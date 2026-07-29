@@ -9,10 +9,15 @@ final class TRAVISAppState {
     var pendingCommands: [TravisCommand] = []
     var activeTasks: [TravisTask] = []
     var permissions: [TravisPermission] = []
-    var deviceState: DeviceState = .defaultState
 
+    var assistantName: String = "TRAVIS"
+    var preferredLanguage: AppLanguage = .greek
+    var currentDeviceState: DeviceState = .idle
+    var isListening: Bool = false
+    var isProcessing: Bool = false
+    var isInternetEnabled: Bool = true
     var isBusy: Bool = false
-    var lastStatusMessage: String = "Ready"
+    var lastResponseSummary: String = "Ready"
 
     func bootstrap() {
         if permissions.isEmpty {
@@ -33,41 +38,50 @@ final class TRAVISAppState {
 
         chatMessages.append(ChatMessage(role: .user, text: text))
         chatInput = ""
-        lastStatusMessage = "Message queued"
+        lastResponseSummary = "Message queued"
     }
 
     func addAssistantMessage(_ text: String) {
         chatMessages.append(ChatMessage(role: .assistant, text: text))
     }
 
-    func queueCommand(_ text: String) {
-        let command = TravisCommand(text: text, status: .pendingApproval)
+    func sendCommand(_ text: String, source: CommandSource) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let command = TravisCommand(text: trimmed, source: source, status: .awaitingApproval)
         pendingCommands.append(command)
-        lastStatusMessage = "Command queued"
+        lastResponseSummary = "Εντολή σε αναμονή: \(trimmed)"
     }
 
     func approveCommand(at index: Int) {
         guard pendingCommands.indices.contains(index) else { return }
         pendingCommands[index].status = .approved
-        lastStatusMessage = "Command approved"
+        lastResponseSummary = "Command approved"
     }
 
     func denyCommand(at index: Int) {
         guard pendingCommands.indices.contains(index) else { return }
-        pendingCommands[index].status = .denied
-        lastStatusMessage = "Command denied"
+        pendingCommands[index].status = .cancelled
+        lastResponseSummary = "Command denied"
     }
 
-    func setPermission(_ capability: TravisCapability, enabled: Bool, policy: PermissionPolicy) {
-        if let index = permissions.firstIndex(where: { $0.capability == capability }) {
-            permissions[index].isEnabled = enabled
-            permissions[index].policy = policy
-        } else {
-            permissions.append(TravisPermission(capability: capability, isEnabled: enabled, policy: policy))
-        }
+    func togglePermissionEnabled(_ permission: TravisPermission) {
+        guard let index = permissions.firstIndex(where: { $0.id == permission.id }) else { return }
+        permissions[index].isEnabled.toggle()
+    }
+
+    func updatePermission(_ permission: TravisPermission, to policy: PermissionPolicy) {
+        guard let index = permissions.firstIndex(where: { $0.id == permission.id }) else { return }
+        permissions[index].policy = policy
+    }
+
+    func toggleListening() {
+        isListening.toggle()
+        currentDeviceState = isListening ? .listening : .idle
     }
 
     func updateDeviceState(_ newState: DeviceState) {
-        deviceState = newState
+        currentDeviceState = newState
     }
 }

@@ -17,6 +17,9 @@
 		EC21709F2FD0486500D1AB6D /* ExecutionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC21709E2FD0486500D1AB6D /* ExecutionService.swift */; };
 		EC2170BE2FD4471000D1AB6D /* TRAVISRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170BD2FD4471000D1AB6D /* TRAVISRootView.swift */; };
 		EC2170C02FD4472800D1AB6D /* TravisCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170BF2FD4472800D1AB6D /* TravisCommand.swift */; };
+		EC2170C32FD4472A00D1AB6D /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170C22FD4472A00D1AB6D /* AppLanguage.swift */; };
+		EC2170C52FD4472B00D1AB6D /* SidebarItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170C42FD4472B00D1AB6D /* SidebarItem.swift */; };
+		EC2170C72FD4472C00D1AB6D /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -31,42 +34,14 @@
 		EC21709E2FD0486500D1AB6D /* ExecutionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExecutionService.swift; sourceTree = "<group>"; };
 		EC2170BD2FD4471000D1AB6D /* TRAVISRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TRAVISRootView.swift; sourceTree = "<group>"; };
 		EC2170BF2FD4472800D1AB6D /* TravisCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravisCommand.swift; sourceTree = "<group>"; };
+		EC2170C22FD4472A00D1AB6D /* AppLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLanguage.swift; sourceTree = "<group>"; };
+		EC2170C42FD4472B00D1AB6D /* SidebarItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarItem.swift; sourceTree = "<group>"; };
+		EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		EC2170A32FD0489600D1AB6D /* Exceptions for "Chat" folder in "Travis_Multiplatform_Ai" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				ChatView.swift,
-			);
-			target = EC2170772FD0469A00D1AB6D /* Travis_Multiplatform_Ai */;
-		};
-		EC2170A72FD048B400D1AB6D /* Exceptions for "Settings" folder in "Travis_Multiplatform_Ai" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				SettingsView.swift,
-			);
-			target = EC2170772FD0469A00D1AB6D /* Travis_Multiplatform_Ai */;
-		};
-		EC2170AB2FD048DB00D1AB6D /* Exceptions for "Permissions" folder in "Travis_Multiplatform_Ai" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				PermissionsView.swift,
-			);
-			target = EC2170772FD0469A00D1AB6D /* Travis_Multiplatform_Ai */;
-		};
-		EC2170B92FD04A9D00D1AB6D /* Exceptions for "Ios" folder in "Travis_Multiplatform_Ai" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				iOSAppShell.swift,
-			);
-			target = EC2170772FD0469A00D1AB6D /* Travis_Multiplatform_Ai */;
-		};
 		EC2170BC2FD04AC300D1AB6D /* Exceptions for "Macos" folder in "Travis_Multiplatform_Ai" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				MacAppShell.swift,
-			);
 			platformFiltersByRelativePath = {
 				MacAppShell.swift = (macos, xros, );
 			};
@@ -82,33 +57,21 @@
 		};
 		EC2170A02FD0488700D1AB6D /* Chat */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				EC2170A32FD0489600D1AB6D /* Exceptions for "Chat" folder in "Travis_Multiplatform_Ai" target */,
-			);
 			path = Chat;
 			sourceTree = "<group>";
 		};
 		EC2170A42FD048A300D1AB6D /* Settings */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				EC2170A72FD048B400D1AB6D /* Exceptions for "Settings" folder in "Travis_Multiplatform_Ai" target */,
-			);
 			path = Settings;
 			sourceTree = "<group>";
 		};
 		EC2170A82FD048CA00D1AB6D /* Permissions */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				EC2170AB2FD048DB00D1AB6D /* Exceptions for "Permissions" folder in "Travis_Multiplatform_Ai" target */,
-			);
 			path = Permissions;
 			sourceTree = "<group>";
 		};
 		EC2170AC2FD048F100D1AB6D /* Ios */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				EC2170B92FD04A9D00D1AB6D /* Exceptions for "Ios" folder in "Travis_Multiplatform_Ai" target */,
-			);
 			path = Ios;
 			sourceTree = "<group>";
 		};
@@ -138,7 +101,7 @@
 			children = (
 				EC21708B2FD046E000D1AB6D /* platform */,
 				EC21708A2FD046D900D1AB6D /* Features */,
-				EC2170892FD046B400D1AB6D /* Servises */,
+				EC2170892FD046B400D1AB6D /* Services */,
 				EC2170882FD046AD00D1AB6D /* App */,
 				EC2170872FD046A200D1AB6D /* Models */,
 				EC21707A2FD0469A00D1AB6D /* Travis_Multiplatform_Ai */,
@@ -161,6 +124,9 @@
 				EC2170942FD047EE00D1AB6D /* TravisTask.swift */,
 				EC2170962FD0480300D1AB6D /* DeviceState.swift */,
 				EC2170BF2FD4472800D1AB6D /* TravisCommand.swift */,
+				EC2170C22FD4472A00D1AB6D /* AppLanguage.swift */,
+				EC2170C42FD4472B00D1AB6D /* SidebarItem.swift */,
+				EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -174,7 +140,7 @@
 			path = App;
 			sourceTree = "<group>";
 		};
-		EC2170892FD046B400D1AB6D /* Servises */ = {
+		EC2170892FD046B400D1AB6D /* Services */ = {
 			isa = PBXGroup;
 			children = (
 				EC2170982FD0483200D1AB6D /* AIService.swift */,
@@ -182,7 +148,7 @@
 				EC21709C2FD0485600D1AB6D /* PermissionService.swift */,
 				EC21709E2FD0486500D1AB6D /* ExecutionService.swift */,
 			);
-			path = Servises;
+			path = Services;
 			sourceTree = "<group>";
 		};
 		EC21708A2FD046D900D1AB6D /* Features */ = {
@@ -221,6 +187,11 @@
 			);
 			fileSystemSynchronizedGroups = (
 				EC21707A2FD0469A00D1AB6D /* Travis_Multiplatform_Ai */,
+				EC2170A02FD0488700D1AB6D /* Chat */,
+				EC2170A42FD048A300D1AB6D /* Settings */,
+				EC2170A82FD048CA00D1AB6D /* Permissions */,
+				EC2170AC2FD048F100D1AB6D /* Ios */,
+				EC2170AD2FD048F900D1AB6D /* Macos */,
 			);
 			name = Travis_Multiplatform_Ai;
 			packageProductDependencies = (
@@ -288,6 +259,9 @@
 				EC2170972FD0480300D1AB6D /* DeviceState.swift in Sources */,
 				EC21709F2FD0486500D1AB6D /* ExecutionService.swift in Sources */,
 				EC21709D2FD0485600D1AB6D /* PermissionService.swift in Sources */,
+				EC2170C32FD4472A00D1AB6D /* AppLanguage.swift in Sources */,
+				EC2170C52FD4472B00D1AB6D /* SidebarItem.swift in Sources */,
+				EC2170C72FD4472C00D1AB6D /* ChatMessage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
