@@ -20,6 +20,7 @@
 		EC2170C32FD4472A00D1AB6D /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170C22FD4472A00D1AB6D /* AppLanguage.swift */; };
 		EC2170C52FD4472B00D1AB6D /* SidebarItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170C42FD4472B00D1AB6D /* SidebarItem.swift */; };
 		EC2170C72FD4472C00D1AB6D /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */; };
+		EC2171142FD5010200D1AB6E /* ProposedAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2171122FD5010100D1AB6E /* ProposedAction.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,6 +38,7 @@
 		EC2170C22FD4472A00D1AB6D /* AppLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLanguage.swift; sourceTree = "<group>"; };
 		EC2170C42FD4472B00D1AB6D /* SidebarItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarItem.swift; sourceTree = "<group>"; };
 		EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
+		EC2171122FD5010100D1AB6E /* ProposedAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProposedAction.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -83,6 +85,11 @@
 			path = Macos;
 			sourceTree = "<group>";
 		};
+		EC2171102FD5010000D1AB6E /* Agent */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Agent;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -99,6 +106,7 @@
 		EC21706F2FD0469A00D1AB6D = {
 			isa = PBXGroup;
 			children = (
+				EC2171102FD5010000D1AB6E /* Agent */,
 				EC21708B2FD046E000D1AB6D /* platform */,
 				EC21708A2FD046D900D1AB6D /* Features */,
 				EC2170892FD046B400D1AB6D /* Services */,
@@ -127,6 +135,7 @@
 				EC2170C22FD4472A00D1AB6D /* AppLanguage.swift */,
 				EC2170C42FD4472B00D1AB6D /* SidebarItem.swift */,
 				EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */,
+				EC2171122FD5010100D1AB6E /* ProposedAction.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -192,6 +201,7 @@
 				EC2170A82FD048CA00D1AB6D /* Permissions */,
 				EC2170AC2FD048F100D1AB6D /* Ios */,
 				EC2170AD2FD048F900D1AB6D /* Macos */,
+				EC2171102FD5010000D1AB6E /* Agent */,
 			);
 			name = Travis_Multiplatform_Ai;
 			packageProductDependencies = (
@@ -262,6 +272,7 @@
 				EC2170C32FD4472A00D1AB6D /* AppLanguage.swift in Sources */,
 				EC2170C52FD4472B00D1AB6D /* SidebarItem.swift in Sources */,
 				EC2170C72FD4472C00D1AB6D /* ChatMessage.swift in Sources */,
+				EC2171142FD5010200D1AB6E /* ProposedAction.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 
+@MainActor
 @Observable
 final class TRAVISAppState {
     var selectedSidebarItem: SidebarItem = .chat
@@ -18,6 +19,15 @@ final class TRAVISAppState {
     var isInternetEnabled: Bool = true
     var isBusy: Bool = false
     var lastResponseSummary: String = "Ready"
+
+    let approvalGate: ApprovalGateService
+    let orchestrator: AgentOrchestrator
+
+    init() {
+        let approvalGate = ApprovalGateService()
+        self.approvalGate = approvalGate
+        self.orchestrator = AgentOrchestrator(approvalGate: approvalGate)
+    }
 
     func bootstrap() {
         if permissions.isEmpty {
@@ -52,6 +62,10 @@ final class TRAVISAppState {
         let command = TravisCommand(text: trimmed, source: source, status: .awaitingApproval)
         pendingCommands.append(command)
         lastResponseSummary = "Εντολή σε αναμονή: \(trimmed)"
+
+        Task {
+            await orchestrator.route(trimmed)
+        }
     }
 
     func approveCommand(at index: Int) {
