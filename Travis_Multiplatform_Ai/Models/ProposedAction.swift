@@ -20,6 +20,7 @@ struct ProposedAction: Identifiable, Codable, Hashable {
     var expectedImpact: String
     var riskLevel: RiskLevel
     var status: ProposedActionStatus
+    var payload: String?
     var createdAt: Date
     var resolvedAt: Date?
 
@@ -31,6 +32,7 @@ struct ProposedAction: Identifiable, Codable, Hashable {
         expectedImpact: String,
         riskLevel: RiskLevel,
         status: ProposedActionStatus = .pending,
+        payload: String? = nil,
         createdAt: Date = Date(),
         resolvedAt: Date? = nil
     ) {
@@ -41,6 +43,7 @@ struct ProposedAction: Identifiable, Codable, Hashable {
         self.expectedImpact = expectedImpact
         self.riskLevel = riskLevel
         self.status = status
+        self.payload = payload
         self.createdAt = createdAt
         self.resolvedAt = resolvedAt
     }

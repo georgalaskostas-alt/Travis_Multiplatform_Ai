@@ -21,6 +21,7 @@
 		EC2170C52FD4472B00D1AB6D /* SidebarItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170C42FD4472B00D1AB6D /* SidebarItem.swift */; };
 		EC2170C72FD4472C00D1AB6D /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */; };
 		EC2171142FD5010200D1AB6E /* ProposedAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2171122FD5010100D1AB6E /* ProposedAction.swift */; };
+		EC2171222FD5020100D1AB6F /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2171202FD5020000D1AB6F /* KeychainService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -39,6 +40,7 @@
 		EC2170C42FD4472B00D1AB6D /* SidebarItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarItem.swift; sourceTree = "<group>"; };
 		EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 		EC2171122FD5010100D1AB6E /* ProposedAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProposedAction.swift; sourceTree = "<group>"; };
+		EC2171202FD5020000D1AB6F /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -156,6 +158,7 @@
 				EC21709A2FD0484500D1AB6D /* SyncService.swift */,
 				EC21709C2FD0485600D1AB6D /* PermissionService.swift */,
 				EC21709E2FD0486500D1AB6D /* ExecutionService.swift */,
+				EC2171202FD5020000D1AB6F /* KeychainService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -273,6 +276,7 @@
 				EC2170C52FD4472B00D1AB6D /* SidebarItem.swift in Sources */,
 				EC2170C72FD4472C00D1AB6D /* ChatMessage.swift in Sources */,
 				EC2171142FD5010200D1AB6E /* ProposedAction.swift in Sources */,
+				EC2171222FD5020100D1AB6F /* KeychainService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

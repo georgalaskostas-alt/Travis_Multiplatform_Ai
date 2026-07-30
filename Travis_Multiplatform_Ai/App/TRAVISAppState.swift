@@ -20,13 +20,30 @@ final class TRAVISAppState {
     var isBusy: Bool = false
     var lastResponseSummary: String = "Ready"
 
+    var anthropicAPIKey: String = "" {
+        didSet {
+            if anthropicAPIKey.isEmpty {
+                KeychainService.shared.deleteAnthropicAPIKey()
+            } else {
+                KeychainService.shared.saveAnthropicAPIKey(anthropicAPIKey)
+            }
+        }
+    }
+
     let approvalGate: ApprovalGateService
     let orchestrator: AgentOrchestrator
 
     init() {
         let approvalGate = ApprovalGateService()
+        let orchestrator = AgentOrchestrator(approvalGate: approvalGate)
         self.approvalGate = approvalGate
-        self.orchestrator = AgentOrchestrator(approvalGate: approvalGate)
+        self.orchestrator = orchestrator
+
+        orchestrator.register(TextTaskCapability())
+
+        if let savedKey = KeychainService.shared.anthropicAPIKey {
+            self.anthropicAPIKey = savedKey
+        }
     }
 
     func bootstrap() {
@@ -97,5 +114,22 @@ final class TRAVISAppState {
 
     func updateDeviceState(_ newState: DeviceState) {
         currentDeviceState = newState
+    }
+
+    func saveGeneratedText(_ text: String) {
+        guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            addAssistantMessage("Δεν ήταν δυνατή η αποθήκευση του αρχείου.")
+            return
+        }
+
+        let filename = "travis-text-\(Int(Date().timeIntervalSince1970)).txt"
+        let fileURL = documentsURL.appendingPathComponent(filename)
+
+        do {
+            try text.write(to: fileURL, atomically: true, encoding: .utf8)
+            addAssistantMessage("Το κείμενο αποθηκεύτηκε: \(fileURL.path)")
+        } catch {
+            addAssistantMessage("Αποτυχία αποθήκευσης: \(error.localizedDescription)")
+        }
     }
 }

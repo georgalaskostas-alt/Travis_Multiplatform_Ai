@@ -19,8 +19,8 @@ final class AgentOrchestrator {
     func route(_ message: String) async {
         let lowered = message.lowercased()
 
-        guard let capability = capabilities.first(where: {
-            lowered.contains($0.id.lowercased()) || lowered.contains($0.name.lowercased())
+        guard let capability = capabilities.first(where: { capability in
+            capability.keywords.contains { lowered.contains($0.lowercased()) }
         }) else {
             return
         }

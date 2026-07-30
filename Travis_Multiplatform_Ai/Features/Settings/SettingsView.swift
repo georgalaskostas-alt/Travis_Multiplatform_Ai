@@ -5,6 +5,16 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("Anthropic API") {
+                SecureField("API Key", text: $appState.anthropicAPIKey)
+
+                if appState.anthropicAPIKey.isEmpty {
+                    Text("Χρειάζεται Anthropic API key για να λειτουργήσουν οι AI δυνατότητες.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Assistant") {
                 TextField("Assistant Name", text: $appState.assistantName)
 

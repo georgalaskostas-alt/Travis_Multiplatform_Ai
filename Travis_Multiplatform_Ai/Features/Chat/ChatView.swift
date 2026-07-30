@@ -52,6 +52,60 @@ struct ChatView: View {
             }
             .padding(.top)
 
+            if !appState.approvalGate.pendingActions.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Προτεινόμενες Ενέργειες")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+
+                    ForEach(appState.approvalGate.pendingActions) { action in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(action.summary)
+                                .font(.subheadline.bold())
+                                .foregroundStyle(.white)
+
+                            Text(action.reasoning)
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.75))
+
+                            Text(action.expectedImpact)
+                                .font(.caption)
+                                .foregroundStyle(.cyan.opacity(0.85))
+
+                            HStack {
+                                Text("Ρίσκο: \(action.riskLevel.rawValue)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.white.opacity(0.6))
+
+                                Spacer()
+
+                                Button("Reject") {
+                                    appState.approvalGate.reject(action)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(.red)
+
+                                Button("Approve") {
+                                    appState.approvalGate.approve(action)
+                                    if let text = action.payload {
+                                        appState.saveGeneratedText(text)
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.cyan)
+                            }
+                        }
+                        .padding()
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(Color.white.opacity(0.04))
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+            }
+
             VStack(alignment: .leading, spacing: 12) {
                 Text("Command Queue")
                     .font(.headline)

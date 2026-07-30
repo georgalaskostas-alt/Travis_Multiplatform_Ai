@@ -11,6 +11,7 @@ protocol AgentCapability: AnyObject, Identifiable {
     var name: String { get }
     var capabilityDescription: String { get }
     var status: AgentCapabilityStatus { get }
+    var keywords: [String] { get }
 
     func handle(command: String) async -> ProposedAction?
     func resolve(_ action: ProposedAction)
