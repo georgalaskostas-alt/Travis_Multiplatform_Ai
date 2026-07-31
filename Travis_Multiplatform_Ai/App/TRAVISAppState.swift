@@ -40,6 +40,9 @@ final class TRAVISAppState {
         self.orchestrator = orchestrator
 
         orchestrator.register(TextTaskCapability())
+        orchestrator.onAssistantMessage = { [weak self] text in
+            self?.addAssistantMessage(text)
+        }
 
         if let savedKey = KeychainService.shared.anthropicAPIKey {
             self.anthropicAPIKey = savedKey

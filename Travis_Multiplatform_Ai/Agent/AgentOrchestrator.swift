@@ -6,6 +6,7 @@ import Observation
 final class AgentOrchestrator {
     private(set) var capabilities: [AgentCapability] = []
     let approvalGate: ApprovalGateService
+    var onAssistantMessage: ((String) -> Void)?
 
     init(approvalGate: ApprovalGateService) {
         self.approvalGate = approvalGate
@@ -22,11 +23,16 @@ final class AgentOrchestrator {
         guard let capability = capabilities.first(where: { capability in
             capability.keywords.contains { lowered.contains($0.lowercased()) }
         }) else {
+            onAssistantMessage?("Δεν κατάλαβα ποια δραστηριότητα αφορά αυτό.")
             return
         }
 
-        if let action = await capability.handle(command: message) {
-            approvalGate.submit(action)
+        do {
+            if let action = try await capability.handle(command: message) {
+                approvalGate.submit(action)
+            }
+        } catch {
+            onAssistantMessage?("Σφάλμα: \(error.localizedDescription)")
         }
     }
 }

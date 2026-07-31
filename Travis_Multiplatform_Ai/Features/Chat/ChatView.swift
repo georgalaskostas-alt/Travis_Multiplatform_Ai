@@ -52,6 +52,38 @@ struct ChatView: View {
             }
             .padding(.top)
 
+            if !appState.chatMessages.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Μηνύματα")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+
+                    ForEach(appState.chatMessages.suffix(5)) { message in
+                        HStack {
+                            if message.role == .assistant {
+                                Text(message.text)
+                                    .foregroundStyle(.white)
+                                    .padding(10)
+                                    .background(Color.cyan.opacity(0.15))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                Spacer(minLength: 24)
+                            } else {
+                                Spacer(minLength: 24)
+                                Text(message.text)
+                                    .foregroundStyle(.white)
+                                    .padding(10)
+                                    .background(Color.white.opacity(0.1))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(Color.white.opacity(0.04))
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+            }
+
             if !appState.approvalGate.pendingActions.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Προτεινόμενες Ενέργειες")
