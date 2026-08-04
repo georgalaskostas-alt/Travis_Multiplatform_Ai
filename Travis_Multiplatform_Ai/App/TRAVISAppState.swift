@@ -83,8 +83,10 @@ final class TRAVISAppState {
         pendingCommands.append(command)
         lastResponseSummary = "Εντολή σε αναμονή: \(trimmed)"
 
+        print("[TRAVIS DEBUG] sendCommand() — starting Task to call orchestrator.route(\"\(trimmed)\")")
         Task {
             await orchestrator.route(trimmed)
+            print("[TRAVIS DEBUG] sendCommand() — orchestrator.route() Task finished")
         }
     }
 
