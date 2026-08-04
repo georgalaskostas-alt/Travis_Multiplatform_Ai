@@ -21,6 +21,7 @@ struct ProposedAction: Identifiable, Codable, Hashable {
     var riskLevel: RiskLevel
     var status: ProposedActionStatus
     var payload: String?
+    var filename: String?
     var createdAt: Date
     var resolvedAt: Date?
 
@@ -33,6 +34,7 @@ struct ProposedAction: Identifiable, Codable, Hashable {
         riskLevel: RiskLevel,
         status: ProposedActionStatus = .pending,
         payload: String? = nil,
+        filename: String? = nil,
         createdAt: Date = Date(),
         resolvedAt: Date? = nil
     ) {
@@ -44,6 +46,7 @@ struct ProposedAction: Identifiable, Codable, Hashable {
         self.riskLevel = riskLevel
         self.status = status
         self.payload = payload
+        self.filename = filename
         self.createdAt = createdAt
         self.resolvedAt = resolvedAt
     }

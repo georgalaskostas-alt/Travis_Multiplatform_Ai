@@ -119,14 +119,14 @@ final class TRAVISAppState {
         currentDeviceState = newState
     }
 
-    func saveGeneratedText(_ text: String) {
+    func saveGeneratedText(_ text: String, filename: String? = nil) {
         guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
             addAssistantMessage("Δεν ήταν δυνατή η αποθήκευση του αρχείου.")
             return
         }
 
-        let filename = "travis-text-\(Int(Date().timeIntervalSince1970)).txt"
-        let fileURL = documentsURL.appendingPathComponent(filename)
+        let resolvedFilename = filename ?? "travis-text-\(Int(Date().timeIntervalSince1970)).txt"
+        let fileURL = documentsURL.appendingPathComponent(resolvedFilename)
 
         do {
             try text.write(to: fileURL, atomically: true, encoding: .utf8)

@@ -4,6 +4,12 @@ import Foundation
 /// intentionally empty — this is the default/catch-all capability for now,
 /// since deciding "just talk" vs "actually do something" is itself the job
 /// of a single AI call, not something a keyword gate upstream can pre-filter.
+///
+/// `@MainActor` because this type holds mutable state (`pendingContent`)
+/// across separate `handle()` calls while it waits for the user to answer
+/// "what filename?" — without actor isolation, two rapidly-sent messages
+/// could race on that state.
+@MainActor
 final class TextTaskCapability: AgentCapability {
     let id = "text_task"
     let name = "Text Task"
@@ -13,11 +19,20 @@ final class TextTaskCapability: AgentCapability {
 
     private let aiService: AIService
 
+    /// Set when a save_file request had no filename — the generated text is
+    /// held here until the user's next message supplies one.
+    private var pendingContent: String?
+    private var pendingOriginalCommand: String?
+
     init(aiService: AIService = .shared) {
         self.aiService = aiService
     }
 
     func handle(command: String) async throws -> CapabilityOutcome {
+        if let content = pendingContent {
+            return resolvePendingFilename(from: command, content: content)
+        }
+
         status = .running
         defer { status = .idle }
 
@@ -28,8 +43,10 @@ final class TextTaskCapability: AgentCapability {
         - "reply": απλή συζήτηση, ερώτηση, ή chit-chat. Καμία ενέργεια δεν χρειάζεται, μόνο απάντηση. Αυτή είναι η προεπιλογή — διάλεξέ την εκτός αν ο χρήστης ζητάει ρητά κάτι από την παρακάτω κατηγορία.
         - "save_file": ρητό αίτημα να γραφτεί κείμενο ΚΑΙ να αποθηκευτεί σε αρχείο (π.χ. "γράψε το και αποθήκευσέ το", "φτιάξε μου αρχείο με...", "θέλω ένα αρχείο με...").
 
+        Αν είναι "save_file" ΚΑΙ ο χρήστης ανέφερε ρητά συγκεκριμένο όνομα αρχείου στην εντολή του (π.χ. "αποθήκευσέ το με όνομα Χ"), βάλε αυτό το όνομα στο πεδίο "filename" (χωρίς κατάληξη .txt). Αν δεν ανέφερε όνομα, το "filename" πρέπει να είναι null — ΜΗΝ επινοήσεις όνομα μόνος σου.
+
         Απάντησε ΑΠΟΚΛΕΙΣΤΙΚΑ με ένα JSON object, χωρίς κανένα άλλο κείμενο, markdown ή εξήγηση πριν ή μετά, ακριβώς σε αυτή τη μορφή:
-        {"kind": "reply ή save_file", "content": "η απάντηση (αν reply) ή το πλήρες κείμενο προς αποθήκευση (αν save_file), στα ελληνικά"}
+        {"kind": "reply ή save_file", "filename": "το όνομα αρχείου ή null", "content": "η απάντηση (αν reply) ή το πλήρες κείμενο προς αποθήκευση (αν save_file), στα ελληνικά"}
         """
 
         let raw = try await aiService.generateText(prompt: prompt)
@@ -44,23 +61,41 @@ final class TextTaskCapability: AgentCapability {
             return .reply(decision.content)
         }
 
-        return .proposal(
-            ProposedAction(
-                capabilityId: id,
-                summary: "Δημιουργία κειμένου: \"\(command)\"",
-                reasoning: "Η εντολή ζητάει ρητά δημιουργία και αποθήκευση κειμένου, οπότε κάλεσα το AI για να το γράψει. Πρόκειται για αναστρέψιμη ενέργεια — απλή αποθήκευση σε τοπικό αρχείο, χωρίς καμία άλλη επίδραση στο σύστημα.",
-                expectedImpact: "Θα αποθηκευτεί ένα νέο αρχείο .txt με το παραγόμενο κείμενο.",
-                riskLevel: .low,
-                payload: decision.content
-            )
-        )
+        guard let filename = decision.filename, !filename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            pendingContent = decision.content
+            pendingOriginalCommand = command
+            return .reply("Τι όνομα να δώσω στο αρχείο, και πού να το αποθηκεύσω;")
+        }
+
+        return .proposal(makeProposedAction(command: command, content: decision.content, filename: filename))
     }
 
     func resolve(_ action: ProposedAction) {
         // Η αποθήκευση του παραγόμενου κειμένου γίνεται από το ChatView κατά το approve.
     }
 
-    private static func parseDecision(from text: String) -> (kind: String, content: String)? {
+    private func resolvePendingFilename(from reply: String, content: String) -> CapabilityOutcome {
+        pendingContent = nil
+        let originalCommand = pendingOriginalCommand ?? content
+        pendingOriginalCommand = nil
+
+        return .proposal(makeProposedAction(command: originalCommand, content: content, filename: reply))
+    }
+
+    private func makeProposedAction(command: String, content: String, filename: String) -> ProposedAction {
+        let sanitized = Self.sanitizeFilename(filename)
+        return ProposedAction(
+            capabilityId: id,
+            summary: "Δημιουργία κειμένου: \"\(command)\"",
+            reasoning: "Η εντολή ζητάει ρητά δημιουργία και αποθήκευση κειμένου, οπότε κάλεσα το AI για να το γράψει. Πρόκειται για αναστρέψιμη ενέργεια — απλή αποθήκευση σε τοπικό αρχείο, χωρίς καμία άλλη επίδραση στο σύστημα.",
+            expectedImpact: "Θα αποθηκευτεί αρχείο με όνομα \"\(sanitized)\".",
+            riskLevel: .low,
+            payload: content,
+            filename: sanitized
+        )
+    }
+
+    private static func parseDecision(from text: String) -> (kind: String, filename: String?, content: String)? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard
@@ -78,6 +113,22 @@ final class TextTaskCapability: AgentCapability {
             let content = object["content"] as? String
         else { return nil }
 
-        return (kind, content)
+        return (kind, object["filename"] as? String, content)
+    }
+
+    private static func sanitizeFilename(_ raw: String) -> String {
+        var name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        name = name.components(separatedBy: CharacterSet(charactersIn: "/\\")).joined()
+        name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if name.isEmpty {
+            name = "travis-text-\(Int(Date().timeIntervalSince1970))"
+        }
+
+        if !name.lowercased().hasSuffix(".txt") {
+            name += ".txt"
+        }
+
+        return name
     }
 }
