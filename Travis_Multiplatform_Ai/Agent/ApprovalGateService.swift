@@ -8,13 +8,26 @@ final class ApprovalGateService {
     private(set) var history: [ProposedAction] = []
 
     private var capabilities: [String: WeakAgentCapabilityBox] = [:]
+    private let persistence: PersistenceService
+
+    init(persistence: PersistenceService = .shared) {
+        self.persistence = persistence
+    }
 
     func register(capability: AgentCapability) {
         capabilities[capability.id] = WeakAgentCapabilityBox(capability)
     }
 
+    /// Loads previously persisted proposed actions so pending approvals and
+    /// resolution history survive a restart, not just a session.
+    func restore(pending: [ProposedAction], history: [ProposedAction]) {
+        pendingActions = pending
+        self.history = history
+    }
+
     func submit(_ action: ProposedAction) {
         pendingActions.append(action)
+        persistence.saveProposedAction(action)
     }
 
     func approve(_ action: ProposedAction) {
@@ -32,6 +45,7 @@ final class ApprovalGateService {
         resolvedAction.status = status
         resolvedAction.resolvedAt = Date()
         history.append(resolvedAction)
+        persistence.updateProposedAction(resolvedAction)
 
         capabilities[resolvedAction.capabilityId]?.value?.resolve(resolvedAction)
     }

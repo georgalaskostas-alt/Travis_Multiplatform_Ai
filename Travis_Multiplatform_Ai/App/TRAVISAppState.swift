@@ -47,6 +47,8 @@ final class TRAVISAppState {
         if let savedKey = KeychainService.shared.anthropicAPIKey {
             self.anthropicAPIKey = savedKey
         }
+
+        bootstrap()
     }
 
     func bootstrap() {
@@ -60,24 +62,37 @@ final class TRAVISAppState {
                 TravisTask(title: "Prepare permissions", details: "Set user approval rules for sensitive actions.", status: .pending, priority: .medium)
             ]
         }
+
+        chatMessages = PersistenceService.shared.loadChatMessages()
+
+        let restoredActions = PersistenceService.shared.loadProposedActions()
+        approvalGate.restore(pending: restoredActions.pending, history: restoredActions.history)
     }
 
     func sendChat() {
         let text = chatInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
-        chatMessages.append(ChatMessage(role: .user, text: text))
+        let message = ChatMessage(role: .user, text: text)
+        chatMessages.append(message)
+        PersistenceService.shared.saveChatMessage(message)
         chatInput = ""
         lastResponseSummary = "Message queued"
     }
 
     func addAssistantMessage(_ text: String) {
-        chatMessages.append(ChatMessage(role: .assistant, text: text))
+        let message = ChatMessage(role: .assistant, text: text)
+        chatMessages.append(message)
+        PersistenceService.shared.saveChatMessage(message)
     }
 
     func sendCommand(_ text: String, source: CommandSource) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        let userMessage = ChatMessage(role: .user, text: trimmed)
+        chatMessages.append(userMessage)
+        PersistenceService.shared.saveChatMessage(userMessage)
 
         let command = TravisCommand(text: trimmed, source: source, status: .awaitingApproval)
         pendingCommands.append(command)
@@ -119,7 +134,7 @@ final class TRAVISAppState {
         currentDeviceState = newState
     }
 
-    func saveGeneratedText(_ text: String, filename: String? = nil) {
+    func saveGeneratedText(_ text: String, filename: String? = nil, capabilityId: String) {
         guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
             addAssistantMessage("Δεν ήταν δυνατή η αποθήκευση του αρχείου.")
             return
@@ -130,6 +145,7 @@ final class TRAVISAppState {
 
         do {
             try text.write(to: fileURL, atomically: true, encoding: .utf8)
+            PersistenceService.shared.saveFile(filename: resolvedFilename, path: fileURL.path, capabilityId: capabilityId)
             addAssistantMessage("Το κείμενο αποθηκεύτηκε: \(fileURL.path)")
         } catch {
             addAssistantMessage("Αποτυχία αποθήκευσης: \(error.localizedDescription)")

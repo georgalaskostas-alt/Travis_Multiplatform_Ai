@@ -84,15 +84,44 @@ final class TextTaskCapability: AgentCapability {
 
     private func makeProposedAction(command: String, content: String, filename: String) -> ProposedAction {
         let sanitized = Self.sanitizeFilename(filename)
+        let alreadyExists = Self.fileAlreadyExists(named: sanitized)
+
+        let summary = alreadyExists
+            ? "Δημιουργία κειμένου: \"\(command)\" — Υπάρχει ήδη αρχείο με αυτό το όνομα, θα αντικατασταθεί"
+            : "Δημιουργία κειμένου: \"\(command)\""
+
+        let reasoning = alreadyExists
+            ? "Η εντολή ζητάει ρητά δημιουργία και αποθήκευση κειμένου, οπότε κάλεσα το AI για να το γράψει. Υπάρχει ήδη αρχείο με το όνομα \"\(sanitized)\" — η αποθήκευση θα το αντικαταστήσει. Πρόκειται για αναστρέψιμη ενέργεια σε τοπικό αρχείο, χωρίς άλλη επίδραση στο σύστημα."
+            : "Η εντολή ζητάει ρητά δημιουργία και αποθήκευση κειμένου, οπότε κάλεσα το AI για να το γράψει. Πρόκειται για αναστρέψιμη ενέργεια — απλή αποθήκευση σε τοπικό αρχείο, χωρίς καμία άλλη επίδραση στο σύστημα."
+
+        let expectedImpact = alreadyExists
+            ? "Θα αντικατασταθεί το υπάρχον αρχείο με όνομα \"\(sanitized)\"."
+            : "Θα αποθηκευτεί αρχείο με όνομα \"\(sanitized)\"."
+
         return ProposedAction(
             capabilityId: id,
-            summary: "Δημιουργία κειμένου: \"\(command)\"",
-            reasoning: "Η εντολή ζητάει ρητά δημιουργία και αποθήκευση κειμένου, οπότε κάλεσα το AI για να το γράψει. Πρόκειται για αναστρέψιμη ενέργεια — απλή αποθήκευση σε τοπικό αρχείο, χωρίς καμία άλλη επίδραση στο σύστημα.",
-            expectedImpact: "Θα αποθηκευτεί αρχείο με όνομα \"\(sanitized)\".",
+            summary: summary,
+            reasoning: reasoning,
+            expectedImpact: expectedImpact,
             riskLevel: .low,
             payload: content,
             filename: sanitized
         )
+    }
+
+    /// Checks both the persisted file history and the actual on-disk
+    /// Documents directory, since a file could exist on disk without a
+    /// persisted record (e.g. created before this persistence layer existed).
+    private static func fileAlreadyExists(named filename: String) -> Bool {
+        if PersistenceService.shared.fileExists(named: filename) {
+            return true
+        }
+
+        guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return false
+        }
+
+        return FileManager.default.fileExists(atPath: documentsURL.appendingPathComponent(filename).path)
     }
 
     private static func parseDecision(from text: String) -> (kind: String, filename: String?, content: String)? {

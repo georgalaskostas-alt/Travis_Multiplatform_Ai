@@ -22,6 +22,10 @@
 		EC2170C72FD4472C00D1AB6D /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */; };
 		EC2171142FD5010200D1AB6E /* ProposedAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2171122FD5010100D1AB6E /* ProposedAction.swift */; };
 		EC2171222FD5020100D1AB6F /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2171202FD5020000D1AB6F /* KeychainService.swift */; };
+		8116E394C469741F6A3F8DD6 /* PersistedChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A69246C40E57CB8B02C7544 /* PersistedChatMessage.swift */; };
+		7DD7C82285C8369DD87F1BB9 /* PersistedProposedAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC450BC06CAAD3E401F366EF /* PersistedProposedAction.swift */; };
+		893F1500C5EA890AFF209370 /* PersistedFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 649AB93329903D4F8F4A3477 /* PersistedFile.swift */; };
+		A1637D2306AEDD20E59287F6 /* PersistenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D26CE687E215F445D4CC99D /* PersistenceService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,6 +45,10 @@
 		EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 		EC2171122FD5010100D1AB6E /* ProposedAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProposedAction.swift; sourceTree = "<group>"; };
 		EC2171202FD5020000D1AB6F /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
+		7A69246C40E57CB8B02C7544 /* PersistedChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedChatMessage.swift; sourceTree = "<group>"; };
+		EC450BC06CAAD3E401F366EF /* PersistedProposedAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedProposedAction.swift; sourceTree = "<group>"; };
+		649AB93329903D4F8F4A3477 /* PersistedFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedFile.swift; sourceTree = "<group>"; };
+		0D26CE687E215F445D4CC99D /* PersistenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -138,6 +146,9 @@
 				EC2170C42FD4472B00D1AB6D /* SidebarItem.swift */,
 				EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */,
 				EC2171122FD5010100D1AB6E /* ProposedAction.swift */,
+				7A69246C40E57CB8B02C7544 /* PersistedChatMessage.swift */,
+				EC450BC06CAAD3E401F366EF /* PersistedProposedAction.swift */,
+				649AB93329903D4F8F4A3477 /* PersistedFile.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -159,6 +170,7 @@
 				EC21709C2FD0485600D1AB6D /* PermissionService.swift */,
 				EC21709E2FD0486500D1AB6D /* ExecutionService.swift */,
 				EC2171202FD5020000D1AB6F /* KeychainService.swift */,
+				0D26CE687E215F445D4CC99D /* PersistenceService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -277,6 +289,10 @@
 				EC2170C72FD4472C00D1AB6D /* ChatMessage.swift in Sources */,
 				EC2171142FD5010200D1AB6E /* ProposedAction.swift in Sources */,
 				EC2171222FD5020100D1AB6F /* KeychainService.swift in Sources */,
+				8116E394C469741F6A3F8DD6 /* PersistedChatMessage.swift in Sources */,
+				7DD7C82285C8369DD87F1BB9 /* PersistedProposedAction.swift in Sources */,
+				893F1500C5EA890AFF209370 /* PersistedFile.swift in Sources */,
+				A1637D2306AEDD20E59287F6 /* PersistenceService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

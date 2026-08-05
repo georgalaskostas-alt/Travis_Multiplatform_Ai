@@ -1,0 +1,78 @@
+import Foundation
+import SwiftData
+
+/// Local, on-device SwiftData persistence. `ModelContainer(for:)` with no
+/// explicit configuration resolves to the app's Application Support
+/// directory identically on iOS and macOS — no platform-specific setup
+/// needed for the container to be usable from both. CloudKit sync is a
+/// separate step for later, not wired in here.
+@MainActor
+final class PersistenceService {
+    static let shared = PersistenceService()
+
+    let container: ModelContainer
+    private var context: ModelContext { container.mainContext }
+
+    private init() {
+        do {
+            container = try ModelContainer(
+                for: PersistedChatMessage.self, PersistedProposedAction.self, PersistedFile.self
+            )
+        } catch {
+            fatalError("Δεν ήταν δυνατή η αρχικοποίηση του SwiftData ModelContainer: \(error)")
+        }
+    }
+
+    // MARK: - Chat messages
+
+    func loadChatMessages() -> [ChatMessage] {
+        let descriptor = FetchDescriptor<PersistedChatMessage>(sortBy: [SortDescriptor(\.createdAt)])
+        let stored = (try? context.fetch(descriptor)) ?? []
+        return stored.map(\.asChatMessage)
+    }
+
+    func saveChatMessage(_ message: ChatMessage) {
+        context.insert(PersistedChatMessage(id: message.id, role: message.role, text: message.text, createdAt: message.createdAt))
+        try? context.save()
+    }
+
+    // MARK: - Proposed actions
+
+    func loadProposedActions() -> (pending: [ProposedAction], history: [ProposedAction]) {
+        let descriptor = FetchDescriptor<PersistedProposedAction>(sortBy: [SortDescriptor(\.createdAt)])
+        let actions = ((try? context.fetch(descriptor)) ?? []).map(\.asProposedAction)
+        return (actions.filter { $0.status == .pending }, actions.filter { $0.status != .pending })
+    }
+
+    func saveProposedAction(_ action: ProposedAction) {
+        context.insert(PersistedProposedAction(from: action))
+        try? context.save()
+    }
+
+    func updateProposedAction(_ action: ProposedAction) {
+        let targetId = action.id
+        let descriptor = FetchDescriptor<PersistedProposedAction>(
+            predicate: #Predicate { $0.id == targetId }
+        )
+
+        guard let existing = try? context.fetch(descriptor).first else { return }
+        existing.apply(action)
+        try? context.save()
+    }
+
+    // MARK: - Files
+
+    func loadFiles() -> [PersistedFile] {
+        let descriptor = FetchDescriptor<PersistedFile>(sortBy: [SortDescriptor(\.createdAt)])
+        return (try? context.fetch(descriptor)) ?? []
+    }
+
+    func fileExists(named filename: String) -> Bool {
+        loadFiles().contains { $0.filename.caseInsensitiveCompare(filename) == .orderedSame }
+    }
+
+    func saveFile(filename: String, path: String, capabilityId: String) {
+        context.insert(PersistedFile(filename: filename, path: path, capabilityId: capabilityId))
+        try? context.save()
+    }
+}
