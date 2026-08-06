@@ -22,6 +22,7 @@ struct ProposedAction: Identifiable, Codable, Hashable {
     var status: ProposedActionStatus
     var payload: String?
     var filename: String?
+    var location: String?
     var createdAt: Date
     var resolvedAt: Date?
 
@@ -35,6 +36,7 @@ struct ProposedAction: Identifiable, Codable, Hashable {
         status: ProposedActionStatus = .pending,
         payload: String? = nil,
         filename: String? = nil,
+        location: String? = nil,
         createdAt: Date = Date(),
         resolvedAt: Date? = nil
     ) {
@@ -47,6 +49,7 @@ struct ProposedAction: Identifiable, Codable, Hashable {
         self.status = status
         self.payload = payload
         self.filename = filename
+        self.location = location
         self.createdAt = createdAt
         self.resolvedAt = resolvedAt
     }

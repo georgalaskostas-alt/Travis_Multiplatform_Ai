@@ -12,6 +12,7 @@ final class PersistedProposedAction {
     var status: String
     var payload: String?
     var filename: String?
+    var location: String?
     var createdAt: Date
     var resolvedAt: Date?
 
@@ -25,6 +26,7 @@ final class PersistedProposedAction {
         self.status = action.status.rawValue
         self.payload = action.payload
         self.filename = action.filename
+        self.location = action.location
         self.createdAt = action.createdAt
         self.resolvedAt = action.resolvedAt
     }
@@ -45,6 +47,7 @@ final class PersistedProposedAction {
             status: ProposedActionStatus(rawValue: status) ?? .pending,
             payload: payload,
             filename: filename,
+            location: location,
             createdAt: createdAt,
             resolvedAt: resolvedAt
         )

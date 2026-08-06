@@ -23,6 +23,7 @@ final class TextTaskCapability: AgentCapability {
     /// held here until the user's next message supplies one.
     private var pendingContent: String?
     private var pendingOriginalCommand: String?
+    private var pendingLocation: String?
 
     init(aiService: AIService = .shared) {
         self.aiService = aiService
@@ -45,8 +46,10 @@ final class TextTaskCapability: AgentCapability {
 
         Αν είναι "save_file" ΚΑΙ ο χρήστης ανέφερε ρητά συγκεκριμένο όνομα αρχείου στην εντολή του (π.χ. "αποθήκευσέ το με όνομα Χ"), βάλε αυτό το όνομα στο πεδίο "filename" (χωρίς κατάληξη .txt). Αν δεν ανέφερε όνομα, το "filename" πρέπει να είναι null — ΜΗΝ επινοήσεις όνομα μόνος σου.
 
+        Αν είναι "save_file" ΚΑΙ ο χρήστης ανέφερε ρητά μια τοποθεσία αποθήκευσης (π.χ. "στο desktop", "στα Documents", ή ένα συγκεκριμένο path), βάλε αυτή την τοποθεσία στο πεδίο "location" ακριβώς όπως την περιέγραψε. Αν δεν ανέφερε τοποθεσία, το "location" πρέπει να είναι null — ΜΗΝ υποθέσεις τοποθεσία μόνος σου.
+
         Απάντησε ΑΠΟΚΛΕΙΣΤΙΚΑ με ένα JSON object, χωρίς κανένα άλλο κείμενο, markdown ή εξήγηση πριν ή μετά, ακριβώς σε αυτή τη μορφή:
-        {"kind": "reply ή save_file", "filename": "το όνομα αρχείου ή null", "content": "η απάντηση (αν reply) ή το πλήρες κείμενο προς αποθήκευση (αν save_file), στα ελληνικά"}
+        {"kind": "reply ή save_file", "filename": "το όνομα αρχείου ή null", "location": "η τοποθεσία αποθήκευσης ή null", "content": "η απάντηση (αν reply) ή το πλήρες κείμενο προς αποθήκευση (αν save_file), στα ελληνικά"}
         """
 
         let raw = try await aiService.generateText(prompt: prompt)
@@ -64,10 +67,11 @@ final class TextTaskCapability: AgentCapability {
         guard let filename = decision.filename, !filename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             pendingContent = decision.content
             pendingOriginalCommand = command
+            pendingLocation = decision.location
             return .reply("Τι όνομα να δώσω στο αρχείο, και πού να το αποθηκεύσω;")
         }
 
-        return .proposal(makeProposedAction(command: command, content: decision.content, filename: filename))
+        return .proposal(makeProposedAction(command: command, content: decision.content, filename: filename, location: decision.location))
     }
 
     func resolve(_ action: ProposedAction) {
@@ -78,13 +82,16 @@ final class TextTaskCapability: AgentCapability {
         pendingContent = nil
         let originalCommand = pendingOriginalCommand ?? content
         pendingOriginalCommand = nil
+        let location = pendingLocation
+        pendingLocation = nil
 
-        return .proposal(makeProposedAction(command: originalCommand, content: content, filename: reply))
+        return .proposal(makeProposedAction(command: originalCommand, content: content, filename: reply, location: location))
     }
 
-    private func makeProposedAction(command: String, content: String, filename: String) -> ProposedAction {
+    private func makeProposedAction(command: String, content: String, filename: String, location: String?) -> ProposedAction {
         let sanitized = Self.sanitizeFilename(filename)
         let alreadyExists = Self.fileAlreadyExists(named: sanitized)
+        let locationSuffix = location.map { " στο \"\($0)\"" } ?? ""
 
         let summary = alreadyExists
             ? "Δημιουργία κειμένου: \"\(command)\" — Υπάρχει ήδη αρχείο με αυτό το όνομα, θα αντικατασταθεί"
@@ -95,8 +102,8 @@ final class TextTaskCapability: AgentCapability {
             : "Η εντολή ζητάει ρητά δημιουργία και αποθήκευση κειμένου, οπότε κάλεσα το AI για να το γράψει. Πρόκειται για αναστρέψιμη ενέργεια — απλή αποθήκευση σε τοπικό αρχείο, χωρίς καμία άλλη επίδραση στο σύστημα."
 
         let expectedImpact = alreadyExists
-            ? "Θα αντικατασταθεί το υπάρχον αρχείο με όνομα \"\(sanitized)\"."
-            : "Θα αποθηκευτεί αρχείο με όνομα \"\(sanitized)\"."
+            ? "Θα αντικατασταθεί το υπάρχον αρχείο με όνομα \"\(sanitized)\"\(locationSuffix)."
+            : "Θα αποθηκευτεί αρχείο με όνομα \"\(sanitized)\"\(locationSuffix)."
 
         return ProposedAction(
             capabilityId: id,
@@ -105,7 +112,8 @@ final class TextTaskCapability: AgentCapability {
             expectedImpact: expectedImpact,
             riskLevel: .low,
             payload: content,
-            filename: sanitized
+            filename: sanitized,
+            location: location
         )
     }
 
@@ -124,7 +132,7 @@ final class TextTaskCapability: AgentCapability {
         return FileManager.default.fileExists(atPath: documentsURL.appendingPathComponent(filename).path)
     }
 
-    private static func parseDecision(from text: String) -> (kind: String, filename: String?, content: String)? {
+    private static func parseDecision(from text: String) -> (kind: String, filename: String?, location: String?, content: String)? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard
@@ -142,7 +150,7 @@ final class TextTaskCapability: AgentCapability {
             let content = object["content"] as? String
         else { return nil }
 
-        return (kind, object["filename"] as? String, content)
+        return (kind, object["filename"] as? String, object["location"] as? String, content)
     }
 
     private static func sanitizeFilename(_ raw: String) -> String {

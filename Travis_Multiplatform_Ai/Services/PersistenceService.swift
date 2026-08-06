@@ -16,7 +16,7 @@ final class PersistenceService {
     private init() {
         do {
             container = try ModelContainer(
-                for: PersistedChatMessage.self, PersistedProposedAction.self, PersistedFile.self
+                for: PersistedChatMessage.self, PersistedProposedAction.self, PersistedFile.self, PersistedLocationBookmark.self
             )
         } catch {
             fatalError("Δεν ήταν δυνατή η αρχικοποίηση του SwiftData ModelContainer: \(error)")
@@ -73,6 +73,27 @@ final class PersistenceService {
 
     func saveFile(filename: String, path: String, capabilityId: String) {
         context.insert(PersistedFile(filename: filename, path: path, capabilityId: capabilityId))
+        try? context.save()
+    }
+
+    // MARK: - Location bookmarks
+
+    func loadLocationBookmark(for key: String) -> Data? {
+        let descriptor = FetchDescriptor<PersistedLocationBookmark>(
+            predicate: #Predicate { $0.locationKey == key }
+        )
+        return (try? context.fetch(descriptor).first)?.bookmarkData
+    }
+
+    func saveLocationBookmark(key: String, data: Data) {
+        if let existing = try? context.fetch(FetchDescriptor<PersistedLocationBookmark>(
+            predicate: #Predicate { $0.locationKey == key }
+        )).first {
+            existing.bookmarkData = data
+            existing.createdAt = Date()
+        } else {
+            context.insert(PersistedLocationBookmark(locationKey: key, bookmarkData: data))
+        }
         try? context.save()
     }
 }

@@ -120,7 +120,7 @@ struct ChatView: View {
                                 Button("Approve") {
                                     appState.approvalGate.approve(action)
                                     if let text = action.payload {
-                                        appState.saveGeneratedText(text, filename: action.filename, capabilityId: action.capabilityId)
+                                        appState.saveGeneratedText(text, filename: action.filename, location: action.location, capabilityId: action.capabilityId)
                                     }
                                 }
                                 .buttonStyle(.borderedProminent)
