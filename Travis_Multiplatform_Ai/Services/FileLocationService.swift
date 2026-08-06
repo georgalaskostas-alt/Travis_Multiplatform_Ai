@@ -3,23 +3,26 @@ import Foundation
 import AppKit
 #endif
 
-/// Resolves where a file should be written, respecting the App Sandbox.
+/// Resolves where a generated file should be written.
 ///
-/// - `location == nil` (no location mentioned by the user) → always the
-///   app's own sandbox container (Documents), on both platforms — no
-///   permission dance needed since the app already owns that directory.
-/// - `location` given, on macOS → that's necessarily outside the sandbox
-///   container (Desktop, ~/Documents, an arbitrary path, ...), which the
-///   App Sandbox blocks by default. We resolve a previously granted
-///   security-scoped bookmark for that location if one exists; otherwise
-///   we present an NSOpenPanel so the user explicitly grants access, then
-///   persist the resulting bookmark so this only happens once per location.
-/// - `location` given, on iOS → iOS has no "Desktop"/system-folder concept
-///   and no NSOpenPanel, so the location is ignored and we fall back to
-///   the default sandboxed directory.
+/// - `location == nil` → always the app's own sandbox container
+///   (Documents), on both platforms — the app already owns that
+///   directory, no permission needed.
+/// - `location` given, on macOS → somewhere under the user's home
+///   directory (Desktop, Documents, Downloads, ...), which the App
+///   Sandbox blocks by default. Access to that is gated by a single
+///   standing permission (`PersistenceService.isPermissionGranted`,
+///   keyed `"file_save"`) rather than a picker per folder: once granted,
+///   `TextTaskCapability` calls `requestHomeDirectoryAccess()` exactly
+///   once to acquire ONE security-scoped bookmark for the whole home
+///   directory, which covers everything beneath it. This type only ever
+///   resolves an existing bookmark — it never shows UI on its own.
+/// - `location` given, on iOS → ignored; iOS has no Desktop/system-folder
+///   concept, so we fall back to the sandboxed directory.
 @MainActor
 final class FileLocationService {
     static let shared = FileLocationService()
+    static let homeBookmarkKey = "home_directory"
 
     struct ResolvedLocation {
         let url: URL
@@ -32,13 +35,17 @@ final class FileLocationService {
         self.persistence = persistence
     }
 
+    var hasHomeDirectoryAccess: Bool {
+        persistence.loadLocationBookmark(for: Self.homeBookmarkKey) != nil
+    }
+
     func resolveSaveDirectory(for location: String?) -> ResolvedLocation? {
         guard let location, !location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return defaultDirectory()
         }
 
         #if os(macOS)
-        return resolveMacOSDirectory(for: location)
+        return resolveHomeSubdirectory(for: location)
         #else
         return defaultDirectory()
         #endif
@@ -52,70 +59,62 @@ final class FileLocationService {
     }
 
     #if os(macOS)
-    private func resolveMacOSDirectory(for location: String) -> ResolvedLocation? {
-        let key = Self.normalize(location)
+    /// Presents NSOpenPanel pointed at the user's home directory and, if
+    /// granted, persists ONE security-scoped bookmark covering it. Callers
+    /// (the conversational grant flow in `TextTaskCapability`) are
+    /// responsible for calling this exactly once, right after the user
+    /// agrees — never speculatively.
+    @discardableResult
+    func requestHomeDirectoryAccess() -> Bool {
+        let panel = NSOpenPanel()
+        panel.title = "Πρόσβαση στον προσωπικό φάκελο"
+        panel.message = "Ο TRAVIS χρειάζεται άδεια πρόσβασης στον προσωπικό σου φάκελο για να μπορεί να αποθηκεύει αρχεία σε θέσεις όπως το Desktop ή τα Documents."
+        panel.prompt = "Επιλογή"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
 
-        if let bookmarkData = persistence.loadLocationBookmark(for: key),
-           let resolved = resolveBookmark(bookmarkData, key: key) {
-            return resolved
-        }
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
 
-        return promptForFolder(key: key, hint: location)
+        guard let bookmarkData = try? url.bookmarkData(
+            options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil
+        ) else { return false }
+
+        persistence.saveLocationBookmark(key: Self.homeBookmarkKey, data: bookmarkData)
+        return true
     }
 
-    private func resolveBookmark(_ data: Data, key: String) -> ResolvedLocation? {
+    private func resolveHomeSubdirectory(for location: String) -> ResolvedLocation? {
+        guard let bookmarkData = persistence.loadLocationBookmark(for: Self.homeBookmarkKey) else {
+            return nil
+        }
+
         var isStale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: data,
+        guard let homeURL = try? URL(
+            resolvingBookmarkData: bookmarkData,
             options: .withSecurityScope,
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         ) else { return nil }
 
-        guard url.startAccessingSecurityScopedResource() else { return nil }
+        guard homeURL.startAccessingSecurityScopedResource() else { return nil }
 
-        if isStale, let refreshed = try? url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
-            persistence.saveLocationBookmark(key: key, data: refreshed)
+        if isStale, let refreshed = try? homeURL.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil) {
+            persistence.saveLocationBookmark(key: Self.homeBookmarkKey, data: refreshed)
         }
 
-        return ResolvedLocation(url: url, stopAccessing: { url.stopAccessingSecurityScopedResource() })
+        let subdirectory = Self.subdirectoryURL(under: homeURL, for: location)
+        return ResolvedLocation(url: subdirectory, stopAccessing: { homeURL.stopAccessingSecurityScopedResource() })
     }
 
-    private func promptForFolder(key: String, hint: String) -> ResolvedLocation? {
-        let panel = NSOpenPanel()
-        panel.title = "Επιλογή φακέλου"
-        panel.message = "Ο TRAVIS χρειάζεται άδεια για αποθήκευση στο \"\(hint)\". Επίλεξε τον φάκελο για να συνεχίσει."
-        panel.prompt = "Επιλογή"
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = true
-        panel.directoryURL = Self.suggestedDirectoryURL(for: hint)
-
-        guard panel.runModal() == .OK, let url = panel.url else { return nil }
-
-        guard let bookmarkData = try? url.bookmarkData(
-            options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil
-        ) else { return nil }
-
-        persistence.saveLocationBookmark(key: key, data: bookmarkData)
-
-        guard url.startAccessingSecurityScopedResource() else { return nil }
-        return ResolvedLocation(url: url, stopAccessing: { url.stopAccessingSecurityScopedResource() })
-    }
-
-    private static func suggestedDirectoryURL(for hint: String) -> URL? {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let lower = hint.lowercased()
-
+    private static func subdirectoryURL(under home: URL, for location: String) -> URL {
+        let lower = location.lowercased()
         if lower.contains("desktop") { return home.appendingPathComponent("Desktop") }
         if lower.contains("document") { return home.appendingPathComponent("Documents") }
         if lower.contains("download") { return home.appendingPathComponent("Downloads") }
-        return nil
-    }
-
-    private static func normalize(_ raw: String) -> String {
-        raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return home
     }
     #endif
 }

@@ -28,6 +28,7 @@
 		A1637D2306AEDD20E59287F6 /* PersistenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D26CE687E215F445D4CC99D /* PersistenceService.swift */; };
 		F05AD77107CAF9DA881E8544 /* PersistedLocationBookmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */; };
 		F5EC4F0794E848C6CA141788 /* FileLocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */; };
+		BCB07EF7ECD6F3D5D3376542 /* StandingPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = B644373748CB262FB7E7B6BF /* StandingPermission.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -53,6 +54,7 @@
 		0D26CE687E215F445D4CC99D /* PersistenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceService.swift; sourceTree = "<group>"; };
 		ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedLocationBookmark.swift; sourceTree = "<group>"; };
 		1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLocationService.swift; sourceTree = "<group>"; };
+		B644373748CB262FB7E7B6BF /* StandingPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandingPermission.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -154,6 +156,7 @@
 				EC450BC06CAAD3E401F366EF /* PersistedProposedAction.swift */,
 				649AB93329903D4F8F4A3477 /* PersistedFile.swift */,
 				ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */,
+				B644373748CB262FB7E7B6BF /* StandingPermission.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -301,6 +304,7 @@
 				A1637D2306AEDD20E59287F6 /* PersistenceService.swift in Sources */,
 				F05AD77107CAF9DA881E8544 /* PersistedLocationBookmark.swift in Sources */,
 				F5EC4F0794E848C6CA141788 /* FileLocationService.swift in Sources */,
+				BCB07EF7ECD6F3D5D3376542 /* StandingPermission.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

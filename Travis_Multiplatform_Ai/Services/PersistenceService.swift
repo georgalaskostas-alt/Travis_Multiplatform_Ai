@@ -16,7 +16,7 @@ final class PersistenceService {
     private init() {
         do {
             container = try ModelContainer(
-                for: PersistedChatMessage.self, PersistedProposedAction.self, PersistedFile.self, PersistedLocationBookmark.self
+                for: PersistedChatMessage.self, PersistedProposedAction.self, PersistedFile.self, PersistedLocationBookmark.self, StandingPermission.self
             )
         } catch {
             fatalError("Δεν ήταν δυνατή η αρχικοποίηση του SwiftData ModelContainer: \(error)")
@@ -93,6 +93,26 @@ final class PersistenceService {
             existing.createdAt = Date()
         } else {
             context.insert(PersistedLocationBookmark(locationKey: key, bookmarkData: data))
+        }
+        try? context.save()
+    }
+
+    // MARK: - Standing permissions
+
+    /// Generic "granted until revoked" gate, reusable for any future
+    /// standing mandate (e.g. trading) beyond today's file-save permission.
+    func isPermissionGranted(_ key: String) -> Bool {
+        let descriptor = FetchDescriptor<StandingPermission>(predicate: #Predicate { $0.key == key })
+        return (try? context.fetch(descriptor).first)?.granted ?? false
+    }
+
+    func setPermission(_ key: String, granted: Bool) {
+        let descriptor = FetchDescriptor<StandingPermission>(predicate: #Predicate { $0.key == key })
+        if let existing = try? context.fetch(descriptor).first {
+            existing.granted = granted
+            existing.grantedAt = Date()
+        } else {
+            context.insert(StandingPermission(key: key, granted: granted))
         }
         try? context.save()
     }

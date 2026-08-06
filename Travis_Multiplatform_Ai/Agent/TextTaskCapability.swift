@@ -19,11 +19,27 @@ final class TextTaskCapability: AgentCapability {
 
     private let aiService: AIService
 
+    /// The standing-permission key gating any file save, regardless of
+    /// destination — see `PersistenceService.isPermissionGranted`/
+    /// `setPermission`. The same generic model is meant to be reused for
+    /// other standing mandates later (e.g. trading), keyed differently.
+    private static let filePermissionKey = "file_save"
+
     /// Set when a save_file request had no filename — the generated text is
     /// held here until the user's next message supplies one.
     private var pendingContent: String?
     private var pendingOriginalCommand: String?
     private var pendingLocation: String?
+
+    /// A fully-specified save_file request that's on hold waiting for the
+    /// user to answer the one-time "may I save files?" consent question.
+    private struct PendingSaveRequest {
+        let command: String
+        let content: String
+        let filename: String
+        let location: String?
+    }
+    private var pendingPermissionRequest: PendingSaveRequest?
 
     init(aiService: AIService = .shared) {
         self.aiService = aiService
@@ -34,22 +50,27 @@ final class TextTaskCapability: AgentCapability {
             return resolvePendingFilename(from: command, content: content)
         }
 
+        if let pending = pendingPermissionRequest {
+            return try await resolvePermissionConsent(reply: command, pending: pending)
+        }
+
         status = .running
         defer { status = .idle }
 
         let prompt = """
         Είσαι ο προσωπικός βοηθός TRAVIS. Ο χρήστης έγραψε: "\(command)"
 
-        Απόφασε ποια από τις δύο περιπτώσεις ισχύει:
-        - "reply": απλή συζήτηση, ερώτηση, ή chit-chat. Καμία ενέργεια δεν χρειάζεται, μόνο απάντηση. Αυτή είναι η προεπιλογή — διάλεξέ την εκτός αν ο χρήστης ζητάει ρητά κάτι από την παρακάτω κατηγορία.
+        Απόφασε ποια από τις τρεις περιπτώσεις ισχύει:
+        - "reply": απλή συζήτηση, ερώτηση, ή chit-chat. Καμία ενέργεια δεν χρειάζεται, μόνο απάντηση. Αυτή είναι η προεπιλογή — διάλεξέ την εκτός αν ο χρήστης ζητάει ρητά κάτι από τις παρακάτω κατηγορίες.
         - "save_file": ρητό αίτημα να γραφτεί κείμενο ΚΑΙ να αποθηκευτεί σε αρχείο (π.χ. "γράψε το και αποθήκευσέ το", "φτιάξε μου αρχείο με...", "θέλω ένα αρχείο με...").
+        - "revoke_file_permission": ρητή δήλωση ότι ο χρήστης αφαιρεί/ανακαλεί την άδεια που είχε δώσει στον TRAVIS να αποθηκεύει αρχεία (π.χ. "δεν έχεις πια άδεια να αποθηκεύεις", "ανάκαλεσε την άδεια αποθήκευσης αρχείων").
 
         Αν είναι "save_file" ΚΑΙ ο χρήστης ανέφερε ρητά συγκεκριμένο όνομα αρχείου στην εντολή του (π.χ. "αποθήκευσέ το με όνομα Χ"), βάλε αυτό το όνομα στο πεδίο "filename" (χωρίς κατάληξη .txt). Αν δεν ανέφερε όνομα, το "filename" πρέπει να είναι null — ΜΗΝ επινοήσεις όνομα μόνος σου.
 
         Αν είναι "save_file" ΚΑΙ ο χρήστης ανέφερε ρητά μια τοποθεσία αποθήκευσης (π.χ. "στο desktop", "στα Documents", ή ένα συγκεκριμένο path), βάλε αυτή την τοποθεσία στο πεδίο "location" ακριβώς όπως την περιέγραψε. Αν δεν ανέφερε τοποθεσία, το "location" πρέπει να είναι null — ΜΗΝ υποθέσεις τοποθεσία μόνος σου.
 
-        Απάντησε ΑΠΟΚΛΕΙΣΤΙΚΑ με ένα JSON object, χωρίς κανένα άλλο κείμενο, markdown ή εξήγηση πριν ή μετά, ακριβώς σε αυτή τη μορφή:
-        {"kind": "reply ή save_file", "filename": "το όνομα αρχείου ή null", "location": "η τοποθεσία αποθήκευσης ή null", "content": "η απάντηση (αν reply) ή το πλήρες κείμενο προς αποθήκευση (αν save_file), στα ελληνικά"}
+        Απάντησε ΑΠΟΚΛΕΙΣΤΙΚΑ με ένα JSON object, χωρίς κανένα άλλο κείμενο, markdown ή εξήγηση πριν ή μετά, ακριβώς σε αυτή τη μορφή (το "content" μπορεί να είναι κενό string αν kind είναι "revoke_file_permission"):
+        {"kind": "reply, save_file, ή revoke_file_permission", "filename": "το όνομα αρχείου ή null", "location": "η τοποθεσία αποθήκευσης ή null", "content": "η απάντηση (αν reply) ή το πλήρες κείμενο προς αποθήκευση (αν save_file), στα ελληνικά"}
         """
 
         let raw = try await aiService.generateText(prompt: prompt)
@@ -60,18 +81,23 @@ final class TextTaskCapability: AgentCapability {
             return .reply(raw)
         }
 
-        guard decision.kind == "save_file" else {
+        switch decision.kind {
+        case "revoke_file_permission":
+            PersistenceService.shared.setPermission(Self.filePermissionKey, granted: false)
+            return .reply("Εντάξει — ανακάλεσα την άδεια αποθήκευσης αρχείων. Θα σε ξαναρωτήσω πριν αποθηκεύσω κάτι.")
+
+        case "save_file":
+            guard let filename = decision.filename, !filename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                pendingContent = decision.content
+                pendingOriginalCommand = command
+                pendingLocation = decision.location
+                return .reply("Τι όνομα να δώσω στο αρχείο, και πού να το αποθηκεύσω;")
+            }
+            return proceedToSaveFile(command: command, content: decision.content, filename: filename, location: decision.location)
+
+        default:
             return .reply(decision.content)
         }
-
-        guard let filename = decision.filename, !filename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            pendingContent = decision.content
-            pendingOriginalCommand = command
-            pendingLocation = decision.location
-            return .reply("Τι όνομα να δώσω στο αρχείο, και πού να το αποθηκεύσω;")
-        }
-
-        return .proposal(makeProposedAction(command: command, content: decision.content, filename: filename, location: decision.location))
     }
 
     func resolve(_ action: ProposedAction) {
@@ -85,7 +111,50 @@ final class TextTaskCapability: AgentCapability {
         let location = pendingLocation
         pendingLocation = nil
 
-        return .proposal(makeProposedAction(command: originalCommand, content: content, filename: reply, location: location))
+        return proceedToSaveFile(command: originalCommand, content: content, filename: reply, location: location)
+    }
+
+    /// Gate before any save_file proposal is built: if the standing
+    /// "file_save" permission hasn't been granted yet, hold the fully
+    /// resolved request and ask conversationally instead of proposing
+    /// anything or touching the filesystem.
+    private func proceedToSaveFile(command: String, content: String, filename: String, location: String?) -> CapabilityOutcome {
+        guard PersistenceService.shared.isPermissionGranted(Self.filePermissionKey) else {
+            pendingPermissionRequest = PendingSaveRequest(command: command, content: content, filename: filename, location: location)
+            return .reply("Θα χρειαστώ την άδειά σου να αποθηκεύω αρχεία — μου τη δίνεις;")
+        }
+
+        return .proposal(makeProposedAction(command: command, content: content, filename: filename, location: location))
+    }
+
+    /// Interprets the user's free-text reply to the consent question via
+    /// the AI (not a keyword match). On agreement, grants the standing
+    /// permission and — macOS only — acquires the one-time home-directory
+    /// bookmark before finally building the proposal that was on hold.
+    private func resolvePermissionConsent(reply: String, pending: PendingSaveRequest) async throws -> CapabilityOutcome {
+        pendingPermissionRequest = nil
+
+        let consentPrompt = """
+        Ο χρήστης απάντησε: "\(reply)" σε ερώτηση αν δίνει άδεια στον TRAVIS να αποθηκεύει αρχεία.
+        Ερμήνευσε αν πρόκειται για καταφατική απάντηση (δίνει την άδεια) ή όχι.
+        Απάντησε ΑΠΟΚΛΕΙΣΤΙΚΑ με τη λέξη yes ή no, χωρίς τίποτα άλλο.
+        """
+        let raw = try await aiService.generateText(prompt: consentPrompt)
+        let agreed = raw.lowercased().contains("yes")
+
+        guard agreed else {
+            return .reply("Εντάξει, δεν θα αποθηκεύσω το αρχείο.")
+        }
+
+        PersistenceService.shared.setPermission(Self.filePermissionKey, granted: true)
+
+        #if os(macOS)
+        guard FileLocationService.shared.requestHomeDirectoryAccess() else {
+            return .reply("Δεν δόθηκε πρόσβαση στον φάκελο, οπότε δεν μπόρεσα να αποθηκεύσω το αρχείο. Μπορείς να το ξαναζητήσεις.")
+        }
+        #endif
+
+        return .proposal(makeProposedAction(command: pending.command, content: pending.content, filename: pending.filename, location: pending.location))
     }
 
     private func makeProposedAction(command: String, content: String, filename: String, location: String?) -> ProposedAction {
