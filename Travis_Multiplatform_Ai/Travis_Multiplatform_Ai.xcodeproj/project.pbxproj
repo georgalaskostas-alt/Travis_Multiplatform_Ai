@@ -29,6 +29,7 @@
 		F05AD77107CAF9DA881E8544 /* PersistedLocationBookmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */; };
 		F5EC4F0794E848C6CA141788 /* FileLocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */; };
 		BCB07EF7ECD6F3D5D3376542 /* StandingPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = B644373748CB262FB7E7B6BF /* StandingPermission.swift */; };
+		E7FF4041F8088D0BD73BE9C5 /* ChatSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8A4BC751EBB945A37C536C8 /* ChatSession.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -55,6 +56,7 @@
 		ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedLocationBookmark.swift; sourceTree = "<group>"; };
 		1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLocationService.swift; sourceTree = "<group>"; };
 		B644373748CB262FB7E7B6BF /* StandingPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandingPermission.swift; sourceTree = "<group>"; };
+		B8A4BC751EBB945A37C536C8 /* ChatSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSession.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -157,6 +159,7 @@
 				649AB93329903D4F8F4A3477 /* PersistedFile.swift */,
 				ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */,
 				B644373748CB262FB7E7B6BF /* StandingPermission.swift */,
+				B8A4BC751EBB945A37C536C8 /* ChatSession.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -305,6 +308,7 @@
 				F05AD77107CAF9DA881E8544 /* PersistedLocationBookmark.swift in Sources */,
 				F5EC4F0794E848C6CA141788 /* FileLocationService.swift in Sources */,
 				BCB07EF7ECD6F3D5D3376542 /* StandingPermission.swift in Sources */,
+				E7FF4041F8088D0BD73BE9C5 /* ChatSession.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

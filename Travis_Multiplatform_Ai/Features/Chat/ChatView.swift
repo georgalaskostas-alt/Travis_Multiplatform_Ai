@@ -4,8 +4,53 @@ struct ChatView: View {
     @Bindable var appState: TRAVISAppState
     @State private var draft: String = ""
 
+    private var isViewingPastSession: Bool {
+        appState.viewedSessionId != appState.currentSessionId
+    }
+
+    private var sessionHeaderDate: String {
+        let date = appState.chatMessages.first?.createdAt ?? Date()
+        return Self.sessionDateFormatter.string(from: date)
+    }
+
+    private static let sessionDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        formatter.timeStyle = .none
+        formatter.locale = Locale(identifier: "el_GR")
+        return formatter
+    }()
+
     var body: some View {
         VStack(spacing: 20) {
+            HStack {
+                Text(sessionHeaderDate)
+                    .font(.caption.bold())
+                    .foregroundStyle(.white.opacity(0.85))
+
+                if isViewingPastSession {
+                    Text("Παλαιότερη συνομιλία")
+                        .font(.caption2)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.25))
+                        .clipShape(Capsule())
+                        .foregroundStyle(.orange)
+                }
+
+                Spacer()
+
+                if isViewingPastSession {
+                    Button("Επιστροφή στην τρέχουσα") {
+                        appState.returnToCurrentSession()
+                    }
+                    .font(.caption)
+                    .buttonStyle(.bordered)
+                    .tint(.cyan)
+                }
+            }
+            .padding(.horizontal)
+
             VStack(spacing: 14) {
                 ZStack {
                     Circle()
@@ -58,25 +103,30 @@ struct ChatView: View {
                         .font(.headline)
                         .foregroundStyle(.white)
 
-                    ForEach(appState.chatMessages.suffix(5)) { message in
-                        HStack {
-                            if message.role == .assistant {
-                                Text(message.text)
-                                    .foregroundStyle(.white)
-                                    .padding(10)
-                                    .background(Color.cyan.opacity(0.15))
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                                Spacer(minLength: 24)
-                            } else {
-                                Spacer(minLength: 24)
-                                Text(message.text)
-                                    .foregroundStyle(.white)
-                                    .padding(10)
-                                    .background(Color.white.opacity(0.1))
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(appState.chatMessages) { message in
+                                HStack {
+                                    if message.role == .assistant {
+                                        Text(message.text)
+                                            .foregroundStyle(.white)
+                                            .padding(10)
+                                            .background(Color.cyan.opacity(0.15))
+                                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        Spacer(minLength: 24)
+                                    } else {
+                                        Spacer(minLength: 24)
+                                        Text(message.text)
+                                            .foregroundStyle(.white)
+                                            .padding(10)
+                                            .background(Color.white.opacity(0.1))
+                                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    }
+                                }
                             }
                         }
                     }
+                    .frame(maxHeight: 320)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()

@@ -15,6 +15,14 @@ struct iOSAppShell: View {
             .tag(SidebarItem.chat)
 
             NavigationStack {
+                ChatHistoryView(appState: appState)
+            }
+            .tabItem {
+                Label("Ιστορικό", systemImage: "clock.arrow.circlepath")
+            }
+            .tag(SidebarItem.history)
+
+            NavigationStack {
                 PermissionsView(appState: appState)
             }
             .tabItem {

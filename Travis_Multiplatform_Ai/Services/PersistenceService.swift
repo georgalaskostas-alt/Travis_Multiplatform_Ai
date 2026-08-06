@@ -32,8 +32,18 @@ final class PersistenceService {
     }
 
     func saveChatMessage(_ message: ChatMessage) {
-        context.insert(PersistedChatMessage(id: message.id, role: message.role, text: message.text, createdAt: message.createdAt))
+        context.insert(PersistedChatMessage(id: message.id, role: message.role, text: message.text, createdAt: message.createdAt, sessionId: message.sessionId))
         try? context.save()
+    }
+
+    /// Groups all persisted messages by `sessionId`, most recently started
+    /// first — the basis for both the "Ιστορικό" list and
+    /// `SessionRecallService`'s date-based lookup.
+    func loadChatSessions() -> [ChatSession] {
+        let grouped = Dictionary(grouping: loadChatMessages(), by: \.sessionId)
+        return grouped
+            .map { ChatSession(id: $0.key, messages: $0.value.sorted { $0.createdAt < $1.createdAt }) }
+            .sorted { $0.startedAt > $1.startedAt }
     }
 
     // MARK: - Proposed actions

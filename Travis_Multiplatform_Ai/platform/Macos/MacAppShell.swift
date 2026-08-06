@@ -23,6 +23,8 @@ struct MacAppShell: View {
         switch item {
         case .chat:
             ChatView(appState: appState)
+        case .history:
+            ChatHistoryView(appState: appState)
         case .tasks:
             taskPanel
         case .permissions:
@@ -52,6 +54,7 @@ struct MacAppShell: View {
     private func icon(for item: SidebarItem) -> String {
         switch item {
         case .chat: return "message"
+        case .history: return "clock.arrow.circlepath"
         case .tasks: return "checklist"
         case .permissions: return "lock.shield"
         case .settings: return "gearshape"
