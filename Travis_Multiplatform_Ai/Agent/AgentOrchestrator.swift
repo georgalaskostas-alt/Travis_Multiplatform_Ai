@@ -12,9 +12,9 @@ final class AgentOrchestrator {
     /// "bring back an old conversation" request and a match was found.
     var onSessionRecall: ((UUID) -> Void)?
 
-    init(approvalGate: ApprovalGateService, sessionRecallService: SessionRecallService = SessionRecallService()) {
+    init(approvalGate: ApprovalGateService, sessionRecallService: SessionRecallService? = nil) {
         self.approvalGate = approvalGate
-        self.sessionRecallService = sessionRecallService
+        self.sessionRecallService = sessionRecallService ?? SessionRecallService()
     }
 
     func register(_ capability: AgentCapability) {
