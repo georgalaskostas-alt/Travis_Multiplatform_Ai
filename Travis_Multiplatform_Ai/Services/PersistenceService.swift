@@ -15,11 +15,50 @@ final class PersistenceService {
 
     private init() {
         do {
-            container = try ModelContainer(
-                for: PersistedChatMessage.self, PersistedProposedAction.self, PersistedFile.self, PersistedLocationBookmark.self, StandingPermission.self
-            )
+            container = try Self.makeContainer()
         } catch {
-            fatalError("Δεν ήταν δυνατή η αρχικοποίηση του SwiftData ModelContainer: \(error)")
+            // ⚠️ DEVELOPMENT-ONLY SAFETY NET — DO NOT SHIP THIS TO PRODUCTION. ⚠️
+            //
+            // The SwiftData schema here has already changed several times
+            // (e.g. adding `sessionId`, adding the whole StandingPermission
+            // model) with no SchemaMigrationPlan, so an on-device store
+            // created under an older schema fails to load instead of
+            // migrating (SwiftDataError.loadIssueModelContainer). While
+            // there's no real user data at stake yet, wiping the local
+            // store on load failure and retrying once is an acceptable way
+            // to keep development unblocked instead of crashing outright.
+            //
+            // This MUST be replaced with a real, versioned
+            // SchemaMigrationPlan before any production/App Store use —
+            // left as-is, every future schema change will silently destroy
+            // real users' chat history, permissions, and bookmarks.
+            Self.deleteDefaultStore()
+            do {
+                container = try Self.makeContainer()
+            } catch {
+                fatalError("Δεν ήταν δυνατή η αρχικοποίηση του SwiftData ModelContainer, ακόμα και μετά τον καθαρισμό του τοπικού store: \(error)")
+            }
+        }
+    }
+
+    private static func makeContainer() throws -> ModelContainer {
+        try ModelContainer(
+            for: PersistedChatMessage.self, PersistedProposedAction.self, PersistedFile.self, PersistedLocationBookmark.self, StandingPermission.self
+        )
+    }
+
+    /// Deletes SwiftData's default on-disk store (plus its WAL/SHM
+    /// sidecar files) so a fresh, schema-compatible one can be created on
+    /// retry. Temporary development-only recovery path — see the warning
+    /// in `init()`.
+    private static func deleteDefaultStore() {
+        guard let supportDirectory = try? FileManager.default.url(
+            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false
+        ) else { return }
+
+        let storeURL = supportDirectory.appendingPathComponent("default.store")
+        for suffix in ["", "-shm", "-wal"] {
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: storeURL.path + suffix))
         }
     }
 
