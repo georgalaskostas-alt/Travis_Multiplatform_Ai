@@ -6,7 +6,7 @@ struct ChatMessage: Identifiable, Codable, Hashable {
     var text: String
     var createdAt: Date
     /// Groups messages into a conversational "session" — see
-    /// `TRAVISAppState`'s 12-hour gap rule for how this is assigned.
+    /// `TRAVISAppState.startNewSession()` for when a new one is assigned.
     var sessionId: UUID
 
     init(

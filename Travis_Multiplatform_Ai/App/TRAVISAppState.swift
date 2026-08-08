@@ -33,16 +33,12 @@ final class TRAVISAppState {
     let approvalGate: ApprovalGateService
     let orchestrator: AgentOrchestrator
 
-    /// A gap of 12+ hours since the last message starts a new session.
-    private static let sessionGapInterval: TimeInterval = 12 * 60 * 60
-
     /// The session new messages are actually appended to right now.
     private(set) var currentSessionId: UUID = UUID()
     /// The session currently shown in `chatMessages` — equal to
     /// `currentSessionId` unless the user is browsing a past one via
     /// `viewSession(_:)`.
     private(set) var viewedSessionId: UUID = UUID()
-    private var lastMessageAt: Date?
 
     init() {
         let approvalGate = ApprovalGateService()
@@ -77,20 +73,23 @@ final class TRAVISAppState {
             ]
         }
 
-        let allMessages = PersistenceService.shared.loadChatMessages()
-        if let last = allMessages.last, Date().timeIntervalSince(last.createdAt) < Self.sessionGapInterval {
-            lastMessageAt = last.createdAt
-            currentSessionId = last.sessionId
-            chatMessages = allMessages.filter { $0.sessionId == currentSessionId }
-        } else {
-            lastMessageAt = nil
-            currentSessionId = UUID()
-            chatMessages = []
-        }
-        viewedSessionId = currentSessionId
+        // Every cold launch always starts on a fresh, empty session — see
+        // `startNewSession()`. Full history stays persisted and reachable
+        // via the "Ιστορικό" tab and voice/text recall regardless.
+        startNewSession()
 
         let restoredActions = PersistenceService.shared.loadProposedActions()
         approvalGate.restore(pending: restoredActions.pending, history: restoredActions.history)
+    }
+
+    /// Starts a brand-new, empty session and displays it — called on
+    /// bootstrap (cold launch) and whenever the app returns to the
+    /// foreground (see the `scenePhase` watcher in the App entry point).
+    /// Does not touch or delete any previously persisted session.
+    func startNewSession() {
+        currentSessionId = UUID()
+        viewedSessionId = currentSessionId
+        chatMessages = []
     }
 
     /// Past sessions available to browse — the live one is excluded since
@@ -114,19 +113,13 @@ final class TRAVISAppState {
         chatMessages = PersistenceService.shared.loadChatMessages().filter { $0.sessionId == currentSessionId }
     }
 
-    /// Tags, persists, and displays a new message — the single place that
-    /// decides whether it continues the live session or starts a new one
-    /// (12+ hour gap), and snaps the view back to live if the user had
-    /// been browsing a past session.
+    /// Tags, persists, and displays a new message under the live session
+    /// (`currentSessionId` — new sessions are only started by
+    /// `startNewSession()`, not by inter-message timing), and snaps the
+    /// view back to live if the user had been browsing a past session.
     @discardableResult
     private func appendMessage(role: ChatRole, text: String) -> ChatMessage {
-        let now = Date()
-        if let lastMessageAt, now.timeIntervalSince(lastMessageAt) >= Self.sessionGapInterval {
-            currentSessionId = UUID()
-        }
-        lastMessageAt = now
-
-        let message = ChatMessage(role: role, text: text, createdAt: now, sessionId: currentSessionId)
+        let message = ChatMessage(role: role, text: text, sessionId: currentSessionId)
         PersistenceService.shared.saveChatMessage(message)
 
         if viewedSessionId == currentSessionId {

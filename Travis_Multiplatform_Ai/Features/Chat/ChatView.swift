@@ -21,6 +21,13 @@ struct ChatView: View {
         return formatter
     }()
 
+    private static let recentCardDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "d MMM, HH:mm"
+        formatter.locale = Locale(identifier: "el_GR")
+        return formatter
+    }()
+
     var body: some View {
         VStack(spacing: 20) {
             HStack {
@@ -96,6 +103,8 @@ struct ChatView: View {
                     .padding(.horizontal)
             }
             .padding(.top)
+
+            recentSessionsPanel
 
             if !appState.chatMessages.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
@@ -259,5 +268,77 @@ struct ChatView: View {
                 endPoint: .bottomTrailing
             )
         )
+    }
+
+    /// Compact, glanceable preview of the most recent past sessions — the
+    /// full browsable list lives in the "Ιστορικό" tab (`ChatHistoryView`).
+    /// Reuses `appState.pastSessions`/`viewSession(_:)`, no new loading
+    /// logic.
+    @ViewBuilder
+    private var recentSessionsPanel: some View {
+        let recent = Array(appState.pastSessions.prefix(5))
+
+        if !recent.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Πρόσφατες συνομιλίες")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(recent) { session in
+                            Button {
+                                appState.viewSession(session.id)
+                            } label: {
+                                recentSessionCard(session)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(Color.white.opacity(0.04))
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+        }
+    }
+
+    private func recentSessionCard(_ session: ChatSession) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(Self.recentCardDateFormatter.string(from: session.startedAt))
+                .font(.caption2.bold())
+                .foregroundStyle(.cyan)
+
+            Text(session.preview.isEmpty ? "…" : session.preview)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+
+            Spacer(minLength: 0)
+
+            Text("\(session.messages.count) μηνύματα")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.5))
+        }
+        .padding(12)
+        .frame(width: 150, height: 100, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.blue.opacity(0.3), Color.cyan.opacity(0.08)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.cyan.opacity(0.45), lineWidth: 1)
+        )
+        .shadow(color: Color.cyan.opacity(0.3), radius: 8, x: 0, y: 0)
     }
 }
