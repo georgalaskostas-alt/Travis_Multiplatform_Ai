@@ -30,6 +30,10 @@
 		F5EC4F0794E848C6CA141788 /* FileLocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */; };
 		BCB07EF7ECD6F3D5D3376542 /* StandingPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = B644373748CB262FB7E7B6BF /* StandingPermission.swift */; };
 		E7FF4041F8088D0BD73BE9C5 /* ChatSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8A4BC751EBB945A37C536C8 /* ChatSession.swift */; };
+		F9427A0857DC2CE7C90FEDDB /* PaperTradingConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6023541AB2F4D7680CC010C6 /* PaperTradingConstants.swift */; };
+		5E1CB6B1475BBF9E9DC8A16C /* PersistedPaperAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CB0CA6A571176843957B003 /* PersistedPaperAccount.swift */; };
+		E438AC5CAB39E69A957D22FD /* PersistedPaperPosition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */; };
+		9F4A7A48ED9AC92FBFEF22C7 /* BinanceMarketDataService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,6 +61,10 @@
 		1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLocationService.swift; sourceTree = "<group>"; };
 		B644373748CB262FB7E7B6BF /* StandingPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandingPermission.swift; sourceTree = "<group>"; };
 		B8A4BC751EBB945A37C536C8 /* ChatSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSession.swift; sourceTree = "<group>"; };
+		6023541AB2F4D7680CC010C6 /* PaperTradingConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaperTradingConstants.swift; sourceTree = "<group>"; };
+		1CB0CA6A571176843957B003 /* PersistedPaperAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedPaperAccount.swift; sourceTree = "<group>"; };
+		92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedPaperPosition.swift; sourceTree = "<group>"; };
+		3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinanceMarketDataService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -160,6 +168,9 @@
 				ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */,
 				B644373748CB262FB7E7B6BF /* StandingPermission.swift */,
 				B8A4BC751EBB945A37C536C8 /* ChatSession.swift */,
+				6023541AB2F4D7680CC010C6 /* PaperTradingConstants.swift */,
+				1CB0CA6A571176843957B003 /* PersistedPaperAccount.swift */,
+				92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -183,6 +194,7 @@
 				EC2171202FD5020000D1AB6F /* KeychainService.swift */,
 				0D26CE687E215F445D4CC99D /* PersistenceService.swift */,
 				1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */,
+				3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -309,6 +321,10 @@
 				F5EC4F0794E848C6CA141788 /* FileLocationService.swift in Sources */,
 				BCB07EF7ECD6F3D5D3376542 /* StandingPermission.swift in Sources */,
 				E7FF4041F8088D0BD73BE9C5 /* ChatSession.swift in Sources */,
+				F9427A0857DC2CE7C90FEDDB /* PaperTradingConstants.swift in Sources */,
+				5E1CB6B1475BBF9E9DC8A16C /* PersistedPaperAccount.swift in Sources */,
+				E438AC5CAB39E69A957D22FD /* PersistedPaperPosition.swift in Sources */,
+				9F4A7A48ED9AC92FBFEF22C7 /* BinanceMarketDataService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

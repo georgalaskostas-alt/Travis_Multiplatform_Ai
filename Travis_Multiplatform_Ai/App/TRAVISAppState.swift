@@ -47,6 +47,7 @@ final class TRAVISAppState {
         self.orchestrator = orchestrator
 
         orchestrator.register(TextTaskCapability())
+        orchestrator.register(CryptoTradingCapability())
         orchestrator.onAssistantMessage = { [weak self] text in
             self?.addAssistantMessage(text)
         }
@@ -80,6 +81,8 @@ final class TRAVISAppState {
 
         let restoredActions = PersistenceService.shared.loadProposedActions()
         approvalGate.restore(pending: restoredActions.pending, history: restoredActions.history)
+
+        refreshTradingMandates()
     }
 
     /// Starts a brand-new, empty session and displays it — called on
@@ -190,6 +193,21 @@ final class TRAVISAppState {
 
     func updateDeviceState(_ newState: DeviceState) {
         currentDeviceState = newState
+    }
+
+    /// Active crypto trading standing mandates ("trading_XRP", "trading_SOL",
+    /// ...) — refreshed explicitly (see `refreshTradingMandates()`) rather
+    /// than computed on read, since it's backed by SwiftData model
+    /// instances mutated outside TRAVISAppState's own observed state.
+    var tradingMandates: [StandingPermission] = []
+
+    func refreshTradingMandates() {
+        tradingMandates = PersistenceService.shared.standingPermissions(withKeyPrefix: "trading_").filter { $0.granted }
+    }
+
+    func revokeTradingMandate(_ mandate: StandingPermission) {
+        PersistenceService.shared.setPermission(mandate.key, granted: false)
+        refreshTradingMandates()
     }
 
     func saveGeneratedText(_ text: String, filename: String? = nil, location: String? = nil, capabilityId: String) {

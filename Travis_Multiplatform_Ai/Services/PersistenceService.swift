@@ -43,7 +43,8 @@ final class PersistenceService {
 
     private static func makeContainer() throws -> ModelContainer {
         try ModelContainer(
-            for: PersistedChatMessage.self, PersistedProposedAction.self, PersistedFile.self, PersistedLocationBookmark.self, StandingPermission.self
+            for: PersistedChatMessage.self, PersistedProposedAction.self, PersistedFile.self, PersistedLocationBookmark.self,
+                StandingPermission.self, PersistedPaperAccount.self, PersistedPaperPosition.self
         )
     }
 
@@ -164,5 +165,86 @@ final class PersistenceService {
             context.insert(StandingPermission(key: key, granted: granted))
         }
         try? context.save()
+    }
+
+    /// All standing permissions whose key starts with `prefix` — e.g.
+    /// `"trading_"` for the crypto trading mandates list in Settings.
+    func standingPermissions(withKeyPrefix prefix: String) -> [StandingPermission] {
+        let descriptor = FetchDescriptor<StandingPermission>(sortBy: [SortDescriptor(\.grantedAt, order: .reverse)])
+        let all = (try? context.fetch(descriptor)) ?? []
+        return all.filter { $0.key.hasPrefix(prefix) }
+    }
+
+    // MARK: - Paper trading
+
+    /// Fetches (or creates, on first use) the single paper-account row.
+    /// Purely simulated — never touches a real exchange balance.
+    func paperAccount() -> PersistedPaperAccount {
+        let accountId = "paper_account"
+        let descriptor = FetchDescriptor<PersistedPaperAccount>(predicate: #Predicate { $0.id == accountId })
+        if let existing = try? context.fetch(descriptor).first {
+            return existing
+        }
+
+        let created = PersistedPaperAccount(id: accountId, cashBalance: PaperTradingConstants.startingBalance)
+        context.insert(created)
+        try? context.save()
+        return created
+    }
+
+    @discardableResult
+    func openPaperPosition(asset: String, quantity: Double, entryPrice: Double, stopLossPrice: Double) -> PersistedPaperPosition {
+        let account = paperAccount()
+        account.cashBalance -= quantity * entryPrice
+
+        let position = PersistedPaperPosition(asset: asset, quantity: quantity, entryPrice: entryPrice, stopLossPrice: stopLossPrice)
+        context.insert(position)
+        try? context.save()
+        return position
+    }
+
+    @discardableResult
+    func closePaperPosition(id: UUID, exitPrice: Double) -> Double? {
+        let descriptor = FetchDescriptor<PersistedPaperPosition>(predicate: #Predicate { $0.id == id })
+        guard let position = try? context.fetch(descriptor).first, position.closedAt == nil else { return nil }
+
+        let realizedPnL = (exitPrice - position.entryPrice) * position.quantity
+        position.closedAt = Date()
+        position.exitPrice = exitPrice
+        position.realizedPnL = realizedPnL
+
+        paperAccount().cashBalance += position.quantity * exitPrice
+        try? context.save()
+        return realizedPnL
+    }
+
+    /// The single open position for `asset`, if any — used to resolve
+    /// "close my position in X" requests.
+    func openPaperPosition(for asset: String) -> PersistedPaperPosition? {
+        let descriptor = FetchDescriptor<PersistedPaperPosition>(
+            predicate: #Predicate { $0.asset == asset && $0.closedAt == nil }
+        )
+        return try? context.fetch(descriptor).first
+    }
+
+    /// Sum (as a positive magnitude) of today's realized paper losses —
+    /// the basis for the daily loss-limit freeze.
+    func todaysRealizedLoss() -> Double {
+        let descriptor = FetchDescriptor<PersistedPaperPosition>(predicate: #Predicate { $0.closedAt != nil })
+        let closedPositions = (try? context.fetch(descriptor)) ?? []
+        let startOfDay = Calendar.current.startOfDay(for: Date())
+
+        let todaysLosses = closedPositions.compactMap { position -> Double? in
+            guard let closedAt = position.closedAt, closedAt >= startOfDay, let pnl = position.realizedPnL, pnl < 0 else {
+                return nil
+            }
+            return pnl
+        }
+
+        return todaysLosses.reduce(0) { $0 + abs($1) }
+    }
+
+    func isTradingFrozenToday() -> Bool {
+        todaysRealizedLoss() >= PaperTradingConstants.dailyLossLimit
     }
 }
