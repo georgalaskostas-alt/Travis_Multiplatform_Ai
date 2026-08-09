@@ -30,7 +30,8 @@ final class CryptoTradingCapability: AgentCapability {
     /// Standing-mandate keys are per-asset — see `PersistenceService`'s
     /// generic `isPermissionGranted`/`setPermission`, the same model
     /// `TextTaskCapability` uses for `"file_save"`.
-    private static func mandateKey(for asset: String) -> String { "trading_\(asset)" }
+    private static let mandateKeyPrefix = "trading_"
+    private static func mandateKey(for asset: String) -> String { mandateKeyPrefix + asset }
 
     /// A fully-priced-and-sized open request that's on hold waiting for
     /// the user to answer the standing-mandate consent question — either
@@ -64,16 +65,19 @@ final class CryptoTradingCapability: AgentCapability {
         let prompt = """
         Είσαι ο προσωπικός βοηθός TRAVIS, σε λειτουργία crypto trading. ΟΛΕΣ οι ενέργειες είναι paper trading (πλασματικά κεφάλαια) — καμία σύνδεση με πραγματικό λογαριασμό. Ο χρήστης έγραψε: "\(command)"
 
-        Απόφασε ποια από τις τρεις περιπτώσεις ισχύει:
-        - "reply": ερώτηση ή συζήτηση για crypto, χωρίς ρητό αίτημα να ανοίξει ή να κλείσει θέση. Αυτή είναι η προεπιλογή εκτός αν το αίτημα είναι ρητό.
+        Απόφασε ποια από τις τέσσερις περιπτώσεις ισχύει:
+        - "reply": ερώτηση ή συζήτηση για crypto, χωρίς ρητό αίτημα να ανοίξει ή να κλείσει θέση, και χωρίς να αφορά άδεια/mandate που έχει ήδη δοθεί. Αυτή είναι η προεπιλογή εκτός αν το αίτημα είναι ρητό.
         - "open": ρητό αίτημα να ανοίξει/κάνει trading σε ένα asset (π.χ. "κάνε trading στο XRP", "αγόρασε Solana").
         - "close": ρητό αίτημα να κλείσει/πουλήσει μια υπάρχουσα θέση (π.χ. "πούλησε τη θέση μου σε Solana", "κλείσε XRP").
+        - "mandate_status": ο χρήστης αναφέρεται ή ρωτάει για άδεια/mandate που έχει ήδη δώσει ή θέλει να επιβεβαιώσει (π.χ. "σου έδωσα ήδη άδεια", "θυμάσαι το ρίσκο που συμφωνήσαμε;", "τι άδειες έχεις;", "πριν λίγο σου έδωσα άδεια..."), ΧΩΡΙΣ να είναι ρητό αίτημα νέου ανοίγματος/κλεισίματος θέσης.
+
+        ΣΗΜΑΝΤΙΚΟ: Τα trading mandates αποθηκεύονται μόνιμα σε βάση δεδομένων, ανεξάρτητα από τη συνομιλία ή το session — ΠΟΤΕ μην απαντήσεις (στο "content") ότι δεν έχεις πρόσβαση σε προηγούμενες συνομιλίες/άδειες ή ότι "κάθε συνομιλία ξεκινά από μηδενική βάση". Αν η ερώτηση αφορά άδεια/mandate, χρησιμοποίησε ΠΑΝΤΑ "mandate_status" ώστε να ελεγχθεί το πραγματικό αποθηκευμένο state αντί να μαντέψεις.
 
         Αν αναφέρεται συγκεκριμένο crypto asset, βάλε το ticker του στο πεδίο "asset", κεφαλαία, χωρίς κατάληξη νομίσματος (π.χ. "XRP", "SOL", "BTC", "ETH" — όχι "XRPUSDT"). Αν δεν αναφέρεται κανένα asset, βάλε null.
 
         Αν ο χρήστης ανέφερε ρητά συγκεκριμένο ποσοστό ρίσκου για μια ΝΕΑ θέση (π.χ. "ρίσκαρε 3%"), βάλε τον αριθμό (π.χ. 3 για 3%) στο πεδίο "riskPercent". Αν δεν ανέφερε ρητά ποσοστό, βάλε null — ΜΗΝ υποθέσεις τιμή.
 
-        Απάντησε ΑΠΟΚΛΕΙΣΤΙΚΑ με ένα JSON object, χωρίς κανένα άλλο κείμενο: {"kind": "reply, open, ή close", "asset": "TICKER ή null", "riskPercent": αριθμός ή null, "content": "η απάντηση (αν reply) ή σύντομη περιγραφή της ενέργειας, στα ελληνικά"}
+        Απάντησε ΑΠΟΚΛΕΙΣΤΙΚΑ με ένα JSON object, χωρίς κανένα άλλο κείμενο: {"kind": "reply, open, close, ή mandate_status", "asset": "TICKER ή null", "riskPercent": αριθμός ή null, "content": "η απάντηση (αν reply) ή σύντομη περιγραφή της ενέργειας, στα ελληνικά (μπορεί να είναι κενό string αν kind είναι mandate_status)"}
         """
 
         let raw = try await aiService.generateText(prompt: prompt)
@@ -86,6 +90,8 @@ final class CryptoTradingCapability: AgentCapability {
             return try await handleOpen(decision: decision)
         case "close":
             return try await handleClose(decision: decision)
+        case "mandate_status":
+            return handleMandateStatus(decision: decision)
         default:
             return try await handleReply(decision: decision)
         }
@@ -127,6 +133,32 @@ final class CryptoTradingCapability: AgentCapability {
         }
 
         return .reply("\(decision.content) (τρέχουσα τιμή \(asset): $\(Self.formatPrice(price)))")
+    }
+
+    // MARK: - Mandate status
+
+    /// Ground-truth answer about standing mandates, pulled directly from
+    /// `PersistenceService` — never left to the AI to guess or "remember"
+    /// conversationally. This is the fix for the reported bug: a
+    /// reference to an existing mandate must be answered from persisted
+    /// state, regardless of what session or conversation it's asked in.
+    private func handleMandateStatus(decision: Decision) -> CapabilityOutcome {
+        if let asset = decision.asset {
+            let granted = persistence.isPermissionGranted(Self.mandateKey(for: asset))
+            return .reply(granted
+                ? "Ναι — υπάρχει ήδη ενεργό trading mandate για \(asset), δεν χρειάζεται να ξαναδώσεις άδεια."
+                : "Δεν υπάρχει mandate για \(asset) αυτή τη στιγμή. Θα σε ρωτήσω την επόμενη φορά που θα ζητήσω να ανοίξω θέση σε αυτό.")
+        }
+
+        let activeAssets = persistence.standingPermissions(withKeyPrefix: Self.mandateKeyPrefix)
+            .filter { $0.granted }
+            .map { String($0.key.dropFirst(Self.mandateKeyPrefix.count)) }
+
+        guard !activeAssets.isEmpty else {
+            return .reply("Δεν υπάρχει αυτή τη στιγμή κανένα ενεργό trading mandate.")
+        }
+
+        return .reply("Αυτή τη στιγμή έχεις ενεργό trading mandate για: \(activeAssets.joined(separator: ", ")).")
     }
 
     // MARK: - Open
