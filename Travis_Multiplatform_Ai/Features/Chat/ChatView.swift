@@ -28,6 +28,53 @@ struct ChatView: View {
         return formatter
     }()
 
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        formatter.locale = Locale(identifier: "el_GR")
+        return formatter
+    }()
+
+    /// A single chronological chat entry — either a message bubble or an
+    /// approval card, merged by `createdAt` so proposed actions render
+    /// inline in the flow at the point they arose, not in a separate
+    /// section. Approval behavior itself (`proposalCard`) is unchanged
+    /// from before this merge.
+    private enum TimelineItem: Identifiable {
+        case message(ChatMessage)
+        case proposal(ProposedAction)
+
+        var id: String {
+            switch self {
+            case .message(let message): return "message-\(message.id)"
+            case .proposal(let action): return "proposal-\(action.id)"
+            }
+        }
+
+        var createdAt: Date {
+            switch self {
+            case .message(let message): return message.createdAt
+            case .proposal(let action): return action.createdAt
+            }
+        }
+    }
+
+    private var timelineItems: [TimelineItem] {
+        let messageItems = appState.chatMessages.map(TimelineItem.message)
+        let proposalItems = appState.approvalGate.pendingActions.map(TimelineItem.proposal)
+        return (messageItems + proposalItems).sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// Best-effort match against `pendingCommands` (same trimmed text,
+    /// still `.awaitingApproval`) — the only correlation available since
+    /// `TravisCommand` isn't linked to a `ChatMessage` id. Kept only
+    /// because the underlying status still exists; the real approval
+    /// mechanism is the `ProposedAction` cards, unaffected by this.
+    private func isAwaitingApproval(_ message: ChatMessage) -> Bool {
+        guard message.role == .user else { return false }
+        return appState.pendingCommands.contains { $0.text == message.text && $0.status == .awaitingApproval }
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             HStack {
@@ -106,125 +153,7 @@ struct ChatView: View {
 
             recentSessionsPanel
 
-            if !appState.chatMessages.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Μηνύματα")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(appState.chatMessages) { message in
-                                HStack {
-                                    if message.role == .assistant {
-                                        Text(message.text)
-                                            .foregroundStyle(.white)
-                                            .padding(10)
-                                            .background(Color.cyan.opacity(0.15))
-                                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                                        Spacer(minLength: 24)
-                                    } else {
-                                        Spacer(minLength: 24)
-                                        Text(message.text)
-                                            .foregroundStyle(.white)
-                                            .padding(10)
-                                            .background(Color.white.opacity(0.1))
-                                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 320)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-                .background(Color.white.opacity(0.04))
-                .clipShape(RoundedRectangle(cornerRadius: 18))
-            }
-
-            if !appState.approvalGate.pendingActions.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Προτεινόμενες Ενέργειες")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-
-                    ForEach(appState.approvalGate.pendingActions) { action in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(action.summary)
-                                .font(.subheadline.bold())
-                                .foregroundStyle(.white)
-
-                            Text(action.reasoning)
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.75))
-
-                            Text(action.expectedImpact)
-                                .font(.caption)
-                                .foregroundStyle(.cyan.opacity(0.85))
-
-                            HStack {
-                                Text("Ρίσκο: \(action.riskLevel.rawValue)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.white.opacity(0.6))
-
-                                Spacer()
-
-                                Button("Reject") {
-                                    appState.approvalGate.reject(action)
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(.red)
-
-                                Button("Approve") {
-                                    appState.approvalGate.approve(action)
-                                    if let text = action.payload {
-                                        appState.saveGeneratedText(text, filename: action.filename, location: action.location, capabilityId: action.capabilityId)
-                                    }
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .tint(.cyan)
-                            }
-                        }
-                        .padding()
-                        .background(Color.white.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-                .background(Color.white.opacity(0.04))
-                .clipShape(RoundedRectangle(cornerRadius: 18))
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Command Queue")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-
-                if appState.pendingCommands.isEmpty {
-                    Text("Δεν υπάρχουν ακόμα εντολές.")
-                        .foregroundStyle(.white.opacity(0.65))
-                } else {
-                    ForEach(appState.pendingCommands.prefix(5)) { command in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(command.text)
-                                .foregroundStyle(.white)
-                            Text("\(command.source.rawValue) • \(command.status.rawValue)")
-                                .font(.caption)
-                                .foregroundStyle(.cyan.opacity(0.8))
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
-                        .background(Color.white.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
-            .background(Color.white.opacity(0.04))
-            .clipShape(RoundedRectangle(cornerRadius: 18))
+            unifiedChatSection
 
             HStack(spacing: 12) {
                 TextField("Δώσε εντολή στον Travis...", text: $draft)
@@ -257,8 +186,6 @@ struct ChatView: View {
                 }
                 .buttonStyle(.bordered)
             }
-
-            Spacer(minLength: 0)
         }
         .padding()
         .background(
@@ -268,6 +195,143 @@ struct ChatView: View {
                 endPoint: .bottomTrailing
             )
         )
+    }
+
+    /// The single chronological chat — messages and approval cards
+    /// merged by time, taking up the majority of the available vertical
+    /// space. Replaces the old separate "Μηνύματα" and "Command Queue"
+    /// sections.
+    private var unifiedChatSection: some View {
+        Group {
+            if timelineItems.isEmpty {
+                VStack {
+                    Spacer(minLength: 0)
+                    Text("Ξεκίνα τη συνομιλία...")
+                        .foregroundStyle(.white.opacity(0.4))
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 12) {
+                            ForEach(timelineItems) { item in
+                                timelineRow(item)
+                                    .id(item.id)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .onChange(of: timelineItems.count) { _, _ in
+                        guard let lastId = timelineItems.last?.id else { return }
+                        withAnimation {
+                            proxy.scrollTo(lastId, anchor: .bottom)
+                        }
+                    }
+                    .onAppear {
+                        guard let lastId = timelineItems.last?.id else { return }
+                        proxy.scrollTo(lastId, anchor: .bottom)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .padding()
+        .background(Color.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+
+    @ViewBuilder
+    private func timelineRow(_ item: TimelineItem) -> some View {
+        switch item {
+        case .message(let message):
+            messageBubble(message)
+        case .proposal(let action):
+            proposalCard(action)
+        }
+    }
+
+    private func messageBubble(_ message: ChatMessage) -> some View {
+        HStack {
+            if message.role == .assistant {
+                bubbleContent(message)
+                Spacer(minLength: 40)
+            } else {
+                Spacer(minLength: 40)
+                bubbleContent(message)
+            }
+        }
+    }
+
+    private func bubbleContent(_ message: ChatMessage) -> some View {
+        VStack(alignment: message.role == .assistant ? .leading : .trailing, spacing: 4) {
+            Text(message.text)
+                .foregroundStyle(.white)
+                .padding(10)
+                .background(message.role == .assistant ? Color.white.opacity(0.08) : Color.blue.opacity(0.4))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+
+            HStack(spacing: 6) {
+                if isAwaitingApproval(message) {
+                    Text("σε αναμονή")
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.3))
+                        .clipShape(Capsule())
+                        .foregroundStyle(.orange)
+                }
+
+                Text(Self.timeFormatter.string(from: message.createdAt))
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+        }
+    }
+
+    /// Unchanged from before the merge — same fields, same Approve/Reject
+    /// behavior — just rendered inline in the timeline instead of in a
+    /// separate "Προτεινόμενες Ενέργειες" section.
+    private func proposalCard(_ action: ProposedAction) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(action.summary)
+                .font(.subheadline.bold())
+                .foregroundStyle(.white)
+
+            Text(action.reasoning)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.75))
+
+            Text(action.expectedImpact)
+                .font(.caption)
+                .foregroundStyle(.cyan.opacity(0.85))
+
+            HStack {
+                Text("Ρίσκο: \(action.riskLevel.rawValue)")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.6))
+
+                Spacer()
+
+                Button("Reject") {
+                    appState.approvalGate.reject(action)
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+
+                Button("Approve") {
+                    appState.approvalGate.approve(action)
+                    if let text = action.payload {
+                        appState.saveGeneratedText(text, filename: action.filename, location: action.location, capabilityId: action.capabilityId)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+            }
+        }
+        .padding()
+        .background(Color.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     /// Compact, glanceable preview of the most recent past sessions — the
