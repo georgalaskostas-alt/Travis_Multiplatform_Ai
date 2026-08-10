@@ -146,6 +146,12 @@ final class TRAVISAppState {
 
     func addAssistantMessage(_ text: String) {
         appendMessage(role: .assistant, text: text)
+
+        // Voice mode currently only covers speaking replies aloud —
+        // listening/recognition is a separate step still to come.
+        if isListening {
+            SpeechService.shared.speak(text, language: preferredLanguage)
+        }
     }
 
     /// How many recent messages of the *current* session get sent to an AI
@@ -200,6 +206,10 @@ final class TRAVISAppState {
     func toggleListening() {
         isListening.toggle()
         currentDeviceState = isListening ? .listening : .idle
+
+        if !isListening {
+            SpeechService.shared.stopSpeaking()
+        }
     }
 
     func updateDeviceState(_ newState: DeviceState) {

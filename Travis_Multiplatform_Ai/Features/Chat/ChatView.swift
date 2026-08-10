@@ -59,8 +59,15 @@ struct ChatView: View {
         }
     }
 
+    /// While voice mode is on, TRAVIS's replies are spoken instead of
+    /// shown as text (see `TRAVISAppState.addAssistantMessage`) — the orb's
+    /// speaking animation is the only indication, so assistant bubbles are
+    /// left out of the timeline entirely. The user's own messages and any
+    /// approval cards keep showing normally either way.
     private var timelineItems: [TimelineItem] {
-        let messageItems = appState.chatMessages.map(TimelineItem.message)
+        let messageItems = appState.chatMessages
+            .filter { !(appState.isListening && $0.role == .assistant) }
+            .map(TimelineItem.message)
         let proposalItems = appState.approvalGate.pendingActions.map(TimelineItem.proposal)
         return (messageItems + proposalItems).sorted { $0.createdAt < $1.createdAt }
     }
@@ -137,11 +144,20 @@ struct ChatView: View {
                             .font(.headline)
                             .foregroundStyle(.white)
 
-                        Text(appState.currentDeviceState.title)
+                        Text(SpeechService.shared.isSpeaking ? "Μιλάει..." : appState.currentDeviceState.title)
                             .font(.caption)
                             .foregroundStyle(.cyan.opacity(0.9))
                     }
                 }
+                // Voice mode's only visible cue while speaking, since the
+                // reply text itself is hidden from the timeline below.
+                .scaleEffect(SpeechService.shared.isSpeaking ? 1.08 : 1.0)
+                .animation(
+                    SpeechService.shared.isSpeaking
+                        ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true)
+                        : .easeInOut(duration: 0.3),
+                    value: SpeechService.shared.isSpeaking
+                )
 
                 Text(appState.lastResponseSummary)
                     .font(.subheadline)

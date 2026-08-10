@@ -34,6 +34,7 @@
 		5E1CB6B1475BBF9E9DC8A16C /* PersistedPaperAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CB0CA6A571176843957B003 /* PersistedPaperAccount.swift */; };
 		E438AC5CAB39E69A957D22FD /* PersistedPaperPosition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */; };
 		9F4A7A48ED9AC92FBFEF22C7 /* BinanceMarketDataService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */; };
+		8B49A644F5700CCEA73B5E7B /* SpeechService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCB1DAF452075101C5ACDEC /* SpeechService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -65,6 +66,7 @@
 		1CB0CA6A571176843957B003 /* PersistedPaperAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedPaperAccount.swift; sourceTree = "<group>"; };
 		92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedPaperPosition.swift; sourceTree = "<group>"; };
 		3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinanceMarketDataService.swift; sourceTree = "<group>"; };
+		6FCB1DAF452075101C5ACDEC /* SpeechService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -195,6 +197,7 @@
 				0D26CE687E215F445D4CC99D /* PersistenceService.swift */,
 				1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */,
 				3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */,
+				6FCB1DAF452075101C5ACDEC /* SpeechService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -325,6 +328,7 @@
 				5E1CB6B1475BBF9E9DC8A16C /* PersistedPaperAccount.swift in Sources */,
 				E438AC5CAB39E69A957D22FD /* PersistedPaperPosition.swift in Sources */,
 				9F4A7A48ED9AC92FBFEF22C7 /* BinanceMarketDataService.swift in Sources */,
+				8B49A644F5700CCEA73B5E7B /* SpeechService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -459,6 +463,8 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ο TRAVIS χρειάζεται πρόσβαση στο μικρόφωνο για να σε ακούει όταν του μιλάς.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Ο TRAVIS χρειάζεται αναγνώριση ομιλίας για να καταλαβαίνει τι του λες φωναχτά.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -498,6 +504,8 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ο TRAVIS χρειάζεται πρόσβαση στο μικρόφωνο για να σε ακούει όταν του μιλάς.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Ο TRAVIS χρειάζεται αναγνώριση ομιλίας για να καταλαβαίνει τι του λες φωναχτά.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
