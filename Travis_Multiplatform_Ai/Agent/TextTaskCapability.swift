@@ -45,20 +45,27 @@ final class TextTaskCapability: AgentCapability {
         self.aiService = aiService
     }
 
-    func handle(command: String) async throws -> CapabilityOutcome {
+    func handle(command: String, recentHistory: [ChatMessage]) async throws -> CapabilityOutcome {
         if let content = pendingContent {
             return resolvePendingFilename(from: command, content: content)
         }
 
         if let pending = pendingPermissionRequest {
-            return try await resolvePermissionConsent(reply: command, pending: pending)
+            return try await resolvePermissionConsent(reply: command, pending: pending, recentHistory: recentHistory)
         }
 
         status = .running
         defer { status = .idle }
 
+        let historyBlock = recentHistory.isEmpty ? "" : """
+
+        Πρόσφατο ιστορικό συνομιλίας (για context, ώστε να καταλαβαίνεις αναφορές όπως "αυτό", "σχετικά", "συνέχισε"):
+        \(recentHistory.promptTranscript)
+
+        """
+
         let prompt = """
-        Είσαι ο προσωπικός βοηθός TRAVIS. Ο χρήστης έγραψε: "\(command)"
+        Είσαι ο προσωπικός βοηθός TRAVIS. \(historyBlock)Ο χρήστης έγραψε τώρα: "\(command)"
 
         Απόφασε ποια από τις τρεις περιπτώσεις ισχύει:
         - "reply": απλή συζήτηση, ερώτηση, ή chit-chat. Καμία ενέργεια δεν χρειάζεται, μόνο απάντηση. Αυτή είναι η προεπιλογή — διάλεξέ την εκτός αν ο χρήστης ζητάει ρητά κάτι από τις παρακάτω κατηγορίες.
@@ -133,11 +140,17 @@ final class TextTaskCapability: AgentCapability {
     /// the AI (not a keyword match). On agreement, grants the standing
     /// permission and — macOS only — acquires the one-time home-directory
     /// bookmark before finally building the proposal that was on hold.
-    private func resolvePermissionConsent(reply: String, pending: PendingSaveRequest) async throws -> CapabilityOutcome {
+    private func resolvePermissionConsent(reply: String, pending: PendingSaveRequest, recentHistory: [ChatMessage]) async throws -> CapabilityOutcome {
         pendingPermissionRequest = nil
 
+        let historyBlock = recentHistory.isEmpty ? "" : """
+        Πρόσφατο ιστορικό συνομιλίας (για context):
+        \(recentHistory.promptTranscript)
+
+        """
+
         let consentPrompt = """
-        Ο χρήστης απάντησε: "\(reply)" σε ερώτηση αν δίνει άδεια στον TRAVIS να αποθηκεύει αρχεία.
+        \(historyBlock)Ο χρήστης απάντησε: "\(reply)" σε ερώτηση αν δίνει άδεια στον TRAVIS να αποθηκεύει αρχεία.
         Ερμήνευσε αν πρόκειται για καταφατική απάντηση (δίνει την άδεια) ή όχι.
         Απάντησε ΑΠΟΚΛΕΙΣΤΙΚΑ με τη λέξη yes ή no, χωρίς τίποτα άλλο.
         """

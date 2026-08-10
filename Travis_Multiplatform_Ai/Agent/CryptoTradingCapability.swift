@@ -54,16 +54,23 @@ final class CryptoTradingCapability: AgentCapability {
         self.persistence = persistence
     }
 
-    func handle(command: String) async throws -> CapabilityOutcome {
+    func handle(command: String, recentHistory: [ChatMessage]) async throws -> CapabilityOutcome {
         if let pending = pendingMandateRequest {
-            return try await resolveMandateConsent(reply: command, pending: pending)
+            return try await resolveMandateConsent(reply: command, pending: pending, recentHistory: recentHistory)
         }
 
         status = .running
         defer { status = .idle }
 
+        let historyBlock = recentHistory.isEmpty ? "" : """
+
+        Πρόσφατο ιστορικό συνομιλίας (για context, ώστε να καταλαβαίνεις αναφορές όπως "αυτό", "σχετικά", "συνέχισε", ή σε ποιο asset αναφέρεσαι αν δεν το ξαναείπες):
+        \(recentHistory.promptTranscript)
+
+        """
+
         let prompt = """
-        Είσαι ο προσωπικός βοηθός TRAVIS, σε λειτουργία crypto trading. ΟΛΕΣ οι ενέργειες είναι paper trading (πλασματικά κεφάλαια) — καμία σύνδεση με πραγματικό λογαριασμό. Ο χρήστης έγραψε: "\(command)"
+        Είσαι ο προσωπικός βοηθός TRAVIS, σε λειτουργία crypto trading. ΟΛΕΣ οι ενέργειες είναι paper trading (πλασματικά κεφάλαια) — καμία σύνδεση με πραγματικό λογαριασμό. \(historyBlock)Ο χρήστης έγραψε τώρα: "\(command)"
 
         Απόφασε ποια από τις τέσσερις περιπτώσεις ισχύει:
         - "reply": ερώτηση ή συζήτηση για crypto, χωρίς ρητό αίτημα να ανοίξει ή να κλείσει θέση, και χωρίς να αφορά άδεια/mandate που έχει ήδη δοθεί. Αυτή είναι η προεπιλογή εκτός αν το αίτημα είναι ρητό.
@@ -253,11 +260,17 @@ final class CryptoTradingCapability: AgentCapability {
 
     /// Interprets the user's free-text reply via the AI (not a keyword
     /// match) — same pattern as `TextTaskCapability`'s file-save consent.
-    private func resolveMandateConsent(reply: String, pending: PendingOpen) async throws -> CapabilityOutcome {
+    private func resolveMandateConsent(reply: String, pending: PendingOpen, recentHistory: [ChatMessage]) async throws -> CapabilityOutcome {
         pendingMandateRequest = nil
 
+        let historyBlock = recentHistory.isEmpty ? "" : """
+        Πρόσφατο ιστορικό συνομιλίας (για context):
+        \(recentHistory.promptTranscript)
+
+        """
+
         let consentPrompt = """
-        Ο χρήστης απάντησε: "\(reply)" σε ερώτηση αν δίνει άδεια στον TRAVIS να ανοίξει μια συγκεκριμένη paper trading θέση.
+        \(historyBlock)Ο χρήστης απάντησε: "\(reply)" σε ερώτηση αν δίνει άδεια στον TRAVIS να ανοίξει μια συγκεκριμένη paper trading θέση.
         Απάντησε ΑΠΟΚΛΕΙΣΤΙΚΑ με τη λέξη yes ή no.
         """
         let raw = try await aiService.generateText(prompt: consentPrompt)

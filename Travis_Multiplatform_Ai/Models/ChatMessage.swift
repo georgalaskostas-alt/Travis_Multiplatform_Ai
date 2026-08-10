@@ -28,3 +28,14 @@ enum ChatRole: String, Codable, CaseIterable {
     case user
     case assistant
 }
+
+extension Array where Element == ChatMessage {
+    /// Compact "role: text" transcript, suitable for injecting into an AI
+    /// classification prompt as short-term conversational context so
+    /// references like "αυτό"/"σχετικά"/"συνέχισε" resolve correctly.
+    /// Callers are expected to have already limited this to a reasonable
+    /// recent window — this doesn't truncate on its own.
+    var promptTranscript: String {
+        map { "\($0.role == .user ? "Χρήστης" : "TRAVIS"): \($0.text)" }.joined(separator: "\n")
+    }
+}

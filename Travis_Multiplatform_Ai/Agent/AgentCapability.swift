@@ -25,6 +25,6 @@ protocol AgentCapability: AnyObject, Identifiable {
     /// as a catch-all/default capability, used when no other capability's keywords match.
     var keywords: [String] { get }
 
-    func handle(command: String) async throws -> CapabilityOutcome
+    func handle(command: String, recentHistory: [ChatMessage]) async throws -> CapabilityOutcome
     func resolve(_ action: ProposedAction)
 }

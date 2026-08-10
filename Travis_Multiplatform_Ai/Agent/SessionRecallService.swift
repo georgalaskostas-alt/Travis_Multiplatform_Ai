@@ -21,12 +21,18 @@ final class SessionRecallService {
         self.aiService = aiService
     }
 
-    func evaluate(_ message: String, excluding liveSessionId: UUID) async throws -> SessionRecallOutcome {
+    func evaluate(_ message: String, excluding liveSessionId: UUID, recentHistory: [ChatMessage] = []) async throws -> SessionRecallOutcome {
         let today = Self.dateFormatter.string(from: Date())
+        let historyBlock = recentHistory.isEmpty ? "" : """
+
+        Πρόσφατο ιστορικό συνομιλίας (για context):
+        \(recentHistory.promptTranscript)
+
+        """
 
         let prompt = """
         Σημερινή ημερομηνία: \(today)
-        Ο χρήστης έγραψε: "\(message)"
+        \(historyBlock)Ο χρήστης έγραψε τώρα: "\(message)"
 
         Είναι αυτό ένα ρητό αίτημα να δει/φέρει μπροστά μια ΠΡΟΗΓΟΥΜΕΝΗ συνομιλία (π.χ. "φέρε μου τη συνομιλία από χθες", "δείξε μου τι λέγαμε την Τρίτη", "άνοιξε την προηγούμενη συζήτηση"); ΟΧΙ απλή αναφορά στο παρελθόν μέσα σε μια κανονική ερώτηση ή εντολή;
 

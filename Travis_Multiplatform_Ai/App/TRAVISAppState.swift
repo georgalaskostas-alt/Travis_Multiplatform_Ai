@@ -148,6 +148,14 @@ final class TRAVISAppState {
         appendMessage(role: .assistant, text: text)
     }
 
+    /// How many recent messages of the *current* session get sent to an AI
+    /// classification call as conversational context — enough to resolve
+    /// references like "αυτό"/"σχετικά" without unboundedly growing the
+    /// prompt as a session gets long. Naturally covers "the whole session"
+    /// for anything shorter than this, since `.suffix()` on a smaller
+    /// array just returns the whole array.
+    private static let conversationContextWindow = 8
+
     func sendCommand(_ text: String, source: CommandSource) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -159,8 +167,11 @@ final class TRAVISAppState {
         lastResponseSummary = "Εντολή σε αναμονή: \(trimmed)"
 
         let liveSessionId = currentSessionId
+        // dropLast() excludes the message just appended above — it's
+        // already passed separately as the command being classified.
+        let recentHistory = Array(chatMessages.dropLast().suffix(Self.conversationContextWindow))
         Task {
-            await orchestrator.route(trimmed, liveSessionId: liveSessionId)
+            await orchestrator.route(trimmed, liveSessionId: liveSessionId, recentHistory: recentHistory)
         }
     }
 

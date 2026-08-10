@@ -25,8 +25,12 @@ final class AgentOrchestrator {
     /// `liveSessionId` is the session new messages are actually being
     /// appended to right now — passed in so a recall request never matches
     /// (or needs to search within) the very session it was typed into.
-    func route(_ message: String, liveSessionId: UUID) async {
-        if let outcome = try? await sessionRecallService.evaluate(message, excluding: liveSessionId) {
+    /// `recentHistory` is a short recent window of the live session's
+    /// messages (not including `message` itself) — passed straight through
+    /// to whichever capability ends up handling this, so references like
+    /// "αυτό"/"σχετικά" resolve against what was actually just said.
+    func route(_ message: String, liveSessionId: UUID, recentHistory: [ChatMessage]) async {
+        if let outcome = try? await sessionRecallService.evaluate(message, excluding: liveSessionId, recentHistory: recentHistory) {
             switch outcome {
             case .found(let sessionId):
                 onSessionRecall?(sessionId)
@@ -52,7 +56,7 @@ final class AgentOrchestrator {
         }
 
         do {
-            switch try await capability.handle(command: message) {
+            switch try await capability.handle(command: message, recentHistory: recentHistory) {
             case .reply(let text):
                 onAssistantMessage?(text)
             case .proposal(let action):
