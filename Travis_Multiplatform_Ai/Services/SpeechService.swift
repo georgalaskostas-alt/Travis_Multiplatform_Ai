@@ -30,9 +30,17 @@ final class SpeechService: NSObject {
     func speak(_ text: String, language: AppLanguage) {
         guard !text.isEmpty else { return }
 
+        // TEMP DEBUG — remove once TTS audio output is confirmed working.
+        print("[SpeechService] speak() text=\"\(text)\" languageCode=\(language.speechLanguageCode)")
+
         let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: language.speechLanguageCode)
+        let voice = AVSpeechSynthesisVoice(language: language.speechLanguageCode)
+        print("[SpeechService] resolved voice=\(String(describing: voice)) (nil means no voice matched that language code — likely cause of silence)")
+        utterance.voice = voice
+        print("[SpeechService] utterance.volume=\(utterance.volume) rate=\(utterance.rate)")
+
         synthesizer.speak(utterance)
+        print("[SpeechService] synthesizer.speak() called, isSpeaking(engine)=\(synthesizer.isSpeaking)")
     }
 
     func stopSpeaking() {
@@ -42,14 +50,17 @@ final class SpeechService: NSObject {
 
 extension SpeechService: AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        print("[SpeechService] delegate didStart")
         Task { @MainActor in self.isSpeaking = true }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        print("[SpeechService] delegate didFinish")
         Task { @MainActor in self.isSpeaking = false }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        print("[SpeechService] delegate didCancel")
         Task { @MainActor in self.isSpeaking = false }
     }
 }
