@@ -43,6 +43,13 @@ struct SettingsView: View {
             Section("Voice") {
                 Toggle("Listening Mode", isOn: $appState.isListening)
                 Toggle("Processing State", isOn: $appState.isProcessing)
+
+                Button("Δοκίμασε τη φωνή") {
+                    SpeechService.shared.speak(
+                        "Γεια σου, είμαι ο \(appState.assistantName). Έτοιμος να βοηθήσω.",
+                        language: appState.preferredLanguage
+                    )
+                }
             }
 
             Section("Trading Mandates (Paper)") {

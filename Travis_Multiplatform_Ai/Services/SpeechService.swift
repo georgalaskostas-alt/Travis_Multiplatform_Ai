@@ -22,6 +22,13 @@ final class SpeechService: NSObject {
 
     private let synthesizer = AVSpeechSynthesizer()
 
+    /// Lower than the neutral 1.0 for a deeper, more "Jarvis"-like tone
+    /// without distorting into a robotic growl.
+    private static let pitchMultiplier: Float = 0.88
+    /// Slightly slower than the system default for a measured,
+    /// authoritative delivery.
+    private static let rate: Float = AVSpeechUtteranceDefaultSpeechRate * 0.9
+
     private override init() {
         super.init()
         synthesizer.delegate = self
@@ -30,37 +37,47 @@ final class SpeechService: NSObject {
     func speak(_ text: String, language: AppLanguage) {
         guard !text.isEmpty else { return }
 
-        // TEMP DEBUG — remove once TTS audio output is confirmed working.
-        print("[SpeechService] speak() text=\"\(text)\" languageCode=\(language.speechLanguageCode)")
-
         let utterance = AVSpeechUtterance(string: text)
-        let voice = AVSpeechSynthesisVoice(language: language.speechLanguageCode)
-        print("[SpeechService] resolved voice=\(String(describing: voice)) (nil means no voice matched that language code — likely cause of silence)")
-        utterance.voice = voice
-        print("[SpeechService] utterance.volume=\(utterance.volume) rate=\(utterance.rate)")
+        utterance.voice = Self.bestAvailableVoice(for: language.speechLanguageCode)
+        utterance.pitchMultiplier = Self.pitchMultiplier
+        utterance.rate = Self.rate
 
         synthesizer.speak(utterance)
-        print("[SpeechService] synthesizer.speak() called, isSpeaking(engine)=\(synthesizer.isSpeaking)")
     }
 
     func stopSpeaking() {
         synthesizer.stopSpeaking(at: .immediate)
     }
+
+    /// Prefers a higher-quality installed voice (`.premium`, then
+    /// `.enhanced`) for the given language over the always-available
+    /// `.default` compact one — those read noticeably more natural and
+    /// deep. Falls back to whatever `AVSpeechSynthesisVoice(language:)`
+    /// resolves to (including `nil`) if no such voice is installed.
+    private static func bestAvailableVoice(for languageCode: String) -> AVSpeechSynthesisVoice? {
+        let matchingVoices = AVSpeechSynthesisVoice.speechVoices()
+            .filter { $0.language == languageCode }
+
+        if let premium = matchingVoices.first(where: { $0.quality == .premium }) {
+            return premium
+        }
+        if let enhanced = matchingVoices.first(where: { $0.quality == .enhanced }) {
+            return enhanced
+        }
+        return AVSpeechSynthesisVoice(language: languageCode)
+    }
 }
 
 extension SpeechService: AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
-        print("[SpeechService] delegate didStart")
         Task { @MainActor in self.isSpeaking = true }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        print("[SpeechService] delegate didFinish")
         Task { @MainActor in self.isSpeaking = false }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        print("[SpeechService] delegate didCancel")
         Task { @MainActor in self.isSpeaking = false }
     }
 }
