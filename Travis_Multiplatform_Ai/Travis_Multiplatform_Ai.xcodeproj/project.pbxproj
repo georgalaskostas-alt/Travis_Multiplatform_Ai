@@ -35,6 +35,7 @@
 		E438AC5CAB39E69A957D22FD /* PersistedPaperPosition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */; };
 		9F4A7A48ED9AC92FBFEF22C7 /* BinanceMarketDataService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */; };
 		8B49A644F5700CCEA73B5E7B /* SpeechService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCB1DAF452075101C5ACDEC /* SpeechService.swift */; };
+		227EC4D057E5DA09BCA718F5 /* SpeechRecognitionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1DC9788190AEBC7B78C4355 /* SpeechRecognitionService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -67,6 +68,7 @@
 		92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedPaperPosition.swift; sourceTree = "<group>"; };
 		3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinanceMarketDataService.swift; sourceTree = "<group>"; };
 		6FCB1DAF452075101C5ACDEC /* SpeechService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechService.swift; sourceTree = "<group>"; };
+		E1DC9788190AEBC7B78C4355 /* SpeechRecognitionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognitionService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -198,6 +200,7 @@
 				1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */,
 				3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */,
 				6FCB1DAF452075101C5ACDEC /* SpeechService.swift */,
+				E1DC9788190AEBC7B78C4355 /* SpeechRecognitionService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -329,6 +332,7 @@
 				E438AC5CAB39E69A957D22FD /* PersistedPaperPosition.swift in Sources */,
 				9F4A7A48ED9AC92FBFEF22C7 /* BinanceMarketDataService.swift in Sources */,
 				8B49A644F5700CCEA73B5E7B /* SpeechService.swift in Sources */,
+				227EC4D057E5DA09BCA718F5 /* SpeechRecognitionService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

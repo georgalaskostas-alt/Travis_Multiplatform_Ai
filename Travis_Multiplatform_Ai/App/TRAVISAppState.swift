@@ -55,6 +55,10 @@ final class TRAVISAppState {
             self?.viewSession(sessionId)
         }
 
+        SpeechRecognitionService.shared.onFinalTranscript = { [weak self] text in
+            self?.sendCommand(text, source: .voice)
+        }
+
         if let savedKey = KeychainService.shared.anthropicAPIKey {
             self.anthropicAPIKey = savedKey
         }
@@ -147,10 +151,18 @@ final class TRAVISAppState {
     func addAssistantMessage(_ text: String) {
         appendMessage(role: .assistant, text: text)
 
-        // Voice mode currently only covers speaking replies aloud —
-        // listening/recognition is a separate step still to come.
+        // Recognition is already stopped by this point whenever it was
+        // the thing that triggered this reply — silence detection tears
+        // down the microphone capture *before* handing off the final
+        // transcript (see `SpeechRecognitionService.teardownCapture`), so
+        // there's no risk of TRAVIS's own voice being picked back up as a
+        // new command while it speaks. Once the reply finishes, listening
+        // resumes automatically if voice mode is still on.
         if isListening {
-            SpeechService.shared.speak(text, language: preferredLanguage)
+            SpeechService.shared.speak(text, language: preferredLanguage) { [weak self] in
+                guard let self, self.isListening else { return }
+                SpeechRecognitionService.shared.start(language: self.preferredLanguage)
+            }
         }
     }
 
@@ -207,8 +219,11 @@ final class TRAVISAppState {
         isListening.toggle()
         currentDeviceState = isListening ? .listening : .idle
 
-        if !isListening {
+        if isListening {
+            SpeechRecognitionService.shared.start(language: preferredLanguage)
+        } else {
             SpeechService.shared.stopSpeaking()
+            SpeechRecognitionService.shared.stop()
         }
     }
 

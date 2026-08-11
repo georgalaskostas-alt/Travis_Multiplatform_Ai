@@ -59,6 +59,53 @@ struct ChatView: View {
         }
     }
 
+    /// Drives the orb's visual state — speaking (TTS) takes priority over
+    /// listening (STT) since `SpeechRecognitionService` is always paused
+    /// while `SpeechService` is talking (see
+    /// `TRAVISAppState.addAssistantMessage`), so the two are never both
+    /// true at once in practice, but speaking is the more important cue
+    /// either way.
+    private enum OrbState: Equatable {
+        case idle, listening, speaking
+
+        var statusText: String {
+            switch self {
+            case .idle: return ""
+            case .listening: return "Ακούει..."
+            case .speaking: return "Μιλάει..."
+            }
+        }
+
+        var ringColor: Color {
+            switch self {
+            case .idle, .speaking: return .cyan
+            case .listening: return .green
+            }
+        }
+
+        var scale: CGFloat {
+            switch self {
+            case .idle: return 1.0
+            case .listening: return 1.04
+            case .speaking: return 1.08
+            }
+        }
+
+        var animation: Animation {
+            switch self {
+            case .idle: return .easeInOut(duration: 0.3)
+            case .listening: return .easeInOut(duration: 0.3).repeatForever(autoreverses: true)
+            case .speaking: return .easeInOut(duration: 0.6).repeatForever(autoreverses: true)
+            }
+        }
+    }
+
+    private var orbState: OrbState {
+        if SpeechService.shared.isSpeaking { return .speaking }
+        if SpeechRecognitionService.shared.isListening { return .listening }
+        return .idle
+    }
+
     /// While voice mode is on, TRAVIS's replies are spoken instead of
     /// shown as text (see `TRAVISAppState.addAssistantMessage`) — the orb's
     /// speaking animation is the only indication, so assistant bubbles are
@@ -132,7 +179,7 @@ struct ChatView: View {
                         .blur(radius: 2)
 
                     Circle()
-                        .stroke(Color.cyan.opacity(0.8), lineWidth: 2)
+                        .stroke(orbState.ringColor.opacity(0.8), lineWidth: 2)
                         .frame(width: 220, height: 220)
 
                     Circle()
@@ -144,26 +191,35 @@ struct ChatView: View {
                             .font(.headline)
                             .foregroundStyle(.white)
 
-                        Text(SpeechService.shared.isSpeaking ? "Μιλάει..." : appState.currentDeviceState.title)
+                        Text(orbState == .idle ? appState.currentDeviceState.title : orbState.statusText)
                             .font(.caption)
                             .foregroundStyle(.cyan.opacity(0.9))
                     }
                 }
-                // Voice mode's only visible cue while speaking, since the
-                // reply text itself is hidden from the timeline below.
-                .scaleEffect(SpeechService.shared.isSpeaking ? 1.08 : 1.0)
-                .animation(
-                    SpeechService.shared.isSpeaking
-                        ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true)
-                        : .easeInOut(duration: 0.3),
-                    value: SpeechService.shared.isSpeaking
-                )
+                // Voice mode's only visible cue while speaking or
+                // listening, since the reply text itself is hidden from
+                // the timeline below in that mode.
+                .scaleEffect(orbState.scale)
+                .animation(orbState.animation, value: orbState)
 
-                Text(appState.lastResponseSummary)
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.82))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                // While actively listening, show the live transcript
+                // building up in place of the usual status summary — the
+                // user sees what TRAVIS heard before it's sent.
+                if orbState == .listening {
+                    Text(SpeechRecognitionService.shared.liveTranscript.isEmpty
+                         ? "..."
+                         : SpeechRecognitionService.shared.liveTranscript)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.82))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                } else {
+                    Text(appState.lastResponseSummary)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.82))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
             }
             .padding(.top)
 

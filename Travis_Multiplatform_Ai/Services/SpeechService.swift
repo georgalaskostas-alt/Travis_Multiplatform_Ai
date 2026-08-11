@@ -1,12 +1,12 @@
 import Foundation
 import AVFoundation
 
-/// Text-to-speech only, for now — reads TRAVIS's replies aloud via
+/// Text-to-speech half of voice mode — reads TRAVIS's replies aloud via
 /// `AVSpeechSynthesizer` when voice mode is on. Speech *recognition*
-/// (listening back) is a separate, not-yet-built step; the
-/// NSSpeechRecognitionUsageDescription/NSMicrophoneUsageDescription
-/// Info.plist keys were added ahead of that work, but nothing here
-/// touches the microphone.
+/// (listening) is the companion `SpeechRecognitionService`; the two
+/// coordinate through `speak(_:language:completion:)`'s completion
+/// handler so they never capture/play audio at the same time — see
+/// `TRAVISAppState.addAssistantMessage`.
 ///
 /// `NSObject` subclass because `AVSpeechSynthesizerDelegate` is an
 /// Objective-C protocol. Delegate callbacks are `nonisolated` since
@@ -22,6 +22,11 @@ final class SpeechService: NSObject {
 
     private let synthesizer = AVSpeechSynthesizer()
 
+    /// Invoked once when the in-flight utterance finishes or is
+    /// cancelled — lets `TRAVISAppState` resume speech *recognition*
+    /// after TRAVIS is done talking (see `speak(_:language:completion:)`).
+    private var onFinishedSpeaking: (() -> Void)?
+
     /// Lower than the neutral 1.0 for a deeper, more "Jarvis"-like tone
     /// without distorting into a robotic growl.
     private static let pitchMultiplier: Float = 0.75
@@ -34,8 +39,13 @@ final class SpeechService: NSObject {
         synthesizer.delegate = self
     }
 
-    func speak(_ text: String, language: AppLanguage) {
-        guard !text.isEmpty else { return }
+    func speak(_ text: String, language: AppLanguage, completion: (() -> Void)? = nil) {
+        guard !text.isEmpty else {
+            completion?()
+            return
+        }
+
+        onFinishedSpeaking = completion
 
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = Self.bestAvailableVoice(for: language.speechLanguageCode)
@@ -87,10 +97,17 @@ extension SpeechService: AVSpeechSynthesizerDelegate {
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.isSpeaking = false }
+        Task { @MainActor in self.finishedSpeaking() }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.isSpeaking = false }
+        Task { @MainActor in self.finishedSpeaking() }
+    }
+
+    private func finishedSpeaking() {
+        isSpeaking = false
+        let completion = onFinishedSpeaking
+        onFinishedSpeaking = nil
+        completion?()
     }
 }
