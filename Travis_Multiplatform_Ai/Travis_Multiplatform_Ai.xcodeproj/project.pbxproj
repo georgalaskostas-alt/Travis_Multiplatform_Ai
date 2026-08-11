@@ -7,6 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		227EC4D057E5DA09BCA718F5 /* SpeechRecognitionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1DC9788190AEBC7B78C4355 /* SpeechRecognitionService.swift */; };
+		5E1CB6B1475BBF9E9DC8A16C /* PersistedPaperAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CB0CA6A571176843957B003 /* PersistedPaperAccount.swift */; };
+		7DD7C82285C8369DD87F1BB9 /* PersistedProposedAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC450BC06CAAD3E401F366EF /* PersistedProposedAction.swift */; };
+		8116E394C469741F6A3F8DD6 /* PersistedChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A69246C40E57CB8B02C7544 /* PersistedChatMessage.swift */; };
+		893F1500C5EA890AFF209370 /* PersistedFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 649AB93329903D4F8F4A3477 /* PersistedFile.swift */; };
+		8B49A644F5700CCEA73B5E7B /* SpeechService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCB1DAF452075101C5ACDEC /* SpeechService.swift */; };
+		9F4A7A48ED9AC92FBFEF22C7 /* BinanceMarketDataService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */; };
+		A1637D2306AEDD20E59287F6 /* PersistenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D26CE687E215F445D4CC99D /* PersistenceService.swift */; };
+		BCB07EF7ECD6F3D5D3376542 /* StandingPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = B644373748CB262FB7E7B6BF /* StandingPermission.swift */; };
+		E438AC5CAB39E69A957D22FD /* PersistedPaperPosition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */; };
+		E7FF4041F8088D0BD73BE9C5 /* ChatSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8A4BC751EBB945A37C536C8 /* ChatSession.swift */; };
 		EC21708D2FD0474200D1AB6D /* TRAVISAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC21708C2FD0474200D1AB6D /* TRAVISAppState.swift */; };
 		EC2170932FD047D600D1AB6D /* TravisPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170922FD047D600D1AB6D /* TravisPermission.swift */; };
 		EC2170952FD047EE00D1AB6D /* TravisTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170942FD047EE00D1AB6D /* TravisTask.swift */; };
@@ -22,23 +33,25 @@
 		EC2170C72FD4472C00D1AB6D /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */; };
 		EC2171142FD5010200D1AB6E /* ProposedAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2171122FD5010100D1AB6E /* ProposedAction.swift */; };
 		EC2171222FD5020100D1AB6F /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2171202FD5020000D1AB6F /* KeychainService.swift */; };
-		8116E394C469741F6A3F8DD6 /* PersistedChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A69246C40E57CB8B02C7544 /* PersistedChatMessage.swift */; };
-		7DD7C82285C8369DD87F1BB9 /* PersistedProposedAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC450BC06CAAD3E401F366EF /* PersistedProposedAction.swift */; };
-		893F1500C5EA890AFF209370 /* PersistedFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 649AB93329903D4F8F4A3477 /* PersistedFile.swift */; };
-		A1637D2306AEDD20E59287F6 /* PersistenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D26CE687E215F445D4CC99D /* PersistenceService.swift */; };
 		F05AD77107CAF9DA881E8544 /* PersistedLocationBookmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */; };
 		F5EC4F0794E848C6CA141788 /* FileLocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */; };
-		BCB07EF7ECD6F3D5D3376542 /* StandingPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = B644373748CB262FB7E7B6BF /* StandingPermission.swift */; };
-		E7FF4041F8088D0BD73BE9C5 /* ChatSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8A4BC751EBB945A37C536C8 /* ChatSession.swift */; };
 		F9427A0857DC2CE7C90FEDDB /* PaperTradingConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6023541AB2F4D7680CC010C6 /* PaperTradingConstants.swift */; };
-		5E1CB6B1475BBF9E9DC8A16C /* PersistedPaperAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CB0CA6A571176843957B003 /* PersistedPaperAccount.swift */; };
-		E438AC5CAB39E69A957D22FD /* PersistedPaperPosition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */; };
-		9F4A7A48ED9AC92FBFEF22C7 /* BinanceMarketDataService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */; };
-		8B49A644F5700CCEA73B5E7B /* SpeechService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCB1DAF452075101C5ACDEC /* SpeechService.swift */; };
-		227EC4D057E5DA09BCA718F5 /* SpeechRecognitionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1DC9788190AEBC7B78C4355 /* SpeechRecognitionService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0D26CE687E215F445D4CC99D /* PersistenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceService.swift; sourceTree = "<group>"; };
+		1CB0CA6A571176843957B003 /* PersistedPaperAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedPaperAccount.swift; sourceTree = "<group>"; };
+		1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLocationService.swift; sourceTree = "<group>"; };
+		3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinanceMarketDataService.swift; sourceTree = "<group>"; };
+		6023541AB2F4D7680CC010C6 /* PaperTradingConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaperTradingConstants.swift; sourceTree = "<group>"; };
+		649AB93329903D4F8F4A3477 /* PersistedFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedFile.swift; sourceTree = "<group>"; };
+		6FCB1DAF452075101C5ACDEC /* SpeechService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechService.swift; sourceTree = "<group>"; };
+		7A69246C40E57CB8B02C7544 /* PersistedChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedChatMessage.swift; sourceTree = "<group>"; };
+		92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedPaperPosition.swift; sourceTree = "<group>"; };
+		ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedLocationBookmark.swift; sourceTree = "<group>"; };
+		B644373748CB262FB7E7B6BF /* StandingPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandingPermission.swift; sourceTree = "<group>"; };
+		B8A4BC751EBB945A37C536C8 /* ChatSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSession.swift; sourceTree = "<group>"; };
+		E1DC9788190AEBC7B78C4355 /* SpeechRecognitionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognitionService.swift; sourceTree = "<group>"; };
 		EC2170782FD0469A00D1AB6D /* Travis_Multiplatform_Ai.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Travis_Multiplatform_Ai.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EC21708C2FD0474200D1AB6D /* TRAVISAppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TRAVISAppState.swift; sourceTree = "<group>"; };
 		EC2170922FD047D600D1AB6D /* TravisPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravisPermission.swift; sourceTree = "<group>"; };
@@ -55,20 +68,7 @@
 		EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 		EC2171122FD5010100D1AB6E /* ProposedAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProposedAction.swift; sourceTree = "<group>"; };
 		EC2171202FD5020000D1AB6F /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
-		7A69246C40E57CB8B02C7544 /* PersistedChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedChatMessage.swift; sourceTree = "<group>"; };
 		EC450BC06CAAD3E401F366EF /* PersistedProposedAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedProposedAction.swift; sourceTree = "<group>"; };
-		649AB93329903D4F8F4A3477 /* PersistedFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedFile.swift; sourceTree = "<group>"; };
-		0D26CE687E215F445D4CC99D /* PersistenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceService.swift; sourceTree = "<group>"; };
-		ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedLocationBookmark.swift; sourceTree = "<group>"; };
-		1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLocationService.swift; sourceTree = "<group>"; };
-		B644373748CB262FB7E7B6BF /* StandingPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandingPermission.swift; sourceTree = "<group>"; };
-		B8A4BC751EBB945A37C536C8 /* ChatSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSession.swift; sourceTree = "<group>"; };
-		6023541AB2F4D7680CC010C6 /* PaperTradingConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaperTradingConstants.swift; sourceTree = "<group>"; };
-		1CB0CA6A571176843957B003 /* PersistedPaperAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedPaperAccount.swift; sourceTree = "<group>"; };
-		92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedPaperPosition.swift; sourceTree = "<group>"; };
-		3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinanceMarketDataService.swift; sourceTree = "<group>"; };
-		6FCB1DAF452075101C5ACDEC /* SpeechService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechService.swift; sourceTree = "<group>"; };
-		E1DC9788190AEBC7B78C4355 /* SpeechRecognitionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognitionService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -464,8 +464,19 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5N7C7P29DB;
+				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ο TRAVIS χρειάζεται πρόσβαση στο μικρόφωνο για να σε ακούει όταν του μιλάς.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Ο TRAVIS χρειάζεται αναγνώριση ομιλίας για να καταλαβαίνει τι του λες φωναχτά.";
@@ -505,8 +516,19 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 5N7C7P29DB;
+				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ο TRAVIS χρειάζεται πρόσβαση στο μικρόφωνο για να σε ακούει όταν του μιλάς.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Ο TRAVIS χρειάζεται αναγνώριση ομιλίας για να καταλαβαίνει τι του λες φωναχτά.";
