@@ -1,19 +1,22 @@
 import Foundation
 import SwiftData
 
+/// See `PersistedChatMessage` for why `.unique` is gone and every
+/// non-optional property now has an inline default — required for
+/// CloudKit-backed SwiftData.
 @Model
 final class PersistedProposedAction {
-    @Attribute(.unique) var id: UUID
-    var capabilityId: String
-    var summary: String
-    var reasoning: String
-    var expectedImpact: String
-    var riskLevel: String
-    var status: String
+    var id: UUID = UUID()
+    var capabilityId: String = ""
+    var summary: String = ""
+    var reasoning: String = ""
+    var expectedImpact: String = ""
+    var riskLevel: String = ""
+    var status: String = ""
     var payload: String?
     var filename: String?
     var location: String?
-    var createdAt: Date
+    var createdAt: Date = Date()
     var resolvedAt: Date?
 
     init(from action: ProposedAction) {
