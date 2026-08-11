@@ -24,10 +24,10 @@ final class SpeechService: NSObject {
 
     /// Lower than the neutral 1.0 for a deeper, more "Jarvis"-like tone
     /// without distorting into a robotic growl.
-    private static let pitchMultiplier: Float = 0.88
-    /// Slightly slower than the system default for a measured,
-    /// authoritative delivery.
-    private static let rate: Float = AVSpeechUtteranceDefaultSpeechRate * 0.9
+    private static let pitchMultiplier: Float = 0.75
+    /// Slower than the system default for a measured, authoritative
+    /// delivery.
+    private static let rate: Float = AVSpeechUtteranceDefaultSpeechRate * 0.85
 
     private override init() {
         super.init()
@@ -58,13 +58,26 @@ final class SpeechService: NSObject {
         let matchingVoices = AVSpeechSynthesisVoice.speechVoices()
             .filter { $0.language == languageCode }
 
+        let chosen: AVSpeechSynthesisVoice?
         if let premium = matchingVoices.first(where: { $0.quality == .premium }) {
-            return premium
+            chosen = premium
+        } else if let enhanced = matchingVoices.first(where: { $0.quality == .enhanced }) {
+            chosen = enhanced
+        } else {
+            chosen = AVSpeechSynthesisVoice(language: languageCode)
         }
-        if let enhanced = matchingVoices.first(where: { $0.quality == .enhanced }) {
-            return enhanced
+
+        // TEMP DEBUG — confirms which actual voice gets used; remove once
+        // we've verified an enhanced/premium voice is available on-device.
+        print("[SpeechService] \(matchingVoices.count) voice(s) installed for \(languageCode): "
+            + matchingVoices.map { "\($0.name) [\($0.identifier)] quality=\($0.quality.rawValue)" }.joined(separator: ", "))
+        if let chosen {
+            print("[SpeechService] chosen voice: \(chosen.name) [\(chosen.identifier)] quality=\(chosen.quality.rawValue)")
+        } else {
+            print("[SpeechService] chosen voice: nil (no voice resolved for \(languageCode))")
         }
-        return AVSpeechSynthesisVoice(language: languageCode)
+
+        return chosen
     }
 }
 
