@@ -48,6 +48,7 @@ final class TRAVISAppState {
 
         orchestrator.register(TextTaskCapability())
         orchestrator.register(CryptoTradingCapability())
+        orchestrator.register(SelfImprovementCapability())
         orchestrator.onAssistantMessage = { [weak self] text in
             self?.addAssistantMessage(text)
         }
