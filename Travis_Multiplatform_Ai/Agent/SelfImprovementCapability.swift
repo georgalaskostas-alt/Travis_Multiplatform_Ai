@@ -56,6 +56,7 @@ final class SelfImprovementCapability: AgentCapability {
         let prompt: String
         let riskLevel: RiskLevel
         let filename: String
+        let location: String?
     }
     private var pendingPermissionRequest: PendingProposal?
 
@@ -115,7 +116,16 @@ final class SelfImprovementCapability: AgentCapability {
         // code-change proposal needs a deliberate, non-trivial approval.
         let riskLevel: RiskLevel = (decision.riskLevel?.lowercased() == "high") ? .high : .medium
 
-        return proceedToPropose(summary: summary, reasoning: reasoning, prompt: claudeCodePrompt, riskLevel: riskLevel)
+        // Same nullable filename/location extraction TextTaskCapability uses
+        // for its own save_file requests — shared, not reimplemented, so a
+        // command like "δώσε όνομα X, αποθήκευσέ το στο desktop" is honored
+        // identically here instead of being silently ignored.
+        let extraction = try await FileSaveRequestExtractor.extract(from: command, aiService: aiService)
+
+        return proceedToPropose(
+            summary: summary, reasoning: reasoning, prompt: claudeCodePrompt, riskLevel: riskLevel,
+            filename: extraction.filename, location: extraction.location
+        )
     }
 
     func resolve(_ action: ProposedAction) {
@@ -129,15 +139,24 @@ final class SelfImprovementCapability: AgentCapability {
         // auto-approves anything.
     }
 
-    private func proceedToPropose(summary: String, reasoning: String, prompt: String, riskLevel: RiskLevel) -> CapabilityOutcome {
-        let filename = Self.filename(from: summary)
+    private func proceedToPropose(
+        summary: String, reasoning: String, prompt: String, riskLevel: RiskLevel,
+        filename: String?, location: String?
+    ) -> CapabilityOutcome {
+        let resolvedFilename = FileSaveRequestExtractor.sanitizeFilename(filename ?? Self.defaultFilename(from: summary))
 
         guard PersistenceService.shared.isPermissionGranted(Self.filePermissionKey) else {
-            pendingPermissionRequest = PendingProposal(summary: summary, reasoning: reasoning, prompt: prompt, riskLevel: riskLevel, filename: filename)
+            pendingPermissionRequest = PendingProposal(
+                summary: summary, reasoning: reasoning, prompt: prompt, riskLevel: riskLevel,
+                filename: resolvedFilename, location: location
+            )
             return .reply("Θα χρειαστώ την άδειά σου να αποθηκεύω αρχεία, ώστε να σου δώσω το prompt έτοιμο σε αρχείο — μου τη δίνεις;")
         }
 
-        return .proposal(makeProposedAction(summary: summary, reasoning: reasoning, prompt: prompt, riskLevel: riskLevel, filename: filename))
+        return .proposal(makeProposedAction(
+            summary: summary, reasoning: reasoning, prompt: prompt, riskLevel: riskLevel,
+            filename: resolvedFilename, location: location
+        ))
     }
 
     /// Interprets the user's free-text reply to the consent question via
@@ -174,24 +193,29 @@ final class SelfImprovementCapability: AgentCapability {
 
         return .proposal(makeProposedAction(
             summary: pending.summary, reasoning: pending.reasoning, prompt: pending.prompt,
-            riskLevel: pending.riskLevel, filename: pending.filename
+            riskLevel: pending.riskLevel, filename: pending.filename, location: pending.location
         ))
     }
 
-    private func makeProposedAction(summary: String, reasoning: String, prompt: String, riskLevel: RiskLevel, filename: String) -> ProposedAction {
-        ProposedAction(
+    private func makeProposedAction(summary: String, reasoning: String, prompt: String, riskLevel: RiskLevel, filename: String, location: String?) -> ProposedAction {
+        let locationSuffix = location.map { " στο \"\($0)\"" } ?? ""
+
+        return ProposedAction(
             capabilityId: id,
             summary: "Πρόταση βελτίωσης κώδικα: \(summary)",
             reasoning: reasoning,
-            expectedImpact: "ΔΕΝ θα εκτελεστεί ή τροποποιηθεί τίποτα αυτόματα — μόνο θα αποθηκευτεί το prompt σε αρχείο \"\(filename)\", έτοιμο να το δώσεις εσύ στο Claude Code χειροκίνητα.",
+            expectedImpact: "ΔΕΝ θα εκτελεστεί ή τροποποιηθεί τίποτα αυτόματα — μόνο θα αποθηκευτεί το prompt σε αρχείο \"\(filename)\"\(locationSuffix), έτοιμο να το δώσεις εσύ στο Claude Code χειροκίνητα.",
             riskLevel: riskLevel,
             payload: prompt,
             filename: filename,
-            location: nil
+            location: location
         )
     }
 
-    private static func filename(from summary: String) -> String {
+    /// Base filename (no `.txt`, added later by
+    /// `FileSaveRequestExtractor.sanitizeFilename`) used only when the
+    /// user didn't explicitly name the file themselves.
+    private static func defaultFilename(from summary: String) -> String {
         let words = summary
             .lowercased()
             .folding(options: .diacriticInsensitive, locale: Locale(identifier: "el"))
@@ -201,7 +225,7 @@ final class SelfImprovementCapability: AgentCapability {
             .joined(separator: "-")
 
         let base = words.isEmpty ? "travis-self-improvement" : "travis-fix-\(words)"
-        return "\(base)-\(Int(Date().timeIntervalSince1970)).txt"
+        return "\(base)-\(Int(Date().timeIntervalSince1970))"
     }
 
     private static func parseDecision(from text: String) -> (isGenuine: Bool, summary: String?, reasoning: String?, riskLevel: String?, claudeCodePrompt: String?, reply: String?)? {

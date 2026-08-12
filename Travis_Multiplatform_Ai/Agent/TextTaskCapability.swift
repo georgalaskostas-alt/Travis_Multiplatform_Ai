@@ -72,14 +72,10 @@ final class TextTaskCapability: AgentCapability {
         - "save_file": ρητό αίτημα να γραφτεί κείμενο ΚΑΙ να αποθηκευτεί σε αρχείο (π.χ. "γράψε το και αποθήκευσέ το", "φτιάξε μου αρχείο με...", "θέλω ένα αρχείο με...").
         - "revoke_file_permission": ρητή δήλωση ότι ο χρήστης αφαιρεί/ανακαλεί την άδεια που είχε δώσει στον TRAVIS να αποθηκεύει αρχεία (π.χ. "δεν έχεις πια άδεια να αποθηκεύεις", "ανάκαλεσε την άδεια αποθήκευσης αρχείων").
 
-        Αν είναι "save_file" ΚΑΙ ο χρήστης ανέφερε ρητά συγκεκριμένο όνομα αρχείου στην εντολή του (π.χ. "αποθήκευσέ το με όνομα Χ"), βάλε αυτό το όνομα στο πεδίο "filename" (χωρίς κατάληξη .txt). Αν δεν ανέφερε όνομα, το "filename" πρέπει να είναι null — ΜΗΝ επινοήσεις όνομα μόνος σου.
-
-        Αν είναι "save_file" ΚΑΙ ο χρήστης ανέφερε ρητά μια τοποθεσία αποθήκευσης (π.χ. "στο desktop", "στα Documents", ή ένα συγκεκριμένο path), βάλε αυτή την τοποθεσία στο πεδίο "location" ακριβώς όπως την περιέγραψε. Αν δεν ανέφερε τοποθεσία, το "location" πρέπει να είναι null — ΜΗΝ υποθέσεις τοποθεσία μόνος σου.
-
         ΣΗΜΑΝΤΙΚΟ: Οι άδειες αποθήκευσης αρχείων αποθηκεύονται μόνιμα σε βάση δεδομένων, ανεξάρτητα από τη συνομιλία ή το session — ΠΟΤΕ μην απαντήσεις (στο "content") ότι δεν έχεις πρόσβαση σε προηγούμενες συνομιλίες/ρυθμίσεις ή ότι "κάθε συνομιλία ξεκινά από μηδενική βάση". Αν κάτι πράγματι δεν είναι γνωστό, πες το συγκεκριμένα.
 
         Απάντησε ΑΠΟΚΛΕΙΣΤΙΚΑ με ένα JSON object, χωρίς κανένα άλλο κείμενο, markdown ή εξήγηση πριν ή μετά, ακριβώς σε αυτή τη μορφή (το "content" μπορεί να είναι κενό string αν kind είναι "revoke_file_permission"):
-        {"kind": "reply, save_file, ή revoke_file_permission", "filename": "το όνομα αρχείου ή null", "location": "η τοποθεσία αποθήκευσης ή null", "content": "η απάντηση (αν reply) ή το πλήρες κείμενο προς αποθήκευση (αν save_file), στα ελληνικά"}
+        {"kind": "reply, save_file, ή revoke_file_permission", "content": "η απάντηση (αν reply) ή το πλήρες κείμενο προς αποθήκευση (αν save_file), στα ελληνικά"}
         """
 
         let raw = try await aiService.generateText(prompt: prompt)
@@ -96,13 +92,14 @@ final class TextTaskCapability: AgentCapability {
             return .reply("Εντάξει — ανακάλεσα την άδεια αποθήκευσης αρχείων. Θα σε ξαναρωτήσω πριν αποθηκεύσω κάτι.")
 
         case "save_file":
-            guard let filename = decision.filename, !filename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let extraction = try await FileSaveRequestExtractor.extract(from: command, aiService: aiService)
+            guard let filename = extraction.filename, !filename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 pendingContent = decision.content
                 pendingOriginalCommand = command
-                pendingLocation = decision.location
+                pendingLocation = extraction.location
                 return .reply("Τι όνομα να δώσω στο αρχείο, και πού να το αποθηκεύσω;")
             }
-            return proceedToSaveFile(command: command, content: decision.content, filename: filename, location: decision.location)
+            return proceedToSaveFile(command: command, content: decision.content, filename: filename, location: extraction.location)
 
         default:
             return .reply(decision.content)
@@ -173,7 +170,7 @@ final class TextTaskCapability: AgentCapability {
     }
 
     private func makeProposedAction(command: String, content: String, filename: String, location: String?) -> ProposedAction {
-        let sanitized = Self.sanitizeFilename(filename)
+        let sanitized = FileSaveRequestExtractor.sanitizeFilename(filename)
         let alreadyExists = Self.fileAlreadyExists(named: sanitized)
         let locationSuffix = location.map { " στο \"\($0)\"" } ?? ""
 
@@ -216,7 +213,7 @@ final class TextTaskCapability: AgentCapability {
         return FileManager.default.fileExists(atPath: documentsURL.appendingPathComponent(filename).path)
     }
 
-    private static func parseDecision(from text: String) -> (kind: String, filename: String?, location: String?, content: String)? {
+    private static func parseDecision(from text: String) -> (kind: String, content: String)? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard
@@ -234,22 +231,6 @@ final class TextTaskCapability: AgentCapability {
             let content = object["content"] as? String
         else { return nil }
 
-        return (kind, object["filename"] as? String, object["location"] as? String, content)
-    }
-
-    private static func sanitizeFilename(_ raw: String) -> String {
-        var name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        name = name.components(separatedBy: CharacterSet(charactersIn: "/\\")).joined()
-        name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if name.isEmpty {
-            name = "travis-text-\(Int(Date().timeIntervalSince1970))"
-        }
-
-        if !name.lowercased().hasSuffix(".txt") {
-            name += ".txt"
-        }
-
-        return name
+        return (kind, content)
     }
 }
