@@ -106,7 +106,15 @@ final class SelfImprovementCapability: AgentCapability {
         }
         """
 
-        let raw = try await aiService.generateText(prompt: prompt, maxTokens: 2048)
+        // maxTokens raised from the original 2048: the grounding-context
+        // instructions above (real filenames/patterns, investigate-first
+        // guidance) made the required claudeCodePrompt noticeably longer
+        // — Greek, multi-paragraph, numbered-steps text easily exceeds
+        // 2048 tokens, which was silently truncating the JSON mid-string
+        // and making the whole response fail to parse (see parseDecision
+        // below), falling through to .reply(raw) instead of ever reaching
+        // a proposal.
+        let raw = try await aiService.generateText(prompt: prompt, maxTokens: 4096)
 
         guard let decision = Self.parseDecision(from: raw) else {
             return .reply(raw)
