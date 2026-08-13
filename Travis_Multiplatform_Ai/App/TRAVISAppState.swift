@@ -247,9 +247,26 @@ final class TRAVISAppState {
         refreshTradingMandates()
     }
 
+    /// Shared save-confirmation point for every capability that can end
+    /// in writing generated text to a file (currently `TextTaskCapability`
+    /// and `SelfImprovementCapability`, both via `ChatView`'s generic
+    /// Approve button) — deliberately the only place this happens, so
+    /// there's one confirmation message shape instead of each capability
+    /// composing its own.
+    ///
+    /// Sets `lastResponseSummary` in addition to the chat message: that
+    /// status line renders unconditionally below the orb, unlike chat
+    /// messages, which `ChatView.timelineItems` hides while voice mode is
+    /// on (role == .assistant messages are suppressed there so TRAVIS's
+    /// spoken replies aren't also shown as text). A save/failure outcome
+    /// isn't a conversational reply — it's a status event the user should
+    /// always be able to see regardless of voice mode, so it isn't left
+    /// dependent on that filter.
     func saveGeneratedText(_ text: String, filename: String? = nil, location: String? = nil, capabilityId: String) {
         guard let resolved = FileLocationService.shared.resolveSaveDirectory(for: location) else {
-            addAssistantMessage("Δεν ήταν δυνατή η αποθήκευση του αρχείου — δεν δόθηκε πρόσβαση στον φάκελο.")
+            let message = "Δεν ήταν δυνατή η αποθήκευση του αρχείου — δεν δόθηκε πρόσβαση στον φάκελο."
+            addAssistantMessage(message)
+            lastResponseSummary = message
             return
         }
         defer { resolved.stopAccessing() }
@@ -261,8 +278,11 @@ final class TRAVISAppState {
             try text.write(to: fileURL, atomically: true, encoding: .utf8)
             PersistenceService.shared.saveFile(filename: resolvedFilename, path: fileURL.path, capabilityId: capabilityId)
             addAssistantMessage("Το κείμενο αποθηκεύτηκε: \(fileURL.path)")
+            lastResponseSummary = "Αποθηκεύτηκε: \(resolvedFilename)"
         } catch {
-            addAssistantMessage("Αποτυχία αποθήκευσης: \(error.localizedDescription)")
+            let message = "Αποτυχία αποθήκευσης: \(error.localizedDescription)"
+            addAssistantMessage(message)
+            lastResponseSummary = message
         }
     }
 }
