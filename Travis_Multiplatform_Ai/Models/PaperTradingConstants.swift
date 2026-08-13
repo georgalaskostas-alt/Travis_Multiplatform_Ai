@@ -1,10 +1,12 @@
 import Foundation
 
-/// Central, tunable constants for the paper-trading risk model used by
-/// `CryptoTradingCapability`. Every number here governs simulated trades
-/// only — there is no real exchange account or real money anywhere in
-/// this capability. A live/testnet mode is an explicit future step that
-/// requires separate, deliberate approval; it does not exist yet.
+/// Central, tunable constants for the trading risk model used by
+/// `CryptoTradingCapability` — identical for both `.paper` and
+/// `.testnet` mode (see `TradingMode`), so risk sizing/stop-loss/circuit
+/// breaker behave the same regardless of which one is active. Neither
+/// mode has a real exchange account or real money at risk. A live mode
+/// is an explicit future step that requires separate, deliberate
+/// approval; it does not exist yet.
 enum PaperTradingConstants {
     /// Starting simulated cash balance for the paper account (USDT).
     static let startingBalance: Double = 10_000

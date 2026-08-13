@@ -259,12 +259,16 @@ final class PersistenceService {
     }
 
     @discardableResult
-    func openPaperPosition(asset: String, quantity: Double, entryPrice: Double, stopLossPrice: Double) -> PersistedPaperPosition {
-        let account = paperAccount()
-        account.cashBalance -= quantity * entryPrice
-        account.lastModifiedAt = Date()
+    func openPaperPosition(asset: String, quantity: Double, entryPrice: Double, stopLossPrice: Double, mode: TradingMode) -> PersistedPaperPosition {
+        // Testnet funds live on Binance's testnet servers, not in our
+        // local cash balance — only a .paper open/close ever touches it.
+        if mode == .paper {
+            let account = paperAccount()
+            account.cashBalance -= quantity * entryPrice
+            account.lastModifiedAt = Date()
+        }
 
-        let position = PersistedPaperPosition(asset: asset, quantity: quantity, entryPrice: entryPrice, stopLossPrice: stopLossPrice)
+        let position = PersistedPaperPosition(asset: asset, quantity: quantity, entryPrice: entryPrice, stopLossPrice: stopLossPrice, mode: mode.rawValue)
         context.insert(position)
         try? context.save()
         return position
@@ -280,24 +284,35 @@ final class PersistenceService {
         position.exitPrice = exitPrice
         position.realizedPnL = realizedPnL
 
-        let account = paperAccount()
-        account.cashBalance += position.quantity * exitPrice
-        account.lastModifiedAt = Date()
+        // Mode is read from the position itself (not passed in) so this
+        // can never mismatch what open actually recorded.
+        if position.mode == TradingMode.paper.rawValue {
+            let account = paperAccount()
+            account.cashBalance += position.quantity * exitPrice
+            account.lastModifiedAt = Date()
+        }
         try? context.save()
         return realizedPnL
     }
 
-    /// The single open position for `asset`, if any — used to resolve
-    /// "close my position in X" requests.
-    func openPaperPosition(for asset: String) -> PersistedPaperPosition? {
+    /// The single open position for `asset` in `mode`, if any — used to
+    /// resolve "close my position in X" requests. Mode-scoped so a paper
+    /// and a testnet position for the same asset (a realistic scenario
+    /// once both exist) are never confused for one another.
+    func openPaperPosition(for asset: String, mode: TradingMode) -> PersistedPaperPosition? {
+        let modeRaw = mode.rawValue
         let descriptor = FetchDescriptor<PersistedPaperPosition>(
-            predicate: #Predicate { $0.asset == asset && $0.closedAt == nil }
+            predicate: #Predicate { $0.asset == asset && $0.closedAt == nil && $0.mode == modeRaw }
         )
         return try? context.fetch(descriptor).first
     }
 
-    /// Sum (as a positive magnitude) of today's realized paper losses —
-    /// the basis for the daily loss-limit freeze.
+    /// Sum (as a positive magnitude) of today's realized losses across
+    /// BOTH paper and testnet positions — the basis for the daily
+    /// loss-limit freeze. Deliberately not mode-scoped: combining both
+    /// into one circuit breaker is the more conservative reading of
+    /// "risk management stays unchanged" than giving testnet its own
+    /// separate, larger effective daily budget.
     func todaysRealizedLoss() -> Double {
         let descriptor = FetchDescriptor<PersistedPaperPosition>(predicate: #Predicate { $0.closedAt != nil })
         let closedPositions = (try? context.fetch(descriptor)) ?? []

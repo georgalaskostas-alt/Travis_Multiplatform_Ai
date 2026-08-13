@@ -1,10 +1,16 @@
 import Foundation
 import SwiftData
 
-/// A single simulated (paper) crypto position — opened and closed only
-/// through `PersistenceService`'s paper-trading methods, which also keep
-/// `PersistedPaperAccount.cashBalance` in sync. `closedAt == nil` means
-/// the position is still open.
+/// A single simulated (paper) or real-execution (testnet) crypto
+/// position — opened and closed only through `PersistenceService`'s
+/// paper-trading methods, which also keep `PersistedPaperAccount.cashBalance`
+/// in sync FOR PAPER-MODE POSITIONS ONLY (testnet funds live on Binance's
+/// testnet servers, not in our local balance). `closedAt == nil` means
+/// the position is still open. `mode` (`TradingMode.rawValue`) is what
+/// `PersistenceService` reads to decide whether to touch the local
+/// balance on open/close, and what `CryptoTradingCapability` uses to
+/// keep paper and testnet positions for the same asset from being
+/// treated as the same thing when closing.
 ///
 /// `.unique` on `id` is gone and every non-optional property has an
 /// inline default — required for CloudKit-backed SwiftData (see
@@ -23,6 +29,7 @@ final class PersistedPaperPosition {
     var closedAt: Date?
     var exitPrice: Double?
     var realizedPnL: Double?
+    var mode: String = TradingMode.paper.rawValue
 
     init(
         id: UUID = UUID(),
@@ -30,7 +37,8 @@ final class PersistedPaperPosition {
         quantity: Double,
         entryPrice: Double,
         stopLossPrice: Double,
-        openedAt: Date = Date()
+        openedAt: Date = Date(),
+        mode: String = TradingMode.paper.rawValue
     ) {
         self.id = id
         self.asset = asset
@@ -41,5 +49,6 @@ final class PersistedPaperPosition {
         self.closedAt = nil
         self.exitPrice = nil
         self.realizedPnL = nil
+        self.mode = mode
     }
 }

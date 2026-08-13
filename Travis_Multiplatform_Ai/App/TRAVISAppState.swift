@@ -30,6 +30,30 @@ final class TRAVISAppState {
         }
     }
 
+    /// Binance SPOT TESTNET credentials only — entirely separate Keychain
+    /// entries from any future live-trading key (see `KeychainService`).
+    /// Used exclusively by `BinanceTestnetTradingService`; never read for
+    /// anything resembling a real account.
+    var binanceTestnetAPIKey: String = "" {
+        didSet {
+            if binanceTestnetAPIKey.isEmpty {
+                KeychainService.shared.deleteBinanceTestnetAPIKey()
+            } else {
+                KeychainService.shared.saveBinanceTestnetAPIKey(binanceTestnetAPIKey)
+            }
+        }
+    }
+
+    var binanceTestnetAPISecret: String = "" {
+        didSet {
+            if binanceTestnetAPISecret.isEmpty {
+                KeychainService.shared.deleteBinanceTestnetAPISecret()
+            } else {
+                KeychainService.shared.saveBinanceTestnetAPISecret(binanceTestnetAPISecret)
+            }
+        }
+    }
+
     let approvalGate: ApprovalGateService
     let orchestrator: AgentOrchestrator
 
@@ -46,14 +70,21 @@ final class TRAVISAppState {
         self.approvalGate = approvalGate
         self.orchestrator = orchestrator
 
+        let cryptoTradingCapability = CryptoTradingCapability()
         orchestrator.register(TextTaskCapability())
-        orchestrator.register(CryptoTradingCapability())
+        orchestrator.register(cryptoTradingCapability)
         orchestrator.register(SelfImprovementCapability())
         orchestrator.onAssistantMessage = { [weak self] text in
             self?.addAssistantMessage(text)
         }
         orchestrator.onSessionRecall = { [weak self] sessionId in
             self?.viewSession(sessionId)
+        }
+        // Testnet order execution happens asynchronously after Approve
+        // (see CryptoTradingCapability.resolve) — this is how its result
+        // (fill confirmation or failure) reaches the chat once it's back.
+        cryptoTradingCapability.onTestnetExecutionUpdate = { [weak self] text in
+            self?.addAssistantMessage(text)
         }
 
         SpeechRecognitionService.shared.onFinalTranscript = { [weak self] text in
@@ -62,6 +93,12 @@ final class TRAVISAppState {
 
         if let savedKey = KeychainService.shared.anthropicAPIKey {
             self.anthropicAPIKey = savedKey
+        }
+        if let savedTestnetKey = KeychainService.shared.binanceTestnetAPIKey {
+            self.binanceTestnetAPIKey = savedTestnetKey
+        }
+        if let savedTestnetSecret = KeychainService.shared.binanceTestnetAPISecret {
+            self.binanceTestnetAPISecret = savedTestnetSecret
         }
 
         bootstrap()
