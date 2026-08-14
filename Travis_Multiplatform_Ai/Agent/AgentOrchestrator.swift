@@ -15,6 +15,14 @@ final class AgentOrchestrator {
     init(approvalGate: ApprovalGateService, sessionRecallService: SessionRecallService? = nil) {
         self.approvalGate = approvalGate
         self.sessionRecallService = sessionRecallService ?? SessionRecallService()
+
+        // Repository/source analysis is a core read-only capability of the
+        // orchestrator. Register it before AppState adds the generic text
+        // capability so source-grounded work cannot silently fall back to
+        // ungrounded conversational reasoning.
+        let repositoryContext = RepositoryContextCapability()
+        capabilities.append(repositoryContext)
+        approvalGate.register(capability: repositoryContext)
     }
 
     func register(_ capability: AgentCapability) {
