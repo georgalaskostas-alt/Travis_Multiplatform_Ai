@@ -110,6 +110,25 @@ struct PlanStep: Identifiable, Codable, Hashable {
     var status: PlanStepStatus
     var capabilityId: String?
     var dependencyStepIds: [UUID]
+
+    /// Observable conditions that must be true for the step
+    /// to be considered successfully completed.
+    var successCriteria: [String]
+
+    /// Planner-assigned risk classification.
+    /// This is informational input for the future Policy Engine.
+    /// It must never be treated as the final authority by itself.
+    var riskLevel: PlanStepRiskLevel
+
+    /// Whether execution must pause for explicit approval.
+    var requiresApproval: Bool
+
+    /// Whether this step is eligible for background execution.
+    var canRunInBackground: Bool
+
+    /// Coarse expected effort category from the planner.
+    var estimatedEffort: PlanStepEffort
+
     var attemptCount: Int
     var maxAttempts: Int
     var startedAt: Date?
@@ -125,6 +144,11 @@ struct PlanStep: Identifiable, Codable, Hashable {
         status: PlanStepStatus = .pending,
         capabilityId: String? = nil,
         dependencyStepIds: [UUID] = [],
+        successCriteria: [String] = [],
+        riskLevel: PlanStepRiskLevel = .low,
+        requiresApproval: Bool = false,
+        canRunInBackground: Bool = true,
+        estimatedEffort: PlanStepEffort = .short,
         attemptCount: Int = 0,
         maxAttempts: Int = 3,
         startedAt: Date? = nil,
@@ -139,6 +163,11 @@ struct PlanStep: Identifiable, Codable, Hashable {
         self.status = status
         self.capabilityId = capabilityId
         self.dependencyStepIds = dependencyStepIds
+        self.successCriteria = successCriteria
+        self.riskLevel = riskLevel
+        self.requiresApproval = requiresApproval
+        self.canRunInBackground = canRunInBackground
+        self.estimatedEffort = estimatedEffort
         self.attemptCount = attemptCount
         self.maxAttempts = maxAttempts
         self.startedAt = startedAt
@@ -146,6 +175,19 @@ struct PlanStep: Identifiable, Codable, Hashable {
         self.lastError = lastError
         self.resultSummary = resultSummary
     }
+}
+
+enum PlanStepRiskLevel: String, Codable, CaseIterable {
+    case low
+    case medium
+    case high
+    case critical
+}
+
+enum PlanStepEffort: String, Codable, CaseIterable {
+    case short
+    case medium
+    case long
 }
 
 enum PlanStepStatus: String, Codable, CaseIterable {
@@ -216,7 +258,12 @@ struct TaskEvent: Identifiable, Codable, Hashable {
     var message: String
     var createdAt: Date
 
-    init(id: UUID = UUID(), type: TaskEventType, message: String, createdAt: Date = Date()) {
+    init(
+        id: UUID = UUID(),
+        type: TaskEventType,
+        message: String,
+        createdAt: Date = Date()
+    ) {
         self.id = id
         self.type = type
         self.message = message

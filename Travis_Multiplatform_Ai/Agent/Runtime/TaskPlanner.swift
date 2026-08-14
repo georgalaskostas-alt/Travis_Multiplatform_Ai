@@ -27,7 +27,6 @@ enum TaskPlannerError: LocalizedError {
     }
 }
 
-
 /// AI-backed planner for long-lived TRAVIS tasks.
 ///
 /// The LLM proposes the plan.
@@ -40,6 +39,7 @@ enum TaskPlannerError: LocalizedError {
 /// - validates dependencies
 /// - limits plan complexity
 /// - creates internal UUIDs for execution steps
+/// - materializes planner metadata into typed PlanStep fields
 final class TaskPlanner {
 
     static let shared = TaskPlanner()
@@ -56,7 +56,6 @@ final class TaskPlanner {
     init(aiService: AIService = .shared) {
         self.aiService = aiService
     }
-
 
     // MARK: - Public API
 
@@ -91,7 +90,6 @@ final class TaskPlanner {
 
         return try materialize(proposal)
     }
-
 
     // MARK: - Prompt
 
@@ -212,7 +210,6 @@ final class TaskPlanner {
         """
     }
 
-
     // MARK: - Decode
 
     private func decodeProposal(
@@ -228,12 +225,10 @@ final class TaskPlanner {
         }
 
         do {
-
             return try JSONDecoder().decode(
                 PlannerProposal.self,
                 from: data
             )
-
         } catch {
 
             // TEMPORARY diagnostic logging.
@@ -255,7 +250,6 @@ final class TaskPlanner {
             throw TaskPlannerError.invalidStructuredResponse
         }
     }
-
 
     // MARK: - Validation + Materialization
 
@@ -283,7 +277,6 @@ final class TaskPlanner {
             throw TaskPlannerError.invalidStructuredResponse
         }
 
-
         // Generate trusted internal UUIDs ourselves.
         // Never trust UUIDs proposed by the LLM.
 
@@ -293,10 +286,9 @@ final class TaskPlanner {
             idsByOrder[step.order] = UUID()
         }
 
-
         let steps: [PlanStep] = try sorted.map { proposalStep in
 
-            // Validate dependencies.
+            // Validate dependencies before materializing the step.
 
             for dependency in proposalStep.dependsOn {
 
@@ -312,53 +304,42 @@ final class TaskPlanner {
                 }
             }
 
+            // Every executable step must define at least one
+            // observable success criterion.
 
-            // Planner metadata is preserved separately inside
-            // the step instructions for Runtime v1.
-            //
-            // Later we will promote these into first-class
-            // PlanStep properties.
-
-            let metadata = PlannerStepMetadata(
-                successCriteria: proposalStep.successCriteria,
-                risk: proposalStep.risk,
-                requiresApproval: proposalStep.requiresApproval,
-                canRunInBackground: proposalStep.canRunInBackground,
-                estimatedEffort: proposalStep.estimatedEffort
-            )
-
-
-            let metadataJSON = (
-                try? String(
-                    data: JSONEncoder().encode(metadata),
-                    encoding: .utf8
-                )
-            ) ?? "{}"
-
+            guard !proposalStep.successCriteria.isEmpty else {
+                throw TaskPlannerError.invalidStructuredResponse
+            }
 
             guard let stepID = idsByOrder[proposalStep.order] else {
                 throw TaskPlannerError.invalidStructuredResponse
             }
 
-
             return PlanStep(
                 id: stepID,
                 order: proposalStep.order,
                 title: proposalStep.title,
-                instructions:
-                    proposalStep.instructions
-                    + "\n\n[planner_metadata]\n"
-                    + metadataJSON,
+                instructions: proposalStep.instructions,
                 status: .pending,
                 capabilityId: proposalStep.capabilityId,
                 dependencyStepIds:
                     proposalStep.dependsOn.compactMap {
                         idsByOrder[$0]
                     },
+                successCriteria: proposalStep.successCriteria,
+                riskLevel:
+                    PlanStepRiskLevel(
+                        rawValue: proposalStep.risk.rawValue
+                    ) ?? .low,
+                requiresApproval: proposalStep.requiresApproval,
+                canRunInBackground: proposalStep.canRunInBackground,
+                estimatedEffort:
+                    PlanStepEffort(
+                        rawValue: proposalStep.estimatedEffort.rawValue
+                    ) ?? .short,
                 maxAttempts: 3
             )
         }
-
 
         return TaskPlan(
             summary: proposal.summary,
@@ -367,77 +348,40 @@ final class TaskPlanner {
     }
 }
 
-
 // MARK: - Planner Response DTOs
 
 private struct PlannerProposal: Decodable {
-
     let summary: String
     let steps: [PlannerStepProposal]
 }
 
-
 private struct PlannerStepProposal: Decodable {
-
     let order: Int
-
     let title: String
-
     let instructions: String
-
     let capabilityId: String?
-
     let dependsOn: [Int]
-
     let successCriteria: [String]
-
     let risk: PlannerRisk
-
     let requiresApproval: Bool
-
     let canRunInBackground: Bool
-
     let estimatedEffort: PlannerEffort
 }
 
-
-// MARK: - Planner Metadata
+// MARK: - Planner Types
 
 private enum PlannerRisk: String, Codable {
-
     case low
-
     case medium
-
     case high
-
     case critical
 }
 
-
 private enum PlannerEffort: String, Codable {
-
     case short
-
     case medium
-
     case long
 }
-
-
-private struct PlannerStepMetadata: Codable {
-
-    let successCriteria: [String]
-
-    let risk: PlannerRisk
-
-    let requiresApproval: Bool
-
-    let canRunInBackground: Bool
-
-    let estimatedEffort: PlannerEffort
-}
-
 
 // MARK: - JSON Cleanup
 
@@ -458,17 +402,14 @@ private extension String {
             value.removeFirst(3)
         }
 
-
         value = value.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
-
 
         if value.hasSuffix("```") {
 
             value.removeLast(3)
         }
-
 
         return value.trimmingCharacters(
             in: .whitespacesAndNewlines

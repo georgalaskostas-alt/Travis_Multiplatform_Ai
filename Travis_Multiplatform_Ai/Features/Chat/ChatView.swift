@@ -234,10 +234,13 @@ struct ChatView: View {
                     .background(Color.white.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .foregroundStyle(.white)
+                    .submitLabel(.send)
+                    .onSubmit {
+                        submitDraft()
+                    }
 
                 Button {
-                    appState.sendCommand(draft, source: .manual)
-                    draft = ""
+                    submitDraft()
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 28))
@@ -267,6 +270,21 @@ struct ChatView: View {
                 endPoint: .bottomTrailing
             )
         )
+    }
+
+    // MARK: - Chat Input
+
+    /// Sends the current manual draft using the same path for both
+    /// Return/Enter and the send button.
+    ///
+    /// Keeping one submit path prevents the keyboard and button behaviors
+    /// from drifting apart as command handling evolves.
+    private func submitDraft() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        appState.sendCommand(trimmed, source: .manual)
+        draft = ""
     }
 
     /// The single chronological chat — messages and approval cards
@@ -339,6 +357,7 @@ struct ChatView: View {
         VStack(alignment: message.role == .assistant ? .leading : .trailing, spacing: 4) {
             Text(message.text)
                 .foregroundStyle(.white)
+                .textSelection(.enabled)
                 .padding(10)
                 .background(message.role == .assistant ? Color.white.opacity(0.08) : Color.blue.opacity(0.4))
                 .clipShape(RoundedRectangle(cornerRadius: 14))
