@@ -23,6 +23,15 @@ final class AIService {
     private let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
     private let apiVersion = "2023-06-01"
     private let model = "claude-sonnet-4-6"
+    private let maxAttempts = 3
+
+    private lazy var session: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 180
+        configuration.timeoutIntervalForResource = 300
+        configuration.waitsForConnectivity = true
+        return URLSession(configuration: configuration)
+    }()
 
     private init() {}
 
@@ -33,6 +42,7 @@ final class AIService {
 
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
+        request.timeoutInterval = 180
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
@@ -46,21 +56,77 @@ final class AIService {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        var lastError: Error?
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AIServiceError.invalidResponse
+        for attempt in 1...maxAttempts {
+            do {
+                let (data, response) = try await session.data(for: request)
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw AIServiceError.invalidResponse
+                }
+
+                if (200..<300).contains(httpResponse.statusCode) {
+                    return try Self.textContent(from: data)
+                }
+
+                let apiError = AIServiceError.apiError(
+                    status: httpResponse.statusCode,
+                    type: Self.errorType(from: data),
+                    message: Self.errorMessage(from: data)
+                )
+
+                guard Self.isRetryableHTTPStatus(httpResponse.statusCode),
+                      attempt < maxAttempts
+                else {
+                    throw apiError
+                }
+
+                lastError = apiError
+                try await Self.backoff(afterAttempt: attempt)
+            } catch let urlError as URLError {
+                guard Self.isRetryable(urlError),
+                      attempt < maxAttempts
+                else {
+                    throw urlError
+                }
+
+                lastError = urlError
+                try await Self.backoff(afterAttempt: attempt)
+            } catch {
+                throw error
+            }
         }
 
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            throw AIServiceError.apiError(
-                status: httpResponse.statusCode,
-                type: Self.errorType(from: data),
-                message: Self.errorMessage(from: data)
-            )
-        }
+        throw lastError ?? AIServiceError.invalidResponse
+    }
 
-        return try Self.textContent(from: data)
+    private static func isRetryable(_ error: URLError) -> Bool {
+        switch error.code {
+        case .timedOut,
+             .networkConnectionLost,
+             .cannotConnectToHost,
+             .cannotFindHost,
+             .dnsLookupFailed,
+             .resourceUnavailable:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func isRetryableHTTPStatus(_ status: Int) -> Bool {
+        switch status {
+        case 408, 429, 500, 502, 503, 504:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func backoff(afterAttempt attempt: Int) async throws {
+        let seconds = min(pow(2.0, Double(attempt - 1)), 8.0)
+        try await Task.sleep(for: .seconds(seconds))
     }
 
     private static func textContent(from data: Data) throws -> String {

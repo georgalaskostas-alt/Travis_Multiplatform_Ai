@@ -218,6 +218,59 @@ final class TRAVISAppState {
 
         appendMessage(role: .user, text: trimmed)
 
+        // Runtime v1 planner smoke-test path.
+        // `/plan <goal>` produces a validated TaskPlan but does not execute it.
+        if trimmed.lowercased().hasPrefix("/plan ") {
+            let goal = String(trimmed.dropFirst("/plan ".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !goal.isEmpty else {
+                addAssistantMessage("Χρήση: /plan <στόχος>")
+                return
+            }
+
+            isProcessing = true
+            lastResponseSummary = "Δημιουργία execution plan…"
+
+            Task {
+                defer { isProcessing = false }
+
+                do {
+                    let capabilityIds = orchestrator.capabilities.map(\.id)
+                    let plan = try await TaskPlanner.shared.makePlan(
+                        for: goal,
+                        availableCapabilities: capabilityIds
+                    )
+
+                    let renderedSteps = plan.steps
+                        .sorted { $0.order < $1.order }
+                        .map { step in
+                            let dependencies = step.dependencyStepIds.isEmpty
+                                ? ""
+                                : " [dependencies: \(step.dependencyStepIds.count)]"
+                            let capability = step.capabilityId.map { " → \($0)" } ?? ""
+                            return "\(step.order). \(step.title)\(capability)\(dependencies)"
+                        }
+                        .joined(separator: "\n")
+
+                    let response = """
+                    PLAN v\(plan.version)
+                    \(plan.summary)
+
+                    \(renderedSteps)
+                    """
+
+                    addAssistantMessage(response)
+                    lastResponseSummary = "Plan: \(plan.steps.count) βήματα"
+                } catch {
+                    let message = "Planner error: \(error.localizedDescription)"
+                    addAssistantMessage(message)
+                    lastResponseSummary = message
+                }
+            }
+            return
+        }
+
         let command = TravisCommand(text: trimmed, source: source, status: .awaitingApproval)
         pendingCommands.append(command)
         lastResponseSummary = "Εντολή σε αναμονή: \(trimmed)"
