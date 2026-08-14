@@ -333,11 +333,23 @@ final class AgentTaskExecutor {
         )
     }
 
+    /// Builds the capability command from the canonical task state.
+    ///
+    /// Crucially, downstream steps receive the VERIFIED outputs of their
+    /// completed dependency steps. This makes the plan a real data-flow graph,
+    /// not merely an ordering graph. Synthesis/verification steps therefore
+    /// operate on actual prior evidence instead of relying on recent chat
+    /// history or reconstructing findings from scratch.
     private func executionCommand(task: AgentTask, step: PlanStep) -> String {
         let criteria = step.successCriteria
             .enumerated()
             .map { "\($0.offset + 1). \($0.element)" }
             .joined(separator: "\n")
+
+        let dependencyEvidence = dependencyEvidenceBlock(
+            task: task,
+            step: step
+        )
 
         return """
         Εκτελείς ένα συγκεκριμένο βήμα ενός ήδη εγκεκριμένου execution plan του TRAVIS.
@@ -351,14 +363,79 @@ final class AgentTaskExecutor {
         ΟΔΗΓΙΕΣ:
         \(step.instructions)
 
+        VERIFIED DEPENDENCY EVIDENCE:
+        \(dependencyEvidence)
+
         SUCCESS CRITERIA:
         \(criteria)
 
         Παρήγαγε το πραγματικό αποτέλεσμα αυτού του step.
+        Χρησιμοποίησε τα VERIFIED DEPENDENCY EVIDENCE ως canonical outputs των προηγούμενων βημάτων.
+        Μην παρουσιάσεις ως verified κάτι που δεν υπάρχει σε αυτά ή στο capability evidence που θα φορτωθεί τώρα.
         Μην ισχυριστείς ότι έκανες ενέργεια ή έλεγχο που δεν έγινε.
         Μην προχωρήσεις σε επόμενο step.
         Αν το ζητούμενο απαιτεί state-changing action, ακολούθησε το υπάρχον capability approval flow.
         """
+    }
+
+    private func dependencyEvidenceBlock(
+        task: AgentTask,
+        step: PlanStep
+    ) -> String {
+        guard !step.dependencyStepIds.isEmpty else {
+            return "None — this step has no dependencies."
+        }
+
+        let dependencyIds = Set(step.dependencyStepIds)
+        let dependencies = task.plan.steps
+            .filter { dependencyIds.contains($0.id) }
+            .sorted { $0.order < $1.order }
+
+        var sections: [String] = []
+        var totalCharacters = 0
+        let maxTotalCharacters = 80_000
+        let maxCharactersPerDependency = 14_000
+
+        for dependency in dependencies {
+            guard totalCharacters < maxTotalCharacters else {
+                break
+            }
+
+            guard dependency.status == .completed,
+                  let result = dependency.resultSummary,
+                  !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else {
+                sections.append(
+                    """
+                    --- DEPENDENCY STEP #\(dependency.order): \(dependency.title) ---
+                    No verified result is available.
+                    """
+                )
+                continue
+            }
+
+            let remaining = maxTotalCharacters - totalCharacters
+            let allowed = min(maxCharactersPerDependency, remaining)
+            let clipped = String(result.prefix(allowed))
+            let truncation = result.count > clipped.count
+                ? "\n[DEPENDENCY RESULT TRUNCATED BY EXECUTION CONTEXT BUDGET]"
+                : ""
+
+            sections.append(
+                """
+                --- VERIFIED DEPENDENCY STEP #\(dependency.order): \(dependency.title) ---
+                \(clipped)\(truncation)
+                """
+            )
+
+            totalCharacters += clipped.count
+        }
+
+        if sections.isEmpty {
+            return "Dependencies exist, but no verified dependency output was available."
+        }
+
+        return sections.joined(separator: "\n\n")
     }
 }
 
