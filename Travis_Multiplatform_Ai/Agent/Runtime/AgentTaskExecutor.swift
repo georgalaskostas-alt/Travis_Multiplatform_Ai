@@ -59,12 +59,11 @@ struct AutonomousRunReport: Codable, Hashable {
     let nextStepLastError: String?
 }
 
-/// Executes validated AgentTask plan steps through the existing capability
-/// system. It never bypasses ApprovalGate and never trusts a capability's
-/// result as complete until it is checked against the step's success criteria.
 @MainActor
 @Observable
 final class AgentTaskExecutor {
+    static let runtimeFingerprint = "runtime-v1.6-grounded"
+
     private let runtime: AgentTaskRuntime
     private let orchestrator: AgentOrchestrator
     private let approvalGate: ApprovalGateService
@@ -136,7 +135,9 @@ final class AgentTaskExecutor {
             summary: "Executing step #\(step.order): \(step.title)",
             nextAction: "Run capability \(capabilityId)"
         )
-        onProgress?("Εκτελώ step #\(step.order): \(step.title)")
+
+        let trace = "[TRAVIS \(Self.runtimeFingerprint) | capability=\(capabilityId) | step=\(step.order)]"
+        onProgress?("\(trace)\nΕκτελώ step #\(step.order): \(step.title)")
 
         do {
             let outcome = try await capability.handle(
@@ -180,6 +181,7 @@ final class AgentTaskExecutor {
 
                 lastExecutionSummary = checkpointSummary
                 onProgress?("""
+                \(trace)
                 ✅ Step #\(step.order) ολοκληρώθηκε και επαληθεύτηκε.
                 \(text)
                 """)
@@ -190,7 +192,7 @@ final class AgentTaskExecutor {
                 approvalGate.submit(action)
                 runtime.markStepWaitingForApproval(taskId: taskId, stepId: step.id)
 
-                let message = "🔐 Step #\(step.order) δημιούργησε ενέργεια που απαιτεί έγκριση."
+                let message = "\(trace)\n🔐 Step #\(step.order) δημιούργησε ενέργεια που απαιτεί έγκριση."
                 lastExecutionSummary = message
                 onProgress?(message)
                 return step
@@ -199,8 +201,6 @@ final class AgentTaskExecutor {
                 throw AgentTaskExecutorError.emptyCapabilityResult
             }
         } catch {
-            // Failed verification may already have transitioned the step back
-            // to pending/failed. Only mutate again if it is still running.
             if let latestTask = runtime.task(id: taskId),
                let latestStep = latestTask.plan.steps.first(where: { $0.id == step.id }),
                latestStep.status == .running {
@@ -212,18 +212,11 @@ final class AgentTaskExecutor {
             }
 
             lastExecutionSummary = error.localizedDescription
-            onProgress?("❌ Step #\(step.order) απέτυχε: \(error.localizedDescription)")
+            onProgress?("\(trace)\n❌ Step #\(step.order) απέτυχε: \(error.localizedDescription)")
             throw error
         }
     }
 
-    /// Runs continuously until a real blocker/terminal state is reached.
-    ///
-    /// `maxStepsPerCycle` is treated as a minimum requested budget. Runtime
-    /// then expands it to cover the plan's legitimate retry envelope
-    /// (`plan steps × maxRetriesPerStep`) and applies a hard ceiling of 60
-    /// attempts. This prevents ordinary plans from stopping merely because
-    /// they contain more than eight steps while still preventing runaway loops.
     func executeUntilBlocked(
         taskId: UUID,
         recentHistory: [ChatMessage] = [],
@@ -333,13 +326,6 @@ final class AgentTaskExecutor {
         )
     }
 
-    /// Builds the capability command from the canonical task state.
-    ///
-    /// Crucially, downstream steps receive the VERIFIED outputs of their
-    /// completed dependency steps. This makes the plan a real data-flow graph,
-    /// not merely an ordering graph. Synthesis/verification steps therefore
-    /// operate on actual prior evidence instead of relying on recent chat
-    /// history or reconstructing findings from scratch.
     private func executionCommand(task: AgentTask, step: PlanStep) -> String {
         let criteria = step.successCriteria
             .enumerated()
@@ -352,6 +338,9 @@ final class AgentTaskExecutor {
         )
 
         return """
+        RUNTIME FINGERPRINT:
+        \(Self.runtimeFingerprint)
+
         Εκτελείς ένα συγκεκριμένο βήμα ενός ήδη εγκεκριμένου execution plan του TRAVIS.
 
         ΣΥΝΟΛΙΚΟΣ ΣΤΟΧΟΣ:
@@ -423,7 +412,7 @@ final class AgentTaskExecutor {
 
             sections.append(
                 """
-                --- VERIFIED DEPENDENCY STEP #\(dependency.order): \(dependency.title) ---
+                --- DEPENDENCY STEP #\(dependency.order): \(dependency.title) ---
                 \(clipped)\(truncation)
                 """
             )
@@ -431,15 +420,12 @@ final class AgentTaskExecutor {
             totalCharacters += clipped.count
         }
 
-        if sections.isEmpty {
-            return "Dependencies exist, but no verified dependency output was available."
-        }
-
-        return sections.joined(separator: "\n\n")
+        return sections.isEmpty
+            ? "No completed dependency evidence is available."
+            : sections.joined(separator: "\n\n")
     }
 }
 
-/// Independent verification pass for an executed step.
 final class AgentStepVerifier {
     private let aiService: AIService
 
