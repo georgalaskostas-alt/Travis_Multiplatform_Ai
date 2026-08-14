@@ -1,5 +1,19 @@
 import Foundation
 
+enum RepositoryGroundingError: LocalizedError {
+    case unknownSourcePaths([String])
+    case noLoadedSourceEvidence
+
+    var errorDescription: String? {
+        switch self {
+        case .unknownSourcePaths(let paths):
+            return "Repository analysis referenced unknown source paths: \(paths.joined(separator: ", "))."
+        case .noLoadedSourceEvidence:
+            return "Repository analysis did not cite any source file that was actually loaded as evidence."
+        }
+    }
+}
+
 @MainActor
 final class RepositoryContextCapability: AgentCapability {
     let id = "repository_context"
@@ -35,6 +49,10 @@ final class RepositoryContextCapability: AgentCapability {
 
         let snapshot = try await repositoryService.context(for: command)
 
+        let loadedEvidenceManifest = snapshot.loadedSourcePaths
+            .map { "- \($0)" }
+            .joined(separator: "\n")
+
         let prompt = """
         You are the repository-analysis component of TRAVIS.
 
@@ -49,13 +67,18 @@ final class RepositoryContextCapability: AgentCapability {
 
         GROUNDING RULES:
         - Analyze only the repository evidence supplied below.
-        - Do not claim you inspected files that are not included.
-        - Do not invent types, APIs, persistence, workers, tests, behavior, or capabilities.
+        - Do not claim you inspected files that are not included in LOADED EVIDENCE FILES.
+        - Do not invent filenames, directories, types, APIs, persistence, workers, tests, behavior, or capabilities.
         - Clearly separate verified observations from recommendations.
         - This capability is read-only. Do not claim code was modified.
         - You do not have access to local uncommitted changes.
-        - For every important finding, cite at least one concrete source path from the supplied files.
+        - For every important finding, cite at least one concrete path from LOADED EVIDENCE FILES.
         - Prefer evidence-backed findings over generic autonomous-agent advice.
+        - Never provide illustrative code as if it came from the repository.
+        - If evidence is insufficient, explicitly say that instead of filling the gap.
+
+        LOADED EVIDENCE FILES:
+        \(loadedEvidenceManifest)
 
         REPOSITORY TREE:
         \(snapshot.tree)
@@ -71,11 +94,70 @@ final class RepositoryContextCapability: AgentCapability {
             maxTokens: 5000
         )
 
+        try validateGrounding(
+            result,
+            snapshot: snapshot
+        )
+
         return .reply(result)
     }
 
     func resolve(_ action: ProposedAction) {
         // Read-only capability. It never produces state-changing proposals.
+    }
+
+    private func validateGrounding(
+        _ result: String,
+        snapshot: RepositoryContextSnapshot
+    ) throws {
+        let mentionedPaths = SourcePathExtractor.extract(from: result)
+
+        var unknownPaths: [String] = []
+        var hasLoadedEvidence = false
+
+        for candidate in mentionedPaths {
+            let normalized = candidate.trimmingCharacters(
+                in: CharacterSet(charactersIn: "`'\"()[]{}:,;")
+            )
+
+            if path(
+                normalized,
+                resolvesWithin: snapshot.loadedSourcePaths
+            ) {
+                hasLoadedEvidence = true
+            }
+
+            if !path(
+                normalized,
+                resolvesWithin: snapshot.repositoryPaths
+            ) {
+                unknownPaths.append(normalized)
+            }
+        }
+
+        let uniqueUnknown = Array(Set(unknownPaths)).sorted()
+
+        guard uniqueUnknown.isEmpty else {
+            throw RepositoryGroundingError.unknownSourcePaths(uniqueUnknown)
+        }
+
+        guard hasLoadedEvidence else {
+            throw RepositoryGroundingError.noLoadedSourceEvidence
+        }
+    }
+
+    private func path(
+        _ candidate: String,
+        resolvesWithin paths: [String]
+    ) -> Bool {
+        if paths.contains(candidate) {
+            return true
+        }
+
+        let suffix = "/\(candidate)"
+        return paths.contains { existing in
+            existing.hasSuffix(suffix)
+        }
     }
 }
 
@@ -84,6 +166,8 @@ struct RepositoryContextSnapshot {
     let branch: String
     let tree: String
     let sources: String
+    let repositoryPaths: [String]
+    let loadedSourcePaths: [String]
 }
 
 final class GitHubRepositoryContextService {
@@ -113,10 +197,19 @@ final class GitHubRepositoryContextService {
     }
 
     func context(for task: String) async throws -> RepositoryContextSnapshot {
-        let paths = try await fetchSwiftPaths()
-        let selected = select(paths: paths, task: task)
+        let repositoryPaths = try await fetchRepositoryPaths()
+
+        let swiftPaths = repositoryPaths.filter { path in
+            path.hasSuffix(".swift")
+        }
+
+        let selected = select(
+            paths: swiftPaths,
+            task: task
+        )
 
         var chunks: [String] = []
+        var loadedSourcePaths: [String] = []
         var totalCharacters = 0
 
         for path in selected {
@@ -144,6 +237,7 @@ final class GitHubRepositoryContextService {
                 """
             )
 
+            loadedSourcePaths.append(path)
             totalCharacters += clipped.count
         }
 
@@ -151,20 +245,22 @@ final class GitHubRepositoryContextService {
             throw URLError(.cannotDecodeContentData)
         }
 
-        let tree = paths
+        let tree = repositoryPaths
             .sorted()
-            .prefix(220)
+            .prefix(300)
             .joined(separator: "\n")
 
         return RepositoryContextSnapshot(
             repository: "\(owner)/\(repository)",
             branch: branch,
             tree: tree,
-            sources: chunks.joined(separator: "\n\n")
+            sources: chunks.joined(separator: "\n\n"),
+            repositoryPaths: repositoryPaths,
+            loadedSourcePaths: loadedSourcePaths
         )
     }
 
-    private func fetchSwiftPaths() async throws -> [String] {
+    private func fetchRepositoryPaths() async throws -> [String] {
         let allowed = CharacterSet(
             charactersIn:
                 "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
@@ -187,11 +283,13 @@ final class GitHubRepositoryContextService {
             from: data
         )
 
-        return tree.tree
-            .filter {
-                $0.type == "blob" && $0.path.hasSuffix(".swift")
+        return tree.tree.compactMap { item in
+            guard item.type == "blob" else {
+                return nil
             }
-            .map(\.path)
+
+            return item.path
+        }
     }
 
     private func fetchFile(path: String) async throws -> String {
@@ -275,25 +373,25 @@ final class GitHubRepositoryContextService {
 
         var result: [String] = []
 
-        for path in preferred {
-            if paths.contains(path) {
-                result.append(path)
+        for preferredPath in preferred {
+            if paths.contains(preferredPath) {
+                result.append(preferredPath)
             }
         }
 
-        let loweredTask = task.lowercased()
-        let rawTerms = loweredTask.components(
-            separatedBy: CharacterSet.alphanumerics.inverted
-        )
-
-        let terms = rawTerms.filter { term in
-            term.count >= 4
-        }
+        let terms = task
+            .lowercased()
+            .components(
+                separatedBy: CharacterSet.alphanumerics.inverted
+            )
+            .filter {
+                $0.count >= 4
+            }
 
         var ranked: [(path: String, score: Int)] = []
 
         for path in paths {
-            if result.contains(path) {
+            guard !result.contains(path) else {
                 continue
             }
 
@@ -323,27 +421,60 @@ final class GitHubRepositoryContextService {
             }
         }
 
-        ranked.sort { lhs, rhs in
-            if lhs.score == rhs.score {
-                return lhs.path < rhs.path
+        ranked.sort { left, right in
+            if left.score == right.score {
+                return left.path < right.path
             }
 
-            return lhs.score > rhs.score
+            return left.score > right.score
         }
 
         for item in ranked {
-            if result.count >= maxSelectedFiles {
+            guard result.count < maxSelectedFiles else {
                 break
             }
 
             result.append(item.path)
         }
 
-        if result.count > maxSelectedFiles {
-            return Array(result[0..<maxSelectedFiles])
+        return Array(result.prefix(maxSelectedFiles))
+    }
+}
+
+private enum SourcePathExtractor {
+    private static let pattern =
+        #"(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:swift|py|js|jsx|ts|tsx|json|ya?ml|toml|md|sh|pbxproj|xcconfig)"#
+
+    static func extract(from text: String) -> [String] {
+        guard let expression = try? NSRegularExpression(
+            pattern: pattern,
+            options: []
+        ) else {
+            return []
         }
 
-        return result
+        let fullRange = NSRange(
+            text.startIndex..<text.endIndex,
+            in: text
+        )
+
+        let matches = expression.matches(
+            in: text,
+            options: [],
+            range: fullRange
+        )
+
+        var paths: [String] = []
+
+        for match in matches {
+            guard let range = Range(match.range, in: text) else {
+                continue
+            }
+
+            paths.append(String(text[range]))
+        }
+
+        return paths
     }
 }
 
