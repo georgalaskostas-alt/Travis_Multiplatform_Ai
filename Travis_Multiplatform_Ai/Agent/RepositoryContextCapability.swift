@@ -1,15 +1,21 @@
 import Foundation
 
 enum RepositoryGroundingError: LocalizedError {
-    case unknownSourcePaths([String])
+    case invalidStructuredResponse
+    case invalidEvidenceReferences([String])
     case noLoadedSourceEvidence
+    case rawPathReferenceForbidden([String])
 
     var errorDescription: String? {
         switch self {
-        case .unknownSourcePaths(let paths):
-            return "Repository analysis referenced unknown source paths: \(paths.joined(separator: ", "))."
+        case .invalidStructuredResponse:
+            return "Repository analysis returned invalid structured JSON."
+        case .invalidEvidenceReferences(let references):
+            return "Repository analysis referenced invalid evidence IDs: \(references.joined(separator: ", "))."
         case .noLoadedSourceEvidence:
-            return "Repository analysis did not cite any source file that was actually loaded as evidence."
+            return "Repository analysis did not reference any loaded source evidence."
+        case .rawPathReferenceForbidden(let paths):
+            return "Repository analysis wrote source paths directly instead of using evidence IDs: \(paths.joined(separator: ", "))."
         }
     }
 }
@@ -38,6 +44,12 @@ enum RepositoryTransportError: LocalizedError {
     }
 }
 
+/// Read-only, repository-grounded analysis capability.
+///
+/// Grounding v2 deliberately does NOT let the model cite filenames directly.
+/// Loaded source files are exposed as opaque evidence IDs (E1, E2, ...).
+/// The model returns structured JSON containing only those IDs, and Swift maps
+/// them back to exact repository paths after deterministic validation.
 @MainActor
 final class RepositoryContextCapability: AgentCapability {
     let id = "repository_context"
@@ -55,6 +67,7 @@ final class RepositoryContextCapability: AgentCapability {
 
     private let aiService: AIService
     private let repositoryService: GitHubRepositoryContextService
+    private let maxAnalysisAttempts = 3
 
     init(
         aiService: AIService = .shared,
@@ -72,12 +85,85 @@ final class RepositoryContextCapability: AgentCapability {
         defer { status = .idle }
 
         let snapshot = try await repositoryService.context(for: command)
+        let evidenceCatalog = RepositoryEvidenceCatalog(paths: snapshot.loadedSourcePaths)
 
-        let loadedEvidenceManifest = snapshot.loadedSourcePaths
-            .map { "- \($0)" }
+        var correctiveFeedback: String?
+        var lastError: Error?
+
+        for attempt in 1...maxAnalysisAttempts {
+            let prompt = buildPrompt(
+                command: command,
+                snapshot: snapshot,
+                evidenceCatalog: evidenceCatalog,
+                correctiveFeedback: correctiveFeedback
+            )
+
+            do {
+                let raw = try await aiService.generateText(
+                    prompt: prompt,
+                    maxTokens: 5000
+                )
+
+                let response = try decodeStructuredResponse(raw)
+                try validateStructuredResponse(
+                    response,
+                    raw: raw,
+                    catalog: evidenceCatalog
+                )
+
+                let rendered = render(
+                    response,
+                    catalog: evidenceCatalog
+                )
+
+                return .reply(rendered)
+            } catch {
+                lastError = error
+
+                guard attempt < maxAnalysisAttempts else {
+                    throw error
+                }
+
+                correctiveFeedback = correctiveFeedbackForRetry(
+                    error: error,
+                    catalog: evidenceCatalog
+                )
+            }
+        }
+
+        throw lastError ?? RepositoryGroundingError.invalidStructuredResponse
+    }
+
+    func resolve(_ action: ProposedAction) {
+        // Read-only capability. It never produces state-changing proposals.
+    }
+
+    // MARK: - Structured grounding
+
+    private func buildPrompt(
+        command: String,
+        snapshot: RepositoryContextSnapshot,
+        evidenceCatalog: RepositoryEvidenceCatalog,
+        correctiveFeedback: String?
+    ) -> String {
+        let evidenceManifest = evidenceCatalog.entries
+            .map { "\($0.id) = \($0.path)" }
             .joined(separator: "\n")
 
-        let prompt = """
+        let retryBlock: String
+        if let correctiveFeedback {
+            retryBlock = """
+
+            PREVIOUS ATTEMPT WAS REJECTED BY DETERMINISTIC VALIDATION:
+            \(correctiveFeedback)
+
+            Correct the response. Do not repeat the rejected behavior.
+            """
+        } else {
+            retryBlock = ""
+        }
+
+        return """
         You are the repository-analysis component of TRAVIS.
 
         TASK:
@@ -89,84 +175,286 @@ final class RepositoryContextCapability: AgentCapability {
         BRANCH:
         \(snapshot.branch)
 
-        GROUNDING RULES:
-        - Analyze only the repository evidence supplied below.
-        - Do not claim you inspected files that are not included in LOADED EVIDENCE FILES.
-        - Do not invent filenames, directories, types, APIs, persistence, workers, tests, behavior, or capabilities.
-        - Clearly separate verified observations from recommendations.
-        - This capability is read-only. Do not claim code was modified.
-        - You do not have access to local uncommitted changes.
-        - For every important finding, cite at least one concrete path from LOADED EVIDENCE FILES.
-        - Prefer evidence-backed findings over generic autonomous-agent advice.
-        - Never provide illustrative code as if it came from the repository.
-        - If evidence is insufficient, explicitly say that instead of filling the gap.
+        STRICT GROUNDING CONTRACT:
+        - Analyze only the evidence supplied below.
+        - Evidence files are identified ONLY by opaque IDs E1, E2, E3, etc.
+        - NEVER write a filename, extension, directory path, or repository path inside any JSON text field.
+        - NEVER invent a new evidence ID.
+        - evidenceRefs may contain ONLY IDs from ALLOWED EVIDENCE IDS.
+        - Every substantive observation must have at least one evidenceRef.
+        - Every finding must have at least one evidenceRef.
+        - If evidence is insufficient, state that in limitations instead of guessing.
+        - Do not invent types, APIs, persistence, workers, tests, behavior, capabilities, entry points, or configuration.
+        - Recommendations may describe proposed architecture, but must never be presented as existing code.
+        - Return ONLY syntactically valid JSON. No markdown fences and no commentary.
 
-        LOADED EVIDENCE FILES:
-        \(loadedEvidenceManifest)
+        ALLOWED EVIDENCE IDS:
+        \(evidenceManifest)
 
-        REPOSITORY TREE:
+        REPOSITORY TREE FOR ORIENTATION ONLY:
         \(snapshot.tree)
 
-        SELECTED SOURCE FILES:
-        \(snapshot.sources)
+        LOADED SOURCE EVIDENCE:
+        \(evidenceCatalog.annotatedSources(snapshot.sources))
 
-        Produce the requested technical analysis.
+        REQUIRED JSON SCHEMA:
+        {
+          "summary": "concise evidence-grounded result",
+          "observations": [
+            {
+              "statement": "verified observation without any filename/path text",
+              "evidenceRefs": ["E1"]
+            }
+          ],
+          "findings": [
+            {
+              "title": "finding title without any filename/path text",
+              "severity": "critical|high|medium|low|null",
+              "explanation": "what the evidence demonstrates",
+              "impact": "technical impact or null",
+              "recommendation": "specific remediation or null",
+              "evidenceRefs": ["E1", "E2"]
+            }
+          ],
+          "limitations": [
+            "anything that could not be verified from supplied evidence"
+          ]
+        }
+
+        Rules:
+        - observations may be empty only if findings is non-empty
+        - findings may be empty for inspection/mapping steps
+        - the combined observations + findings must contain at least one evidence reference
+        - severity must be one of critical, high, medium, low, or null
+        - do not include source excerpts unless essential; describe behavior precisely instead
+        \(retryBlock)
         """
-
-        let result = try await aiService.generateText(
-            prompt: prompt,
-            maxTokens: 5000
-        )
-
-        try validateGrounding(result, snapshot: snapshot)
-        return .reply(result)
     }
 
-    func resolve(_ action: ProposedAction) {
-        // Read-only capability. It never produces state-changing proposals.
-    }
+    private func decodeStructuredResponse(
+        _ raw: String
+    ) throws -> RepositoryStructuredResponse {
+        let cleaned = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .removingRepositoryJSONFence()
 
-    private func validateGrounding(
-        _ result: String,
-        snapshot: RepositoryContextSnapshot
-    ) throws {
-        let mentionedPaths = SourcePathExtractor.extract(from: result)
+        guard let data = cleaned.data(using: .utf8) else {
+            throw RepositoryGroundingError.invalidStructuredResponse
+        }
 
-        var unknownPaths: [String] = []
-        var hasLoadedEvidence = false
-
-        for candidate in mentionedPaths {
-            let normalized = candidate.trimmingCharacters(
-                in: CharacterSet(charactersIn: "`'\"()[]{}:,;")
+        do {
+            return try JSONDecoder().decode(
+                RepositoryStructuredResponse.self,
+                from: data
             )
+        } catch {
+            throw RepositoryGroundingError.invalidStructuredResponse
+        }
+    }
 
-            if path(normalized, resolvesWithin: snapshot.loadedSourcePaths) {
-                hasLoadedEvidence = true
-            }
-
-            if !path(normalized, resolvesWithin: snapshot.repositoryPaths) {
-                unknownPaths.append(normalized)
-            }
+    private func validateStructuredResponse(
+        _ response: RepositoryStructuredResponse,
+        raw: String,
+        catalog: RepositoryEvidenceCatalog
+    ) throws {
+        // The model is forbidden from emitting path-like strings at all.
+        // Exact paths are injected only after validation by Swift.
+        let directlyWrittenPaths = SourcePathExtractor.extract(from: raw)
+        if !directlyWrittenPaths.isEmpty {
+            throw RepositoryGroundingError.rawPathReferenceForbidden(
+                Array(Set(directlyWrittenPaths)).sorted()
+            )
         }
 
-        let uniqueUnknown = Array(Set(unknownPaths)).sorted()
+        let allReferences = response.observations.flatMap(\.evidenceRefs)
+            + response.findings.flatMap(\.evidenceRefs)
 
-        guard uniqueUnknown.isEmpty else {
-            throw RepositoryGroundingError.unknownSourcePaths(uniqueUnknown)
+        let invalidReferences = Array(
+            Set(allReferences.filter { !catalog.allowedIDs.contains($0) })
+        ).sorted()
+
+        guard invalidReferences.isEmpty else {
+            throw RepositoryGroundingError.invalidEvidenceReferences(
+                invalidReferences
+            )
         }
 
-        guard hasLoadedEvidence else {
+        guard !allReferences.isEmpty else {
             throw RepositoryGroundingError.noLoadedSourceEvidence
         }
-    }
 
-    private func path(_ candidate: String, resolvesWithin paths: [String]) -> Bool {
-        if paths.contains(candidate) {
-            return true
+        for observation in response.observations {
+            guard !observation.evidenceRefs.isEmpty else {
+                throw RepositoryGroundingError.noLoadedSourceEvidence
+            }
         }
 
-        let suffix = "/\(candidate)"
-        return paths.contains { $0.hasSuffix(suffix) }
+        for finding in response.findings {
+            guard !finding.evidenceRefs.isEmpty else {
+                throw RepositoryGroundingError.noLoadedSourceEvidence
+            }
+
+            if let severity = finding.severity {
+                guard RepositoryFindingSeverity(rawValue: severity.lowercased()) != nil else {
+                    throw RepositoryGroundingError.invalidStructuredResponse
+                }
+            }
+        }
+    }
+
+    private func correctiveFeedbackForRetry(
+        error: Error,
+        catalog: RepositoryEvidenceCatalog
+    ) -> String {
+        let allowed = catalog.entries
+            .map(\.id)
+            .joined(separator: ", ")
+
+        if let groundingError = error as? RepositoryGroundingError {
+            switch groundingError {
+            case .rawPathReferenceForbidden(let paths):
+                return "You wrote forbidden path-like strings: \(paths.joined(separator: ", ")). Do not write filenames or paths anywhere. Cite only evidence IDs: \(allowed)."
+            case .invalidEvidenceReferences(let references):
+                return "Invalid evidence IDs were used: \(references.joined(separator: ", ")). Allowed IDs are only: \(allowed)."
+            case .noLoadedSourceEvidence:
+                return "The response lacked evidence references. Every substantive observation/finding must cite at least one of: \(allowed)."
+            case .invalidStructuredResponse:
+                return "The response was not valid JSON matching the required schema. Return only the requested JSON object and use only evidence IDs: \(allowed)."
+            }
+        }
+
+        return "The previous response failed validation: \(error.localizedDescription). Return valid JSON and cite only these evidence IDs: \(allowed)."
+    }
+
+    private func render(
+        _ response: RepositoryStructuredResponse,
+        catalog: RepositoryEvidenceCatalog
+    ) -> String {
+        var sections: [String] = []
+
+        sections.append(response.summary)
+
+        if !response.observations.isEmpty {
+            var lines: [String] = ["VERIFIED OBSERVATIONS"]
+
+            for (index, observation) in response.observations.enumerated() {
+                let evidence = catalog.paths(for: observation.evidenceRefs)
+                    .map { "`\($0)`" }
+                    .joined(separator: ", ")
+
+                lines.append(
+                    "\(index + 1). \(observation.statement)\n   Evidence: \(evidence)"
+                )
+            }
+
+            sections.append(lines.joined(separator: "\n"))
+        }
+
+        if !response.findings.isEmpty {
+            var lines: [String] = ["FINDINGS"]
+
+            for (index, finding) in response.findings.enumerated() {
+                let severity = finding.severity?.uppercased() ?? "UNRANKED"
+                let evidence = catalog.paths(for: finding.evidenceRefs)
+                    .map { "`\($0)`" }
+                    .joined(separator: ", ")
+
+                var block = "\(index + 1). [\(severity)] \(finding.title)\n   \(finding.explanation)"
+
+                if let impact = finding.impact, !impact.isEmpty {
+                    block += "\n   Impact: \(impact)"
+                }
+
+                if let recommendation = finding.recommendation, !recommendation.isEmpty {
+                    block += "\n   Recommendation: \(recommendation)"
+                }
+
+                block += "\n   Evidence: \(evidence)"
+                lines.append(block)
+            }
+
+            sections.append(lines.joined(separator: "\n\n"))
+        }
+
+        if !response.limitations.isEmpty {
+            let limitations = response.limitations
+                .map { "- \($0)" }
+                .joined(separator: "\n")
+
+            sections.append("LIMITATIONS\n\(limitations)")
+        }
+
+        return sections.joined(separator: "\n\n")
+    }
+}
+
+// MARK: - Structured repository response
+
+private struct RepositoryStructuredResponse: Decodable {
+    let summary: String
+    let observations: [RepositoryObservation]
+    let findings: [RepositoryFinding]
+    let limitations: [String]
+}
+
+private struct RepositoryObservation: Decodable {
+    let statement: String
+    let evidenceRefs: [String]
+}
+
+private struct RepositoryFinding: Decodable {
+    let title: String
+    let severity: String?
+    let explanation: String
+    let impact: String?
+    let recommendation: String?
+    let evidenceRefs: [String]
+}
+
+private enum RepositoryFindingSeverity: String {
+    case critical
+    case high
+    case medium
+    case low
+}
+
+private struct RepositoryEvidenceCatalog {
+    struct Entry {
+        let id: String
+        let path: String
+    }
+
+    let entries: [Entry]
+    let allowedIDs: Set<String>
+
+    init(paths: [String]) {
+        self.entries = paths.enumerated().map { index, path in
+            Entry(id: "E\(index + 1)", path: path)
+        }
+        self.allowedIDs = Set(entries.map(\.id))
+    }
+
+    func paths(for references: [String]) -> [String] {
+        let requested = Set(references)
+        return entries
+            .filter { requested.contains($0.id) }
+            .map(\.path)
+    }
+
+    /// Replaces exact source-path headers with evidence IDs before the text is
+    /// sent to the model. The model can inspect content but is instructed to
+    /// cite only the opaque IDs in its response.
+    func annotatedSources(_ sources: String) -> String {
+        var value = sources
+
+        for entry in entries {
+            value = value.replacingOccurrences(
+                of: "===== FILE: \(entry.path) =====",
+                with: "===== EVIDENCE \(entry.id) ====="
+            )
+        }
+
+        return value
     }
 }
 
@@ -229,8 +517,6 @@ final class GitHubRepositoryContextService {
                 break
             }
 
-            // A missing/unreadable evidence file is skipped, but transport
-            // failures are no longer silently collapsed into -1011.
             let text: String
             do {
                 text = try await fetchFile(path: path)
@@ -371,7 +657,6 @@ final class GitHubRepositoryContextService {
                     reset: reset
                 )
 
-                // Retry only transient server/rate-limit responses.
                 if Self.isRetryable(status: http.statusCode), attempt < maxRequestAttempts {
                     lastError = error
                     let delay = UInt64(attempt * attempt)
@@ -383,8 +668,6 @@ final class GitHubRepositoryContextService {
             } catch {
                 lastError = error
 
-                // URL/network errors may be transient. RepositoryTransportError
-                // has already been classified above and should not be hidden.
                 if error is RepositoryTransportError {
                     throw error
                 }
@@ -511,4 +794,24 @@ private struct GitHubTreeItem: Decodable {
 
 private struct GitHubContentResponse: Decodable {
     let content: String
+}
+
+private extension String {
+    func removingRepositoryJSONFence() -> String {
+        var value = trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if value.hasPrefix("```json") {
+            value.removeFirst("```json".count)
+        } else if value.hasPrefix("```") {
+            value.removeFirst(3)
+        }
+
+        value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if value.hasSuffix("```") {
+            value.removeLast(3)
+        }
+
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
