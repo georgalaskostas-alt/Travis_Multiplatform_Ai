@@ -142,6 +142,11 @@ final class TaskPlanner {
 
         Never invent capabilities that are not present in AVAILABLE CAPABILITY IDS.
         If no available capability clearly matches a step, use null for capabilityId.
+        When repository_context is present in AVAILABLE CAPABILITY IDS, assign repository inspection,
+        source-code analysis, architecture review, runtime/codebase investigation, implementation review,
+        and any task whose correctness depends on the actual TRAVIS source tree to repository_context.
+        Do not assign those source-grounded tasks to text_task when repository_context is available.
+        Use text_task for reasoning or writing that does not require repository evidence.
 
         Return ONLY valid JSON.
         Do not use markdown fences.
