@@ -54,16 +54,17 @@ struct AutonomousRunReport: Codable, Hashable {
     let lastCheckpoint: String?
     let nextStepTitle: String?
     let failureReason: String?
+    let nextStepAttemptCount: Int?
+    let nextStepMaxAttempts: Int?
+    let nextStepLastError: String?
 }
 
 /// Executes validated AgentTask plan steps through the existing capability
 /// system. It never bypasses ApprovalGate and never trusts a capability's
-/// result as complete until the result is checked against the step's
-/// successCriteria by AgentStepVerifier.
+/// result as complete until it is checked against the step's success criteria.
 @MainActor
 @Observable
 final class AgentTaskExecutor {
-
     private let runtime: AgentTaskRuntime
     private let orchestrator: AgentOrchestrator
     private let approvalGate: ApprovalGateService
@@ -86,17 +87,11 @@ final class AgentTaskExecutor {
         self.verifier = verifier
     }
 
-    /// Executes exactly one currently runnable step.
-    ///
-    /// This method intentionally performs one step at a time. The later
-    /// scheduler/worker loop will repeatedly call it while respecting
-    /// budgets, pauses, approvals, background execution and checkpoints.
     @discardableResult
     func executeNextStep(
         taskId: UUID,
         recentHistory: [ChatMessage] = []
     ) async throws -> PlanStep? {
-
         guard let task = runtime.task(id: taskId) else {
             throw AgentTaskExecutorError.taskNotFound
         }
@@ -109,14 +104,8 @@ final class AgentTaskExecutor {
             throw AgentTaskExecutorError.noRunnableStep
         }
 
-        // The planner may flag a step as requiring approval, but the LLM
-        // itself never grants that approval. Stop before capability execution.
         if step.requiresApproval {
-            runtime.markStepWaitingForApproval(
-                taskId: taskId,
-                stepId: step.id
-            )
-
+            runtime.markStepWaitingForApproval(taskId: taskId, stepId: step.id)
             let message = "Το step #\(step.order) περιμένει έγκριση: \(step.title)"
             lastExecutionSummary = message
             onProgress?(message)
@@ -134,35 +123,24 @@ final class AgentTaskExecutor {
 
         guard let capability = orchestrator.capabilities.first(where: { $0.id == capabilityId }) else {
             let error = AgentTaskExecutorError.missingCapability(capabilityId)
-            runtime.markStepFailed(
-                taskId: taskId,
-                stepId: step.id,
-                error: error.localizedDescription
-            )
+            runtime.markStepFailed(taskId: taskId, stepId: step.id, error: error.localizedDescription)
             throw error
         }
 
         isExecuting = true
         defer { isExecuting = false }
 
-        runtime.markStepRunning(
-            taskId: taskId,
-            stepId: step.id
-        )
-
+        runtime.markStepRunning(taskId: taskId, stepId: step.id)
         runtime.checkpoint(
             taskId: taskId,
             summary: "Executing step #\(step.order): \(step.title)",
             nextAction: "Run capability \(capabilityId)"
         )
-
         onProgress?("Εκτελώ step #\(step.order): \(step.title)")
 
         do {
-            let command = executionCommand(task: task, step: step)
-
             let outcome = try await capability.handle(
-                command: command,
+                command: executionCommand(task: task, step: step),
                 recentHistory: recentHistory
             )
 
@@ -180,12 +158,7 @@ final class AgentTaskExecutor {
 
                 guard verification.passed else {
                     let reason = verification.reason
-                    runtime.markStepFailed(
-                        taskId: taskId,
-                        stepId: step.id,
-                        error: reason
-                    )
-
+                    runtime.markStepFailed(taskId: taskId, stepId: step.id, error: reason)
                     throw AgentTaskExecutorError.verificationFailed(reason)
                 }
 
@@ -206,44 +179,31 @@ final class AgentTaskExecutor {
                 )
 
                 lastExecutionSummary = checkpointSummary
-                onProgress?(
-                    """
-                    ✅ Step #\(step.order) ολοκληρώθηκε και επαληθεύτηκε.
-                    \(text)
-                    """
-                )
+                onProgress?("""
+                ✅ Step #\(step.order) ολοκληρώθηκε και επαληθεύτηκε.
+                \(text)
+                """)
 
                 return runtime.nextRunnableStep(taskId: taskId)
 
             case .proposal(let action):
-                // A capability-generated state-changing action enters the
-                // existing approval queue. The runtime pauses this step.
                 approvalGate.submit(action)
+                runtime.markStepWaitingForApproval(taskId: taskId, stepId: step.id)
 
-                runtime.markStepWaitingForApproval(
-                    taskId: taskId,
-                    stepId: step.id
-                )
-
-                let message =
-                    "🔐 Step #\(step.order) δημιούργησε ενέργεια που απαιτεί έγκριση."
-
+                let message = "🔐 Step #\(step.order) δημιούργησε ενέργεια που απαιτεί έγκριση."
                 lastExecutionSummary = message
                 onProgress?(message)
-
                 return step
 
             case .none:
                 throw AgentTaskExecutorError.emptyCapabilityResult
             }
-
         } catch {
-            // markStepFailed may already have been called for a failed
-            // verification. Avoid double-mutating a terminal failed step.
+            // Failed verification may already have transitioned the step back
+            // to pending/failed. Only mutate again if it is still running.
             if let latestTask = runtime.task(id: taskId),
                let latestStep = latestTask.plan.steps.first(where: { $0.id == step.id }),
                latestStep.status == .running {
-
                 runtime.markStepFailed(
                     taskId: taskId,
                     stepId: step.id,
@@ -257,62 +217,45 @@ final class AgentTaskExecutor {
         }
     }
 
-    /// Executes runnable steps continuously until the task reaches a natural
-    /// blocker/terminal state or the foreground cycle reaches its safety cap.
+    /// Runs continuously until a real blocker/terminal state is reached.
     ///
-    /// This is intentionally bounded. Durable multi-hour/day execution will
-    /// later re-enter this loop from the persistence/scheduler layer.
+    /// `maxStepsPerCycle` is treated as a minimum requested budget. Runtime
+    /// then expands it to cover the plan's legitimate retry envelope
+    /// (`plan steps × maxRetriesPerStep`) and applies a hard ceiling of 60
+    /// attempts. This prevents ordinary plans from stopping merely because
+    /// they contain more than eight steps while still preventing runaway loops.
     func executeUntilBlocked(
         taskId: UUID,
         recentHistory: [ChatMessage] = [],
         maxStepsPerCycle: Int = 8
     ) async throws -> AutonomousRunReport {
+        guard let initialTask = runtime.task(id: taskId) else {
+            throw AgentTaskExecutorError.taskNotFound
+        }
 
-        let safeLimit = max(1, min(maxStepsPerCycle, 20))
+        let retryBudgetPerStep = max(1, initialTask.budget.maxRetriesPerStep)
+        let planAttemptBudget = max(1, initialTask.plan.steps.count * retryBudgetPerStep)
+        let requestedBudget = max(1, maxStepsPerCycle)
+        let safeLimit = min(max(requestedBudget, planAttemptBudget), 60)
+
         var attempted = 0
 
         while attempted < safeLimit {
-
             guard let task = runtime.task(id: taskId) else {
                 throw AgentTaskExecutorError.taskNotFound
             }
 
             switch task.status {
             case .completed:
-                return makeRunReport(
-                    task: task,
-                    reason: .completed,
-                    stepsAttempted: attempted
-                )
-
+                return makeRunReport(task: task, reason: .completed, stepsAttempted: attempted)
             case .waitingForApproval:
-                return makeRunReport(
-                    task: task,
-                    reason: .waitingForApproval,
-                    stepsAttempted: attempted
-                )
-
+                return makeRunReport(task: task, reason: .waitingForApproval, stepsAttempted: attempted)
             case .paused:
-                return makeRunReport(
-                    task: task,
-                    reason: .paused,
-                    stepsAttempted: attempted
-                )
-
+                return makeRunReport(task: task, reason: .paused, stepsAttempted: attempted)
             case .failed, .cancelled:
-                return makeRunReport(
-                    task: task,
-                    reason: .failed,
-                    stepsAttempted: attempted
-                )
-
+                return makeRunReport(task: task, reason: .failed, stepsAttempted: attempted)
             case .pending, .planning, .waitingForDependency:
-                return makeRunReport(
-                    task: task,
-                    reason: .noRunnableStep,
-                    stepsAttempted: attempted
-                )
-
+                return makeRunReport(task: task, reason: .noRunnableStep, stepsAttempted: attempted)
             case .running:
                 break
             }
@@ -321,22 +264,12 @@ final class AgentTaskExecutor {
                 guard let latest = runtime.task(id: taskId) else {
                     throw AgentTaskExecutorError.taskNotFound
                 }
-
-                return makeRunReport(
-                    task: latest,
-                    reason: .noRunnableStep,
-                    stepsAttempted: attempted
-                )
+                return makeRunReport(task: latest, reason: .noRunnableStep, stepsAttempted: attempted)
             }
 
             do {
-                _ = try await executeNextStep(
-                    taskId: taskId,
-                    recentHistory: recentHistory
-                )
-
+                _ = try await executeNextStep(taskId: taskId, recentHistory: recentHistory)
                 attempted += 1
-
             } catch {
                 attempted += 1
 
@@ -344,29 +277,22 @@ final class AgentTaskExecutor {
                     throw AgentTaskExecutorError.taskNotFound
                 }
 
-                // Retryable failures return the step to pending while the task
-                // remains running. Autonomous mode may retry, still bounded by
-                // per-step maxAttempts and this cycle's safety limit.
                 if latest.status == .running,
-                   runtime.nextRunnableStep(taskId: taskId) != nil {
+                   let retryStep = runtime.nextRunnableStep(taskId: taskId) {
+                    let retryMessage = retryStep.lastError.map {
+                        "Retrying step #\(retryStep.order) (attempt \(retryStep.attemptCount + 1)/\(retryStep.maxAttempts)): \($0)"
+                    } ?? "Retrying step #\(retryStep.order): \(retryStep.title)"
+                    onProgress?("↻ \(retryMessage)")
                     try? await Task.sleep(for: .seconds(1))
                     continue
                 }
 
                 if latest.status == .waitingForApproval {
-                    return makeRunReport(
-                        task: latest,
-                        reason: .waitingForApproval,
-                        stepsAttempted: attempted
-                    )
+                    return makeRunReport(task: latest, reason: .waitingForApproval, stepsAttempted: attempted)
                 }
 
                 if latest.status == .failed || latest.status == .cancelled {
-                    return makeRunReport(
-                        task: latest,
-                        reason: .failed,
-                        stepsAttempted: attempted
-                    )
+                    return makeRunReport(task: latest, reason: .failed, stepsAttempted: attempted)
                 }
 
                 throw error
@@ -391,23 +317,23 @@ final class AgentTaskExecutor {
         reason: AutonomousRunStopReason,
         stepsAttempted: Int
     ) -> AutonomousRunReport {
+        let nextStep = runtime.nextRunnableStep(taskId: task.id)
 
-        AutonomousRunReport(
+        return AutonomousRunReport(
             taskId: task.id,
             stopReason: reason,
             stepsAttempted: stepsAttempted,
             progress: runtime.progress(taskId: task.id),
             lastCheckpoint: task.executionState.lastCheckpoint?.summary,
-            nextStepTitle: runtime.nextRunnableStep(taskId: task.id)?.title,
-            failureReason: task.failureReason
+            nextStepTitle: nextStep?.title,
+            failureReason: task.failureReason,
+            nextStepAttemptCount: nextStep?.attemptCount,
+            nextStepMaxAttempts: nextStep?.maxAttempts,
+            nextStepLastError: nextStep?.lastError
         )
     }
 
-    private func executionCommand(
-        task: AgentTask,
-        step: PlanStep
-    ) -> String {
-
+    private func executionCommand(task: AgentTask, step: PlanStep) -> String {
         let criteria = step.successCriteria
             .enumerated()
             .map { "\($0.offset + 1). \($0.element)" }
@@ -437,12 +363,7 @@ final class AgentTaskExecutor {
 }
 
 /// Independent verification pass for an executed step.
-///
-/// The verifier receives the goal, the exact step, its success criteria,
-/// and the produced result. It returns structured JSON and is never allowed
-/// to execute tools or mutate runtime state.
 final class AgentStepVerifier {
-
     private let aiService: AIService
 
     init(aiService: AIService = .shared) {
@@ -454,7 +375,6 @@ final class AgentStepVerifier {
         step: PlanStep,
         capabilityResult: String
     ) async throws -> StepVerificationResult {
-
         let criteria = step.successCriteria
             .enumerated()
             .map { "\($0.offset + 1). \($0.element)" }
@@ -497,11 +417,7 @@ final class AgentStepVerifier {
         - unmetCriteria must contain each criterion that was not demonstrated
         """
 
-        let raw = try await aiService.generateText(
-            prompt: prompt,
-            maxTokens: 1200
-        )
-
+        let raw = try await aiService.generateText(prompt: prompt, maxTokens: 1200)
         let cleaned = raw
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .removingVerifierJSONFence()
@@ -512,11 +428,7 @@ final class AgentStepVerifier {
             )
         }
 
-        let result = try JSONDecoder().decode(
-            StepVerificationResult.self,
-            from: data
-        )
-
+        let result = try JSONDecoder().decode(StepVerificationResult.self, from: data)
         let boundedConfidence = min(max(result.confidence, 0), 1)
 
         return StepVerificationResult(
