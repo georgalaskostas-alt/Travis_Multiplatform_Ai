@@ -273,57 +273,77 @@ final class GitHubRepositoryContextService {
             "Travis_Multiplatform_Ai/Features/Chat/ChatView.swift"
         ]
 
-        var result = preferred.filter(paths.contains)
+        var result: [String] = []
 
-        let terms = task
-            .lowercased()
-            .components(
-                separatedBy: CharacterSet.alphanumerics.inverted
-            )
-            .filter {
-                $0.count >= 4
+        for path in preferred {
+            if paths.contains(path) {
+                result.append(path)
             }
-
-        let ranked = paths
-            .filter {
-                !result.contains($0)
-            }
-            .map { path -> (String, Int) in
-                let lower = path.lowercased()
-                var score = 0
-
-                if lower.contains("/runtime/") {
-                    score += 8
-                }
-
-                if lower.contains("/agent/") {
-                    score += 6
-                }
-
-                if lower.contains("/services/") {
-                    score += 3
-                }
-
-                for term in terms where lower.contains(term) {
-                    score += 5
-                }
-
-                return (path, score)
-            }
-            .filter {
-                $0.1 > 0
-            }
-            .sorted { lhs, rhs in
-                lhs.1 == rhs.1
-                ? lhs.0 < rhs.0
-                : lhs.1 > rhs.1
-            }
-
-        for (path, _) in ranked where result.count < maxSelectedFiles {
-            result.append(path)
         }
 
-        return Array(result.prefix(maxSelectedFiles))
+        let loweredTask = task.lowercased()
+        let rawTerms = loweredTask.components(
+            separatedBy: CharacterSet.alphanumerics.inverted
+        )
+
+        let terms = rawTerms.filter { term in
+            term.count >= 4
+        }
+
+        var ranked: [(path: String, score: Int)] = []
+
+        for path in paths {
+            if result.contains(path) {
+                continue
+            }
+
+            let lower = path.lowercased()
+            var score = 0
+
+            if lower.contains("/runtime/") {
+                score += 8
+            }
+
+            if lower.contains("/agent/") {
+                score += 6
+            }
+
+            if lower.contains("/services/") {
+                score += 3
+            }
+
+            for term in terms {
+                if lower.contains(term) {
+                    score += 5
+                }
+            }
+
+            if score > 0 {
+                ranked.append((path: path, score: score))
+            }
+        }
+
+        ranked.sort { lhs, rhs in
+            if lhs.score == rhs.score {
+                return lhs.path < rhs.path
+            }
+
+            return lhs.score > rhs.score
+        }
+
+        for item in ranked {
+            if result.count >= maxSelectedFiles {
+                break
+            }
+
+            result.append(item.path)
+        }
+
+        if result.count > maxSelectedFiles {
+            return Array(result[0..<maxSelectedFiles])
+        }
+
+        return result
     }
 }
 
