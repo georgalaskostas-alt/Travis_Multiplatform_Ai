@@ -14,6 +14,30 @@ enum RepositoryGroundingError: LocalizedError {
     }
 }
 
+enum RepositoryTransportError: LocalizedError {
+    case invalidResponse
+    case httpError(status: Int, message: String, remaining: String?, reset: String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "GitHub repository service returned an invalid HTTP response."
+        case .httpError(let status, let message, let remaining, let reset):
+            var details = "GitHub API HTTP \(status)"
+            if !message.isEmpty {
+                details += ": \(message)"
+            }
+            if let remaining {
+                details += " | rate-limit remaining: \(remaining)"
+            }
+            if let reset {
+                details += " | reset: \(reset)"
+            }
+            return details
+        }
+    }
+}
+
 @MainActor
 final class RepositoryContextCapability: AgentCapability {
     let id = "repository_context"
@@ -94,11 +118,7 @@ final class RepositoryContextCapability: AgentCapability {
             maxTokens: 5000
         )
 
-        try validateGrounding(
-            result,
-            snapshot: snapshot
-        )
-
+        try validateGrounding(result, snapshot: snapshot)
         return .reply(result)
     }
 
@@ -120,17 +140,11 @@ final class RepositoryContextCapability: AgentCapability {
                 in: CharacterSet(charactersIn: "`'\"()[]{}:,;")
             )
 
-            if path(
-                normalized,
-                resolvesWithin: snapshot.loadedSourcePaths
-            ) {
+            if path(normalized, resolvesWithin: snapshot.loadedSourcePaths) {
                 hasLoadedEvidence = true
             }
 
-            if !path(
-                normalized,
-                resolvesWithin: snapshot.repositoryPaths
-            ) {
+            if !path(normalized, resolvesWithin: snapshot.repositoryPaths) {
                 unknownPaths.append(normalized)
             }
         }
@@ -146,18 +160,13 @@ final class RepositoryContextCapability: AgentCapability {
         }
     }
 
-    private func path(
-        _ candidate: String,
-        resolvesWithin paths: [String]
-    ) -> Bool {
+    private func path(_ candidate: String, resolvesWithin paths: [String]) -> Bool {
         if paths.contains(candidate) {
             return true
         }
 
         let suffix = "/\(candidate)"
-        return paths.contains { existing in
-            existing.hasSuffix(suffix)
-        }
+        return paths.contains { $0.hasSuffix(suffix) }
     }
 }
 
@@ -170,6 +179,12 @@ struct RepositoryContextSnapshot {
     let loadedSourcePaths: [String]
 }
 
+/// Read-only GitHub repository reader used by RepositoryContextCapability.
+///
+/// Runtime v1 intentionally caches the immutable branch snapshot and file
+/// contents in memory. Without this cache, every autonomous analysis step
+/// would refetch the same recursive tree plus the same source files and can
+/// exhaust GitHub's unauthenticated API quota very quickly.
 final class GitHubRepositoryContextService {
     private let owner: String
     private let repository: String
@@ -179,6 +194,10 @@ final class GitHubRepositoryContextService {
     private let maxSelectedFiles = 12
     private let maxCharactersPerFile = 12_000
     private let maxTotalSourceCharacters = 80_000
+    private let maxRequestAttempts = 3
+
+    private var repositoryPathsCache: [String]?
+    private var fileCache: [String: String] = [:]
 
     init(
         owner: String = "georgalaskostas-alt",
@@ -198,15 +217,8 @@ final class GitHubRepositoryContextService {
 
     func context(for task: String) async throws -> RepositoryContextSnapshot {
         let repositoryPaths = try await fetchRepositoryPaths()
-
-        let swiftPaths = repositoryPaths.filter { path in
-            path.hasSuffix(".swift")
-        }
-
-        let selected = select(
-            paths: swiftPaths,
-            task: task
-        )
+        let swiftPaths = repositoryPaths.filter { $0.hasSuffix(".swift") }
+        let selected = select(paths: swiftPaths, task: task)
 
         var chunks: [String] = []
         var loadedSourcePaths: [String] = []
@@ -217,7 +229,14 @@ final class GitHubRepositoryContextService {
                 break
             }
 
-            guard let text = try? await fetchFile(path: path) else {
+            // A missing/unreadable evidence file is skipped, but transport
+            // failures are no longer silently collapsed into -1011.
+            let text: String
+            do {
+                text = try await fetchFile(path: path)
+            } catch let error as RepositoryTransportError {
+                throw error
+            } catch {
                 continue
             }
 
@@ -225,8 +244,7 @@ final class GitHubRepositoryContextService {
             let allowed = min(maxCharactersPerFile, remaining)
             let clipped = String(text.prefix(allowed))
 
-            let truncationNotice =
-                text.count > clipped.count
+            let truncationNotice = text.count > clipped.count
                 ? "\n[FILE TRUNCATED BY REPOSITORY CONTEXT BUDGET]"
                 : ""
 
@@ -261,9 +279,12 @@ final class GitHubRepositoryContextService {
     }
 
     private func fetchRepositoryPaths() async throws -> [String] {
+        if let cached = repositoryPathsCache {
+            return cached
+        }
+
         let allowed = CharacterSet(
-            charactersIn:
-                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
         )
 
         let encodedBranch = branch.addingPercentEncoding(
@@ -271,54 +292,42 @@ final class GitHubRepositoryContextService {
         ) ?? branch
 
         guard let url = URL(
-            string:
-                "https://api.github.com/repos/\(owner)/\(repository)/git/trees/\(encodedBranch)?recursive=1"
+            string: "https://api.github.com/repos/\(owner)/\(repository)/git/trees/\(encodedBranch)?recursive=1"
         ) else {
             throw URLError(.badURL)
         }
 
         let data = try await request(url)
-        let tree = try JSONDecoder().decode(
-            GitHubTreeResponse.self,
-            from: data
-        )
+        let tree = try JSONDecoder().decode(GitHubTreeResponse.self, from: data)
 
-        return tree.tree.compactMap { item in
-            guard item.type == "blob" else {
-                return nil
-            }
-
+        let paths = tree.tree.compactMap { item -> String? in
+            guard item.type == "blob" else { return nil }
             return item.path
         }
+
+        repositoryPathsCache = paths
+        return paths
     }
 
     private func fetchFile(path: String) async throws -> String {
+        if let cached = fileCache[path] {
+            return cached
+        }
+
         var components = URLComponents()
         components.scheme = "https"
         components.host = "api.github.com"
-        components.path =
-            "/repos/\(owner)/\(repository)/contents/\(path)"
-        components.queryItems = [
-            URLQueryItem(
-                name: "ref",
-                value: branch
-            )
-        ]
+        components.path = "/repos/\(owner)/\(repository)/contents/\(path)"
+        components.queryItems = [URLQueryItem(name: "ref", value: branch)]
 
         guard let url = components.url else {
             throw URLError(.badURL)
         }
 
         let data = try await request(url)
-        let response = try JSONDecoder().decode(
-            GitHubContentResponse.self,
-            from: data
-        )
+        let response = try JSONDecoder().decode(GitHubContentResponse.self, from: data)
 
-        let base64 = response.content.replacingOccurrences(
-            of: "\n",
-            with: ""
-        )
+        let base64 = response.content.replacingOccurrences(of: "\n", with: "")
 
         guard
             let decoded = Data(base64Encoded: base64),
@@ -327,32 +336,83 @@ final class GitHubRepositoryContextService {
             throw URLError(.cannotDecodeContentData)
         }
 
+        fileCache[path] = text
         return text
     }
 
     private func request(_ url: URL) async throws -> Data {
-        var request = URLRequest(url: url)
+        var lastError: Error?
 
-        request.setValue(
-            "application/vnd.github+json",
-            forHTTPHeaderField: "Accept"
-        )
+        for attempt in 1...maxRequestAttempts {
+            var request = URLRequest(url: url)
+            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            request.setValue("TRAVIS-AI-Assistant", forHTTPHeaderField: "User-Agent")
+            request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
 
-        request.setValue(
-            "TRAVIS-AI-Assistant",
-            forHTTPHeaderField: "User-Agent"
-        )
+            do {
+                let (data, response) = try await session.data(for: request)
 
-        let (data, response) = try await session.data(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    throw RepositoryTransportError.invalidResponse
+                }
 
-        guard
-            let http = response as? HTTPURLResponse,
-            (200..<300).contains(http.statusCode)
-        else {
-            throw URLError(.badServerResponse)
+                if (200..<300).contains(http.statusCode) {
+                    return data
+                }
+
+                let message = Self.githubMessage(from: data)
+                let remaining = http.value(forHTTPHeaderField: "X-RateLimit-Remaining")
+                let reset = http.value(forHTTPHeaderField: "X-RateLimit-Reset")
+
+                let error = RepositoryTransportError.httpError(
+                    status: http.statusCode,
+                    message: message,
+                    remaining: remaining,
+                    reset: reset
+                )
+
+                // Retry only transient server/rate-limit responses.
+                if Self.isRetryable(status: http.statusCode), attempt < maxRequestAttempts {
+                    lastError = error
+                    let delay = UInt64(attempt * attempt)
+                    try? await Task.sleep(for: .seconds(delay))
+                    continue
+                }
+
+                throw error
+            } catch {
+                lastError = error
+
+                // URL/network errors may be transient. RepositoryTransportError
+                // has already been classified above and should not be hidden.
+                if error is RepositoryTransportError {
+                    throw error
+                }
+
+                if attempt < maxRequestAttempts {
+                    let delay = UInt64(attempt * attempt)
+                    try? await Task.sleep(for: .seconds(delay))
+                    continue
+                }
+            }
         }
 
-        return data
+        throw lastError ?? URLError(.badServerResponse)
+    }
+
+    private static func isRetryable(status: Int) -> Bool {
+        status == 429 || status == 502 || status == 503 || status == 504
+    }
+
+    private static func githubMessage(from data: Data) -> String {
+        guard
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let message = object["message"] as? String
+        else {
+            return String(data: data, encoding: .utf8).map { String($0.prefix(300)) } ?? ""
+        }
+
+        return message
     }
 
     private func select(paths: [String], task: String) -> [String] {
@@ -373,47 +433,29 @@ final class GitHubRepositoryContextService {
 
         var result: [String] = []
 
-        for preferredPath in preferred {
-            if paths.contains(preferredPath) {
-                result.append(preferredPath)
-            }
+        for preferredPath in preferred where paths.contains(preferredPath) {
+            result.append(preferredPath)
         }
 
         let terms = task
             .lowercased()
-            .components(
-                separatedBy: CharacterSet.alphanumerics.inverted
-            )
-            .filter {
-                $0.count >= 4
-            }
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count >= 4 }
 
         var ranked: [(path: String, score: Int)] = []
 
         for path in paths {
-            guard !result.contains(path) else {
-                continue
-            }
+            guard !result.contains(path) else { continue }
 
             let lower = path.lowercased()
             var score = 0
 
-            if lower.contains("/runtime/") {
-                score += 8
-            }
+            if lower.contains("/runtime/") { score += 8 }
+            if lower.contains("/agent/") { score += 6 }
+            if lower.contains("/services/") { score += 3 }
 
-            if lower.contains("/agent/") {
-                score += 6
-            }
-
-            if lower.contains("/services/") {
-                score += 3
-            }
-
-            for term in terms {
-                if lower.contains(term) {
-                    score += 5
-                }
+            for term in terms where lower.contains(term) {
+                score += 5
             }
 
             if score > 0 {
@@ -425,15 +467,11 @@ final class GitHubRepositoryContextService {
             if left.score == right.score {
                 return left.path < right.path
             }
-
             return left.score > right.score
         }
 
         for item in ranked {
-            guard result.count < maxSelectedFiles else {
-                break
-            }
-
+            guard result.count < maxSelectedFiles else { break }
             result.append(item.path)
         }
 
@@ -446,34 +484,18 @@ private enum SourcePathExtractor {
         #"(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:swift|py|js|jsx|ts|tsx|json|ya?ml|toml|md|sh|pbxproj|xcconfig)"#
 
     static func extract(from text: String) -> [String] {
-        guard let expression = try? NSRegularExpression(
-            pattern: pattern,
-            options: []
-        ) else {
+        guard let expression = try? NSRegularExpression(pattern: pattern) else {
             return []
         }
 
-        let fullRange = NSRange(
-            text.startIndex..<text.endIndex,
-            in: text
-        )
-
-        let matches = expression.matches(
-            in: text,
-            options: [],
-            range: fullRange
-        )
+        let fullRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        let matches = expression.matches(in: text, range: fullRange)
 
         var paths: [String] = []
-
         for match in matches {
-            guard let range = Range(match.range, in: text) else {
-                continue
-            }
-
+            guard let range = Range(match.range, in: text) else { continue }
             paths.append(String(text[range]))
         }
-
         return paths
     }
 }
