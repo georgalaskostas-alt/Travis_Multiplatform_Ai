@@ -11,16 +11,12 @@ enum TaskPlannerError: LocalizedError {
         switch self {
         case .emptyGoal:
             return "Το task δεν έχει στόχο."
-
         case .invalidStructuredResponse:
             return "Ο planner επέστρεψε μη έγκυρο structured plan."
-
         case .noSteps:
             return "Ο planner δεν δημιούργησε κανένα βήμα."
-
         case .tooManySteps(let count):
             return "Ο planner δημιούργησε υπερβολικά πολλά βήματα (\(count))."
-
         case .invalidDependency(let step, let dependency):
             return "Μη έγκυρη dependency: step \(step) -> \(dependency)."
         }
@@ -29,42 +25,25 @@ enum TaskPlannerError: LocalizedError {
 
 /// AI-backed planner for long-lived TRAVIS tasks.
 ///
-/// The LLM proposes the plan.
-/// TRAVIS validates and normalizes it before anything can be executed.
-///
-/// The planner:
-/// - does NOT execute tools
-/// - does NOT grant permissions
-/// - does NOT trust model-generated UUIDs
-/// - validates dependencies
-/// - limits plan complexity
-/// - creates internal UUIDs for execution steps
-/// - materializes planner metadata into typed PlanStep fields
+/// The LLM proposes the plan. TRAVIS then validates and normalizes it before
+/// anything can execute. Capability routing and dependency repair for
+/// repository-grounded plans are deliberately deterministic so an LLM cannot
+/// route evidence-sensitive synthesis through an ungrounded text capability.
 final class TaskPlanner {
-
     static let shared = TaskPlanner()
 
     private let aiService: AIService
-
-    /// Keep top-level plans intentionally compact.
-    ///
-    /// Complex work should later be decomposed into sub-plans
-    /// when execution reaches that stage, instead of generating
-    /// enormous plans up-front.
     private let maxPlanSteps = 16
 
     init(aiService: AIService = .shared) {
         self.aiService = aiService
     }
 
-    // MARK: - Public API
-
     func makePlan(
         for goal: String,
         availableCapabilities: [String] = [],
         context: String? = nil
     ) async throws -> TaskPlan {
-
         let trimmedGoal = goal
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -78,9 +57,6 @@ final class TaskPlanner {
             context: context
         )
 
-        // Planner responses can be larger than normal conversational replies.
-        // 8192 gives enough room for a robust structured plan,
-        // while the prompt itself prevents unnecessary plan explosion.
         let raw = try await aiService.generateText(
             prompt: prompt,
             maxTokens: 8192
@@ -88,7 +64,11 @@ final class TaskPlanner {
 
         let proposal = try decodeProposal(from: raw)
 
-        return try materialize(proposal)
+        return try materialize(
+            proposal,
+            goal: trimmedGoal,
+            availableCapabilities: availableCapabilities
+        )
     }
 
     // MARK: - Prompt
@@ -98,7 +78,6 @@ final class TaskPlanner {
         availableCapabilities: [String],
         context: String?
     ) -> String {
-
         let capabilityText = availableCapabilities.isEmpty
             ? "No capability registry was supplied. Use null for capabilityId unless clearly known."
             : availableCapabilities.joined(separator: ", ")
@@ -133,27 +112,29 @@ final class TaskPlanner {
         Do not try to anticipate every possible subtask up-front.
 
         Steps may depend only on earlier steps.
-
         Include verification when the result could be wrong.
-
         Include explicit approval boundaries for consequential actions.
-
         Never claim that an action has already happened.
 
         Never invent capabilities that are not present in AVAILABLE CAPABILITY IDS.
         If no available capability clearly matches a step, use null for capabilityId.
-        When repository_context is present in AVAILABLE CAPABILITY IDS, assign repository inspection,
-        source-code analysis, architecture review, runtime/codebase investigation, implementation review,
-        and any task whose correctness depends on the actual TRAVIS source tree to repository_context.
-        Do not assign those source-grounded tasks to text_task when repository_context is available.
-        Use text_task for reasoning or writing that does not require repository evidence.
+
+        When repository_context is present in AVAILABLE CAPABILITY IDS:
+        - repository inspection must use repository_context
+        - source-code analysis must use repository_context
+        - architecture/runtime/codebase review must use repository_context
+        - synthesis of repository findings must use repository_context
+        - evidence verification must use repository_context
+        - final reports whose claims depend on source evidence must use repository_context
+        - do NOT route any repository-grounded synthesis/report/verification step through text_task
+
+        Use text_task only for reasoning or writing whose correctness does not depend on repository evidence.
 
         Return ONLY valid JSON.
         Do not use markdown fences.
         Do not include explanations before or after the JSON.
 
         Schema:
-
         {
           "summary": "short plan summary",
           "steps": [
@@ -163,9 +144,7 @@ final class TaskPlanner {
               "instructions": "precise execution instructions",
               "capabilityId": null,
               "dependsOn": [],
-              "successCriteria": [
-                "observable condition"
-              ],
+              "successCriteria": ["observable condition"],
               "risk": "low",
               "requiresApproval": false,
               "canRunInBackground": true,
@@ -175,22 +154,19 @@ final class TaskPlanner {
         }
 
         Constraints:
-
         - order must be contiguous integers starting at 1
         - dependsOn contains step order numbers, never UUIDs
         - a step may depend only on a lower order number
-        - risk must be exactly one of:
-          low, medium, high, critical
-        - estimatedEffort must be exactly one of:
-          short, medium, long
+        - risk must be exactly one of: low, medium, high, critical
+        - estimatedEffort must be exactly one of: short, medium, long
         - use between 5 and \(maxPlanSteps) steps unless the goal genuinely requires fewer
         - avoid duplicate or overlapping steps
         - avoid splitting one logical stage into many tiny steps
         - every step must have at least one observable success criterion
         - verification should normally be a separate step for important outputs
+        - synthesis/report/verification steps must depend on every earlier evidence-producing stage they require
 
         Approval rules:
-
         - destructive actions require approval
         - financial actions require approval
         - external sending or publishing requires approval
@@ -201,11 +177,9 @@ final class TaskPlanner {
         - self-modification affecting safety or permissions requires approval
 
         Research, analysis, reading, planning, local reasoning,
-        non-destructive inspection and verification should normally
-        not require approval.
+        non-destructive inspection and verification should normally not require approval.
 
         Background execution:
-
         - analysis and research may normally run in background
         - waiting, monitoring and long-running investigation may run in background
         - actions waiting for user approval cannot proceed until approval exists
@@ -217,10 +191,7 @@ final class TaskPlanner {
 
     // MARK: - Decode
 
-    private func decodeProposal(
-        from raw: String
-    ) throws -> PlannerProposal {
-
+    private func decodeProposal(from raw: String) throws -> PlannerProposal {
         let cleaned = raw
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .removingMarkdownJSONFence()
@@ -230,73 +201,64 @@ final class TaskPlanner {
         }
 
         do {
-            return try JSONDecoder().decode(
-                PlannerProposal.self,
-                from: data
-            )
+            return try JSONDecoder().decode(PlannerProposal.self, from: data)
         } catch {
-
-            // TEMPORARY diagnostic logging.
-            //
-            // Remove this before production because planner responses
-            // may eventually contain sensitive/private user context.
-
             print("========== TRAVIS PLANNER RAW RESPONSE ==========")
             print(raw)
-
             print("========== TRAVIS PLANNER CLEANED RESPONSE ======")
             print(cleaned)
-
             print("========== TRAVIS PLANNER DECODE ERROR ==========")
             print(error)
-
             print("=================================================")
-
             throw TaskPlannerError.invalidStructuredResponse
         }
     }
 
-    // MARK: - Validation + Materialization
+    // MARK: - Validation + Deterministic Normalization
 
     private func materialize(
-        _ proposal: PlannerProposal
+        _ proposal: PlannerProposal,
+        goal: String,
+        availableCapabilities: [String]
     ) throws -> TaskPlan {
-
         guard !proposal.steps.isEmpty else {
             throw TaskPlannerError.noSteps
         }
 
         guard proposal.steps.count <= maxPlanSteps else {
-            throw TaskPlannerError.tooManySteps(
-                proposal.steps.count
-            )
+            throw TaskPlannerError.tooManySteps(proposal.steps.count)
         }
 
-        let sorted = proposal.steps.sorted {
-            $0.order < $1.order
-        }
-
+        let sorted = proposal.steps.sorted { $0.order < $1.order }
         let expectedOrders = Array(1...sorted.count)
 
         guard sorted.map(\.order) == expectedOrders else {
             throw TaskPlannerError.invalidStructuredResponse
         }
 
-        // Generate trusted internal UUIDs ourselves.
-        // Never trust UUIDs proposed by the LLM.
+        let capabilitySet = Set(availableCapabilities)
+        let repositoryGroundedPlan =
+            capabilitySet.contains("repository_context")
+            && isRepositoryGroundedGoal(goal)
 
         var idsByOrder: [Int: UUID] = [:]
-
         for step in sorted {
             idsByOrder[step.order] = UUID()
         }
 
         let steps: [PlanStep] = try sorted.map { proposalStep in
+            var dependencyOrders = proposalStep.dependsOn
 
-            // Validate dependencies before materializing the step.
+            // For repository analysis, aggregation/evidence-verification stages
+            // must not run while earlier evidence branches are still pending.
+            // Normalize them to depend on every prior stage deterministically.
+            if repositoryGroundedPlan && isAggregationOrVerificationStep(proposalStep) {
+                dependencyOrders = Array(1..<proposalStep.order)
+            }
 
-            for dependency in proposalStep.dependsOn {
+            dependencyOrders = Array(Set(dependencyOrders)).sorted()
 
+            for dependency in dependencyOrders {
                 guard
                     dependency > 0,
                     dependency < proposalStep.order,
@@ -309,9 +271,6 @@ final class TaskPlanner {
                 }
             }
 
-            // Every executable step must define at least one
-            // observable success criterion.
-
             guard !proposalStep.successCriteria.isEmpty else {
                 throw TaskPlannerError.invalidStructuredResponse
             }
@@ -320,28 +279,25 @@ final class TaskPlanner {
                 throw TaskPlannerError.invalidStructuredResponse
             }
 
+            let capabilityId = normalizedCapabilityId(
+                proposed: proposalStep.capabilityId,
+                repositoryGroundedPlan: repositoryGroundedPlan,
+                availableCapabilities: capabilitySet
+            )
+
             return PlanStep(
                 id: stepID,
                 order: proposalStep.order,
                 title: proposalStep.title,
                 instructions: proposalStep.instructions,
                 status: .pending,
-                capabilityId: proposalStep.capabilityId,
-                dependencyStepIds:
-                    proposalStep.dependsOn.compactMap {
-                        idsByOrder[$0]
-                    },
+                capabilityId: capabilityId,
+                dependencyStepIds: dependencyOrders.compactMap { idsByOrder[$0] },
                 successCriteria: proposalStep.successCriteria,
-                riskLevel:
-                    PlanStepRiskLevel(
-                        rawValue: proposalStep.risk.rawValue
-                    ) ?? .low,
+                riskLevel: PlanStepRiskLevel(rawValue: proposalStep.risk.rawValue) ?? .low,
                 requiresApproval: proposalStep.requiresApproval,
                 canRunInBackground: proposalStep.canRunInBackground,
-                estimatedEffort:
-                    PlanStepEffort(
-                        rawValue: proposalStep.estimatedEffort.rawValue
-                    ) ?? .short,
+                estimatedEffort: PlanStepEffort(rawValue: proposalStep.estimatedEffort.rawValue) ?? .short,
                 maxAttempts: 3
             )
         }
@@ -351,9 +307,50 @@ final class TaskPlanner {
             steps: steps
         )
     }
-}
 
-// MARK: - Planner Response DTOs
+    private func normalizedCapabilityId(
+        proposed: String?,
+        repositoryGroundedPlan: Bool,
+        availableCapabilities: Set<String>
+    ) -> String? {
+        guard repositoryGroundedPlan else {
+            return proposed
+        }
+
+        // Preserve explicit specialized state-changing capabilities, but never
+        // allow generic text_task/nil to become an escape hatch from repository
+        // grounding for a repository-analysis goal.
+        if proposed == nil || proposed == "text_task" || proposed == "repository_context" {
+            return availableCapabilities.contains("repository_context")
+                ? "repository_context"
+                : proposed
+        }
+
+        return proposed
+    }
+
+    private func isRepositoryGroundedGoal(_ goal: String) -> Bool {
+        let value = goal.lowercased()
+        let markers = [
+            "repository", "repo", "codebase", "source code", "source files",
+            "κώδικ", "αρχιτεκτον", "architecture", "runtime", "project travis",
+            "travis project"
+        ]
+
+        return markers.contains { value.contains($0) }
+    }
+
+    private func isAggregationOrVerificationStep(_ step: PlannerStepProposal) -> Bool {
+        let value = (step.title + " " + step.instructions).lowercased()
+        let markers = [
+            "synth", "consolidat", "report", "roadmap", "priorit",
+            "verify", "verification", "evidence", "finding", "remediation",
+            "σύνοψ", "αναφορά", "επαλήθευσ"
+        ]
+
+        return markers.contains { value.contains($0) }
+    }
+}
 
 private struct PlannerProposal: Decodable {
     let summary: String
@@ -373,8 +370,6 @@ private struct PlannerStepProposal: Decodable {
     let estimatedEffort: PlannerEffort
 }
 
-// MARK: - Planner Types
-
 private enum PlannerRisk: String, Codable {
     case low
     case medium
@@ -388,36 +383,22 @@ private enum PlannerEffort: String, Codable {
     case long
 }
 
-// MARK: - JSON Cleanup
-
 private extension String {
-
     func removingMarkdownJSONFence() -> String {
-
-        var value = trimmingCharacters(
-            in: .whitespacesAndNewlines
-        )
+        var value = trimmingCharacters(in: .whitespacesAndNewlines)
 
         if value.hasPrefix("```json") {
-
             value.removeFirst("```json".count)
-
         } else if value.hasPrefix("```") {
-
             value.removeFirst(3)
         }
 
-        value = value.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        )
+        value = value.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if value.hasSuffix("```") {
-
             value.removeLast(3)
         }
 
-        return value.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        )
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
