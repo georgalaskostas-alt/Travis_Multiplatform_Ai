@@ -2,10 +2,16 @@ import SwiftUI
 
 struct ChatHistoryView: View {
     @Bindable var appState: TRAVISAppState
+    @State private var historyRevision = 0
+
+    private var sessions: [ChatSession] {
+        _ = historyRevision
+        return appState.pastSessions
+    }
 
     var body: some View {
         Group {
-            if appState.pastSessions.isEmpty {
+            if sessions.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "clock")
                         .font(.system(size: 32))
@@ -15,7 +21,7 @@ struct ChatHistoryView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(appState.pastSessions) { session in
+                List(sessions) { session in
                     Button {
                         appState.viewSession(session.id)
                         appState.selectedSidebarItem = .chat
@@ -58,11 +64,14 @@ struct ChatHistoryView: View {
 
     private func delete(_ sessionId: UUID) {
         do {
-            try ChatHistoryStore.deleteSession(sessionId)
+            let deletedCount = try PersistenceService.shared.deleteChatSession(sessionId)
             if appState.viewedSessionId == sessionId {
                 appState.returnToCurrentSession()
             }
-            appState.lastResponseSummary = "Η συνομιλία διαγράφηκε"
+            historyRevision += 1
+            appState.lastResponseSummary = deletedCount > 0
+                ? "Η συνομιλία διαγράφηκε"
+                : "Δεν βρέθηκαν μηνύματα για διαγραφή"
         } catch {
             appState.lastResponseSummary = "Αποτυχία διαγραφής: \(error.localizedDescription)"
         }
