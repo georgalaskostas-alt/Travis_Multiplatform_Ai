@@ -16,12 +16,11 @@ final class SpeechRecognitionService: NSObject {
     static let shared = SpeechRecognitionService()
 
     private static let deleteLatestConversationNotification = Notification.Name("TRAVISDeleteLatestConversation")
+    private static let stopAutonomousExecutionNotification = Notification.Name("TRAVISStopAutonomousExecution")
 
     private(set) var isListening = false
     private(set) var liveTranscript = ""
 
-    /// Fired only when the transcript is not consumed by a local semantic
-    /// intent. Normal requests continue through TRAVISAppState/orchestrator.
     var onFinalTranscript: ((String) -> Void)?
 
     private let audioEngine = AVAudioEngine()
@@ -41,7 +40,6 @@ final class SpeechRecognitionService: NSObject {
         SFSpeechRecognizer.requestAuthorization { [weak self] authStatus in
             Task { @MainActor in
                 guard let self, authStatus == .authorized else { return }
-
                 self.requestMicrophoneAccess { granted in
                     guard granted else { return }
                     self.beginCapture(language: language)
@@ -150,8 +148,6 @@ final class SpeechRecognitionService: NSObject {
 
         guard sendFinalTranscript, !finalText.isEmpty else { return }
 
-        // Meaning-based routing. The LLM is used only to understand intent;
-        // it never performs the destructive action itself.
         Task { @MainActor [weak self] in
             guard let self else { return }
 
@@ -172,11 +168,6 @@ final class SpeechRecognitionService: NSObject {
         let needsClarification: Bool
     }
 
-    /// Returns true when a local app action consumed the transcript.
-    ///
-    /// For now the first local semantic action is chat-history deletion.
-    /// More local actions can be added to the same schema without teaching
-    /// the user command phrases.
     private func consumeLocalSemanticIntent(_ transcript: String) async -> Bool {
         let prompt = """
         You are the semantic command router for TRAVIS, a personal AI assistant.
@@ -187,35 +178,37 @@ final class SpeechRecognitionService: NSObject {
         USER TRANSCRIPT:
         \(transcript)
 
-        Classify whether the user intends a LOCAL CHAT-HISTORY ACTION.
-
-        Supported local intent right now:
-        - delete_conversation: the user wants to remove/delete/erase a conversation or chat from TRAVIS history.
+        Supported LOCAL intents:
+        - delete_conversation: remove/delete a conversation from TRAVIS history.
+        - stop_execution: stop/pause/cancel the autonomous task or execution that is currently running.
         - none: anything else.
 
-        Examples that all mean delete_conversation:
-        - "σβήσε την τελευταία συνομιλία"
-        - "αυτή τη συζήτηση δεν τη θέλω, πέταξέ την"
-        - "βγάλε την προηγούμενη κουβέντα από το ιστορικό"
-        - "delete that chat"
-        - "καθάρισε αυτή τη συνομιλία"
+        Interpret naturally. For example all of these mean stop_execution:
+        - "σταμάτα αυτό που κάνεις"
+        - "άστο εδώ για τώρα"
+        - "παύσε το task"
+        - "μη συνεχίσεις άλλο"
+        - "stop the current run"
+        - "cancel what is running"
 
-        target values:
-        - latest: latest previous conversation
-        - viewed: conversation the user is currently viewing / deictic references like "αυτή"
-        - unspecified: delete intent is clear but the target is not safely resolvable
-        - null for intent none
+        For delete_conversation target values are:
+        - latest
+        - viewed
+        - unspecified
 
-        Safety rule:
-        If deletion intent itself is uncertain, return none.
-        If deletion intent is clear but which conversation is ambiguous, return
-        delete_conversation with target "unspecified" and needsClarification true.
+        For stop_execution target should be "active".
+        For none target should be null.
+
+        Safety:
+        - If a destructive deletion target is ambiguous, set needsClarification true.
+        - stop_execution is reversible and may be classified when the intent is clear.
+        - If intent itself is uncertain, return none.
 
         Return ONLY valid JSON, no markdown:
         {
-          "intent": "delete_conversation|none",
+          "intent": "delete_conversation|stop_execution|none",
           "confidence": 0.0,
-          "target": "latest|viewed|unspecified|null",
+          "target": "latest|viewed|unspecified|active|null",
           "needsClarification": false
         }
         """
@@ -229,29 +222,33 @@ final class SpeechRecognitionService: NSObject {
                 return false
             }
 
-            guard parsed.intent == "delete_conversation", parsed.confidence >= 0.72 else {
+            guard parsed.confidence >= 0.72 else { return false }
+
+            switch parsed.intent {
+            case "stop_execution":
+                NotificationCenter.default.post(
+                    name: Self.stopAutonomousExecutionNotification,
+                    object: transcript
+                )
+                return true
+
+            case "delete_conversation":
+                if parsed.needsClarification || parsed.target == "unspecified" {
+                    onFinalTranscript?("Θέλω να διαγράψω μια συνομιλία, αλλά δεν είναι σαφές ποια. Ρώτησέ με ποια συνομιλία εννοώ πριν διαγράψεις οτιδήποτε.")
+                    return true
+                }
+
+                NotificationCenter.default.post(
+                    name: Self.deleteLatestConversationNotification,
+                    object: parsed.target ?? "latest"
+                )
+                return true
+
+            default:
                 return false
             }
 
-            if parsed.needsClarification || parsed.target == "unspecified" {
-                // Do not risk deleting the wrong conversation. Pass a natural
-                // clarification request through the normal assistant path.
-                onFinalTranscript?("Θέλω να διαγράψω μια συνομιλία, αλλά δεν είναι σαφές ποια. Ρώτησέ με ποια συνομιλία εννοώ πριν διαγράψεις οτιδήποτε.")
-                return true
-            }
-
-            // Existing ChatView owns the deterministic persistence delete.
-            // The semantic target is attached for future target-aware UI
-            // routing; current behavior deletes the most recent previous chat.
-            NotificationCenter.default.post(
-                name: Self.deleteLatestConversationNotification,
-                object: parsed.target ?? "latest"
-            )
-            return true
-
         } catch {
-            // AI intent routing failure must never block normal voice use.
-            // Fall back to the existing orchestrator path.
             return false
         }
     }
