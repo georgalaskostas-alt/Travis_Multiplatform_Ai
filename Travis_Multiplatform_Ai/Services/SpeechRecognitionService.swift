@@ -19,6 +19,8 @@ import AVFoundation
 final class SpeechRecognitionService: NSObject {
     static let shared = SpeechRecognitionService()
 
+    private static let deleteLatestConversationNotification = Notification.Name("TRAVISDeleteLatestConversation")
+
     /// Whether the microphone is actively capturing right now — distinct
     /// from `TRAVISAppState.isListening`, which tracks whether voice mode
     /// is on overall (recognition pauses during TTS playback without
@@ -73,11 +75,6 @@ final class SpeechRecognitionService: NSObject {
     }
 
     private func requestMicrophoneAccess(completion: @escaping (Bool) -> Void) {
-        // AVCaptureDevice's permission API is used (rather than
-        // AVAudioSession.requestRecordPermission) because it's the one
-        // microphone-permission entry point common to both iOS and native
-        // macOS — AVAudioSession itself doesn't exist on macOS at all,
-        // see the #if os(macOS) guard below.
         AVCaptureDevice.requestAccess(for: .audio) { granted in
             Task { @MainActor in completion(granted) }
         }
@@ -172,7 +169,22 @@ final class SpeechRecognitionService: NSObject {
         liveTranscript = ""
 
         if sendFinalTranscript, !finalText.isEmpty {
-            onFinalTranscript?(finalText)
+            if isDeleteLatestConversationCommand(finalText) {
+                NotificationCenter.default.post(name: Self.deleteLatestConversationNotification, object: nil)
+            } else {
+                onFinalTranscript?(finalText)
+            }
         }
+    }
+
+    private func isDeleteLatestConversationCommand(_ text: String) -> Bool {
+        let normalized = text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "el_GR"))
+            .lowercased()
+
+        let wantsDelete = normalized.contains("σβησε") || normalized.contains("διαγραψε") || normalized.contains("delete")
+        let targetsConversation = normalized.contains("συνομιλ") || normalized.contains("conversation")
+        let targetsLatest = normalized.contains("τελευται") || normalized.contains("προσφατ") || normalized.contains("latest") || normalized.contains("last")
+        return wantsDelete && targetsConversation && targetsLatest
     }
 }
