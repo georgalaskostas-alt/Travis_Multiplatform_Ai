@@ -35,11 +35,6 @@ struct ChatView: View {
         return formatter
     }()
 
-    /// A single chronological chat entry — either a message bubble or an
-    /// approval card, merged by `createdAt` so proposed actions render
-    /// inline in the flow at the point they arose, not in a separate
-    /// section. Approval behavior itself (`proposalCard`) is unchanged
-    /// from before this merge.
     private enum TimelineItem: Identifiable {
         case message(ChatMessage)
         case proposal(ProposedAction)
@@ -59,12 +54,6 @@ struct ChatView: View {
         }
     }
 
-    /// Drives the orb's visual state — speaking (TTS) takes priority over
-    /// listening (STT) since `SpeechRecognitionService` is always paused
-    /// while `SpeechService` is talking (see
-    /// `TRAVISAppState.addAssistantMessage`), so the two are never both
-    /// true at once in practice, but speaking is the more important cue
-    /// either way.
     private enum OrbState: Equatable {
         case idle, listening, speaking
 
@@ -106,11 +95,6 @@ struct ChatView: View {
         return .idle
     }
 
-    /// While voice mode is on, TRAVIS's replies are spoken instead of
-    /// shown as text (see `TRAVISAppState.addAssistantMessage`) — the orb's
-    /// speaking animation is the only indication, so assistant bubbles are
-    /// left out of the timeline entirely. The user's own messages and any
-    /// approval cards keep showing normally either way.
     private var timelineItems: [TimelineItem] {
         let messageItems = appState.chatMessages
             .filter { !(appState.isListening && $0.role == .assistant) }
@@ -119,11 +103,6 @@ struct ChatView: View {
         return (messageItems + proposalItems).sorted { $0.createdAt < $1.createdAt }
     }
 
-    /// Best-effort match against `pendingCommands` (same trimmed text,
-    /// still `.awaitingApproval`) — the only correlation available since
-    /// `TravisCommand` isn't linked to a `ChatMessage` id. Kept only
-    /// because the underlying status still exists; the real approval
-    /// mechanism is the `ProposedAction` cards, unaffected by this.
     private func isAwaitingApproval(_ message: ChatMessage) -> Bool {
         guard message.role == .user else { return false }
         return appState.pendingCommands.contains { $0.text == message.text && $0.status == .awaitingApproval }
@@ -196,15 +175,9 @@ struct ChatView: View {
                             .foregroundStyle(.cyan.opacity(0.9))
                     }
                 }
-                // Voice mode's only visible cue while speaking or
-                // listening, since the reply text itself is hidden from
-                // the timeline below in that mode.
                 .scaleEffect(orbState.scale)
                 .animation(orbState.animation, value: orbState)
 
-                // While actively listening, show the live transcript
-                // building up in place of the usual status summary — the
-                // user sees what TRAVIS heard before it's sent.
                 if orbState == .listening {
                     Text(SpeechRecognitionService.shared.liveTranscript.isEmpty
                          ? "..."
@@ -274,23 +247,20 @@ struct ChatView: View {
 
     // MARK: - Chat Input
 
-    /// Sends the current manual draft using the same path for both
-    /// Return/Enter and the send button.
-    ///
-    /// Keeping one submit path prevents the keyboard and button behaviors
-    /// from drifting apart as command handling evolves.
     private func submitDraft() {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        if trimmed.lowercased() == "/resume" {
+            appState.resumeRecoveredAutonomousTask()
+            draft = ""
+            return
+        }
 
         appState.sendCommand(trimmed, source: .manual)
         draft = ""
     }
 
-    /// The single chronological chat — messages and approval cards
-    /// merged by time, taking up the majority of the available vertical
-    /// space. Replaces the old separate "Μηνύματα" and "Command Queue"
-    /// sections.
     private var unifiedChatSection: some View {
         Group {
             if timelineItems.isEmpty {
@@ -380,9 +350,6 @@ struct ChatView: View {
         }
     }
 
-    /// Unchanged from before the merge — same fields, same Approve/Reject
-    /// behavior — just rendered inline in the timeline instead of in a
-    /// separate "Προτεινόμενες Ενέργειες" section.
     private func proposalCard(_ action: ProposedAction) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(action.summary)
@@ -425,10 +392,6 @@ struct ChatView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
-    /// Compact, glanceable preview of the most recent past sessions — the
-    /// full browsable list lives in the "Ιστορικό" tab (`ChatHistoryView`).
-    /// Reuses `appState.pastSessions`/`viewSession(_:)`, no new loading
-    /// logic.
     @ViewBuilder
     private var recentSessionsPanel: some View {
         let recent = Array(appState.pastSessions.prefix(5))
