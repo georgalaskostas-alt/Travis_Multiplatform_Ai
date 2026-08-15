@@ -5,7 +5,9 @@ final class KeychainService {
     static let shared = KeychainService()
 
     private let service = "com.konstantinos.Travis-Multiplatform-Ai"
-    private let apiKeyAccount = "anthropic-api-key"
+    private let anthropicAPIKeyAccount = "anthropic-api-key"
+    private let openAIAPIKeyAccount = "openai-api-key"
+
     /// Distinct Keychain accounts from any future live-trading credential
     /// — never reused, never shared, so a testnet key can never be
     /// accidentally treated as a live one or vice versa.
@@ -14,17 +16,33 @@ final class KeychainService {
 
     private init() {}
 
+    // MARK: - AI Providers
+
+    var openAIAPIKey: String? {
+        read(account: openAIAPIKeyAccount)
+    }
+
+    func saveOpenAIAPIKey(_ key: String) {
+        save(key, account: openAIAPIKeyAccount)
+    }
+
+    func deleteOpenAIAPIKey() {
+        delete(account: openAIAPIKeyAccount)
+    }
+
     var anthropicAPIKey: String? {
-        read(account: apiKeyAccount)
+        read(account: anthropicAPIKeyAccount)
     }
 
     func saveAnthropicAPIKey(_ key: String) {
-        save(key, account: apiKeyAccount)
+        save(key, account: anthropicAPIKeyAccount)
     }
 
     func deleteAnthropicAPIKey() {
-        delete(account: apiKeyAccount)
+        delete(account: anthropicAPIKeyAccount)
     }
+
+    // MARK: - Binance Testnet
 
     var binanceTestnetAPIKey: String? {
         read(account: binanceTestnetAPIKeyAccount)
@@ -49,6 +67,8 @@ final class KeychainService {
     func deleteBinanceTestnetAPISecret() {
         delete(account: binanceTestnetAPISecretAccount)
     }
+
+    // MARK: - Generic Keychain Helpers
 
     private func save(_ value: String, account: String) {
         guard let data = value.data(using: .utf8) else { return }
