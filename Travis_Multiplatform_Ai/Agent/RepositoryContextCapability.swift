@@ -30,37 +30,23 @@ enum RepositoryTransportError: LocalizedError {
             return "GitHub repository service returned an invalid HTTP response."
         case .httpError(let status, let message, let remaining, let reset):
             var details = "GitHub API HTTP \(status)"
-            if !message.isEmpty {
-                details += ": \(message)"
-            }
-            if let remaining {
-                details += " | rate-limit remaining: \(remaining)"
-            }
-            if let reset {
-                details += " | reset: \(reset)"
-            }
+            if !message.isEmpty { details += ": \(message)" }
+            if let remaining { details += " | rate-limit remaining: \(remaining)" }
+            if let reset { details += " | reset: \(reset)" }
             return details
         }
     }
 }
 
-/// Read-only, repository-grounded analysis capability.
-///
-/// Grounding v2 deliberately does NOT let the model cite filenames directly.
-/// Loaded source files are exposed as opaque evidence IDs (E1, E2, ...).
-/// The model returns structured JSON containing only those IDs, and Swift maps
-/// them back to exact repository paths after deterministic validation.
 @MainActor
 final class RepositoryContextCapability: AgentCapability {
     let id = "repository_context"
     let name = "Repository Context"
-    let capabilityDescription =
-        "Read-only ανάλυση του πραγματικού GitHub repository και source code του TRAVIS."
+    let capabilityDescription = "Read-only ανάλυση του πραγματικού GitHub repository και source code του TRAVIS."
 
     let keywords = [
-        "repository", "repo", "codebase", "source code",
-        "architecture", "runtime", "κώδικ", "αρχιτεκτον",
-        "project travis", "travis project"
+        "repository", "repo", "codebase", "source code", "architecture",
+        "runtime", "κώδικ", "αρχιτεκτον", "project travis", "travis project"
     ]
 
     private(set) var status: AgentCapabilityStatus = .idle
@@ -77,15 +63,12 @@ final class RepositoryContextCapability: AgentCapability {
         self.repositoryService = repositoryService
     }
 
-    func handle(
-        command: String,
-        recentHistory: [ChatMessage]
-    ) async throws -> CapabilityOutcome {
+    func handle(command: String, recentHistory: [ChatMessage]) async throws -> CapabilityOutcome {
         status = .running
         defer { status = .idle }
 
         let snapshot = try await repositoryService.context(for: command)
-        let evidenceCatalog = RepositoryEvidenceCatalog(paths: snapshot.loadedSourcePaths)
+        let catalog = RepositoryEvidenceCatalog(paths: snapshot.loadedSourcePaths)
 
         var correctiveFeedback: String?
         var lastError: Error?
@@ -94,51 +77,26 @@ final class RepositoryContextCapability: AgentCapability {
             let prompt = buildPrompt(
                 command: command,
                 snapshot: snapshot,
-                evidenceCatalog: evidenceCatalog,
+                evidenceCatalog: catalog,
                 correctiveFeedback: correctiveFeedback
             )
 
             do {
-                let raw = try await aiService.generateText(
-                    prompt: prompt,
-                    maxTokens: 5000
-                )
-
+                let raw = try await aiService.generateText(prompt: prompt, maxTokens: 6000)
                 let response = try decodeStructuredResponse(raw)
-                try validateStructuredResponse(
-                    response,
-                    raw: raw,
-                    catalog: evidenceCatalog
-                )
-
-                let rendered = render(
-                    response,
-                    catalog: evidenceCatalog
-                )
-
-                return .reply(rendered)
+                try validateStructuredResponse(response, raw: raw, catalog: catalog)
+                return .reply(render(response, catalog: catalog))
             } catch {
                 lastError = error
-
-                guard attempt < maxAnalysisAttempts else {
-                    throw error
-                }
-
-                correctiveFeedback = correctiveFeedbackForRetry(
-                    error: error,
-                    catalog: evidenceCatalog
-                )
+                guard attempt < maxAnalysisAttempts else { throw error }
+                correctiveFeedback = correctiveFeedbackForRetry(error: error, catalog: catalog)
             }
         }
 
         throw lastError ?? RepositoryGroundingError.invalidStructuredResponse
     }
 
-    func resolve(_ action: ProposedAction) {
-        // Read-only capability. It never produces state-changing proposals.
-    }
-
-    // MARK: - Structured grounding
+    func resolve(_ action: ProposedAction) {}
 
     private func buildPrompt(
         command: String,
@@ -150,14 +108,18 @@ final class RepositoryContextCapability: AgentCapability {
             .map { "\($0.id) = \($0.path)" }
             .joined(separator: "\n")
 
+        let coverageManifest = snapshot.evidenceCoverage
+            .map { "\($0.key): \($0.value)" }
+            .sorted()
+            .joined(separator: "\n")
+
         let retryBlock: String
         if let correctiveFeedback {
             retryBlock = """
 
             PREVIOUS ATTEMPT WAS REJECTED BY DETERMINISTIC VALIDATION:
             \(correctiveFeedback)
-
-            Correct the response. Do not repeat the rejected behavior.
+            Correct the response without repeating the rejected behavior.
             """
         } else {
             retryBlock = ""
@@ -175,21 +137,25 @@ final class RepositoryContextCapability: AgentCapability {
         BRANCH:
         \(snapshot.branch)
 
+        EVIDENCE PROFILE:
+        \(snapshot.profile.rawValue)
+
+        EVIDENCE COVERAGE:
+        \(coverageManifest)
+
         STRICT GROUNDING CONTRACT:
         - Analyze only the evidence supplied below.
-        - Evidence files are identified ONLY by opaque IDs E1, E2, E3, etc.
+        - Evidence files are identified only by E1, E2, E3, etc.
         - NEVER write a filename, extension, directory path, or repository path inside any JSON text field.
-        - NEVER invent a new evidence ID.
-        - evidenceRefs may contain ONLY IDs from ALLOWED EVIDENCE IDS.
-        - Every substantive observation must have at least one evidenceRef.
-        - Every finding must have at least one evidenceRef.
-        - Every finding must describe concrete source-level evidence in evidenceDetail: a real type, method, state transition, condition, call path, retry rule, data mutation, or control-flow behavior visible in the supplied source.
-        - Prefer positive evidence (what the code demonstrably does) over absence claims.
-        - A claim that a guard, timeout, recovery path, validation, telemetry, lock, or other mechanism is ABSENT is allowed only when the relevant evidence unit is complete. If an evidence block contains an EVIDENCE TRUNCATED notice, do NOT use that evidence to prove absence. State the uncertainty in limitations instead.
-        - If evidence is insufficient, state that in limitations instead of guessing.
-        - Do not invent types, APIs, persistence, workers, tests, behavior, capabilities, entry points, or configuration.
-        - Recommendations may describe proposed architecture, but must never be presented as existing code.
-        - Return ONLY syntactically valid JSON. No markdown fences and no commentary.
+        - NEVER invent evidence IDs.
+        - evidenceRefs may contain only IDs from ALLOWED EVIDENCE IDS.
+        - Every observation and every finding must cite at least one evidenceRef.
+        - Positive claims must identify a concrete symbol, control-flow branch, state transition, API call, or data-flow behavior in evidenceDetail.
+        - Absence claims such as "no timeout", "no persistence", "no guard", or "no telemetry" are allowed only when the relevant EVIDENCE COVERAGE says FULL for the inspected concern.
+        - If the evidence scope is incomplete, say so in limitations instead of claiming absence.
+        - Do not invent files, types, APIs, persistence, workers, tests, configuration, or runtime behavior.
+        - Recommendations are proposals only; never present them as existing implementation.
+        - Return ONLY syntactically valid JSON.
 
         ALLOWED EVIDENCE IDS:
         \(evidenceManifest)
@@ -202,57 +168,44 @@ final class RepositoryContextCapability: AgentCapability {
 
         REQUIRED JSON SCHEMA:
         {
-          "summary": "concise evidence-grounded result",
+          "summary": "concise grounded result",
           "observations": [
             {
-              "statement": "verified observation without any filename/path text",
+              "statement": "verified observation without path text",
+              "evidenceDetail": "specific symbol/control-flow/state/data-flow evidence",
               "evidenceRefs": ["E1"]
             }
           ],
           "findings": [
             {
-              "title": "finding title without any filename/path text",
+              "title": "finding title without path text",
               "severity": "critical|high|medium|low|null",
               "explanation": "what the evidence demonstrates",
-              "evidenceDetail": "specific symbol/control-flow/state behavior observed in the loaded source; do not include a filename/path",
+              "evidenceDetail": "specific symbol/control-flow/state/data-flow evidence",
               "impact": "technical impact or null",
               "recommendation": "specific remediation or null",
               "evidenceRefs": ["E1", "E2"]
             }
           ],
-          "limitations": [
-            "anything that could not be verified from supplied evidence"
-          ]
+          "limitations": ["anything not verifiable from this evidence profile"]
         }
 
         Rules:
-        - observations may be empty only if findings is non-empty
-        - findings may be empty for inspection/mapping steps
-        - the combined observations + findings must contain at least one evidence reference
-        - severity must be one of critical, high, medium, low, or null
-        - evidenceDetail must be non-empty for every finding
-        - do not infer repository-wide absence from a partial or truncated source excerpt
-        - do not include invented source excerpts; describe the exact observed implementation/control flow instead
+        - inspection/mapping steps may return observations with zero findings
+        - combined observations + findings must contain at least one evidence reference
+        - evidenceDetail must be concrete, not generic
+        - severity must be critical, high, medium, low, or null
         \(retryBlock)
         """
     }
 
-    private func decodeStructuredResponse(
-        _ raw: String
-    ) throws -> RepositoryStructuredResponse {
-        let cleaned = raw
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .removingRepositoryJSONFence()
-
+    private func decodeStructuredResponse(_ raw: String) throws -> RepositoryStructuredResponse {
+        let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines).removingRepositoryJSONFence()
         guard let data = cleaned.data(using: .utf8) else {
             throw RepositoryGroundingError.invalidStructuredResponse
         }
-
         do {
-            return try JSONDecoder().decode(
-                RepositoryStructuredResponse.self,
-                from: data
-            )
+            return try JSONDecoder().decode(RepositoryStructuredResponse.self, from: data)
         } catch {
             throw RepositoryGroundingError.invalidStructuredResponse
         }
@@ -263,47 +216,26 @@ final class RepositoryContextCapability: AgentCapability {
         raw: String,
         catalog: RepositoryEvidenceCatalog
     ) throws {
-        // The model is forbidden from emitting path-like strings at all.
-        // Exact paths are injected only after validation by Swift.
         let directlyWrittenPaths = SourcePathExtractor.extract(from: raw)
         if !directlyWrittenPaths.isEmpty {
-            throw RepositoryGroundingError.rawPathReferenceForbidden(
-                Array(Set(directlyWrittenPaths)).sorted()
-            )
+            throw RepositoryGroundingError.rawPathReferenceForbidden(Array(Set(directlyWrittenPaths)).sorted())
         }
 
-        let allReferences = response.observations.flatMap(\.evidenceRefs)
-            + response.findings.flatMap(\.evidenceRefs)
-
-        let invalidReferences = Array(
-            Set(allReferences.filter { !catalog.allowedIDs.contains($0) })
-        ).sorted()
-
-        guard invalidReferences.isEmpty else {
-            throw RepositoryGroundingError.invalidEvidenceReferences(
-                invalidReferences
-            )
-        }
-
-        guard !allReferences.isEmpty else {
-            throw RepositoryGroundingError.noLoadedSourceEvidence
-        }
+        let refs = response.observations.flatMap(\.evidenceRefs) + response.findings.flatMap(\.evidenceRefs)
+        let invalid = Array(Set(refs.filter { !catalog.allowedIDs.contains($0) })).sorted()
+        guard invalid.isEmpty else { throw RepositoryGroundingError.invalidEvidenceReferences(invalid) }
+        guard !refs.isEmpty else { throw RepositoryGroundingError.noLoadedSourceEvidence }
 
         for observation in response.observations {
-            guard !observation.evidenceRefs.isEmpty else {
-                throw RepositoryGroundingError.noLoadedSourceEvidence
-            }
+            guard !observation.evidenceRefs.isEmpty,
+                  !observation.evidenceDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { throw RepositoryGroundingError.noLoadedSourceEvidence }
         }
 
         for finding in response.findings {
-            guard !finding.evidenceRefs.isEmpty else {
-                throw RepositoryGroundingError.noLoadedSourceEvidence
-            }
-
-            guard !finding.evidenceDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw RepositoryGroundingError.invalidStructuredResponse
-            }
-
+            guard !finding.evidenceRefs.isEmpty,
+                  !finding.evidenceDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { throw RepositoryGroundingError.noLoadedSourceEvidence }
             if let severity = finding.severity {
                 guard RepositoryFindingSeverity(rawValue: severity.lowercased()) != nil else {
                     throw RepositoryGroundingError.invalidStructuredResponse
@@ -312,94 +244,56 @@ final class RepositoryContextCapability: AgentCapability {
         }
     }
 
-    private func correctiveFeedbackForRetry(
-        error: Error,
-        catalog: RepositoryEvidenceCatalog
-    ) -> String {
-        let allowed = catalog.entries
-            .map(\.id)
-            .joined(separator: ", ")
-
+    private func correctiveFeedbackForRetry(error: Error, catalog: RepositoryEvidenceCatalog) -> String {
+        let allowed = catalog.entries.map(\.id).joined(separator: ", ")
         if let groundingError = error as? RepositoryGroundingError {
             switch groundingError {
             case .rawPathReferenceForbidden(let paths):
-                return "You wrote forbidden path-like strings: \(paths.joined(separator: ", ")). Do not write filenames or paths anywhere. Cite only evidence IDs: \(allowed)."
+                return "Forbidden path-like strings were written: \(paths.joined(separator: ", ")). Cite only evidence IDs: \(allowed)."
             case .invalidEvidenceReferences(let references):
-                return "Invalid evidence IDs were used: \(references.joined(separator: ", ")). Allowed IDs are only: \(allowed)."
+                return "Invalid evidence IDs: \(references.joined(separator: ", ")). Allowed: \(allowed)."
             case .noLoadedSourceEvidence:
-                return "The response lacked evidence references. Every substantive observation/finding must cite at least one of: \(allowed)."
+                return "Every observation/finding needs evidenceRefs and a concrete evidenceDetail. Allowed IDs: \(allowed)."
             case .invalidStructuredResponse:
-                return "The response was not valid JSON matching the required schema, or a finding lacked evidenceDetail. Return only the requested JSON object and use only evidence IDs: \(allowed)."
+                return "Return only valid JSON matching the required schema and cite only: \(allowed)."
             }
         }
-
-        return "The previous response failed validation: \(error.localizedDescription). Return valid JSON and cite only these evidence IDs: \(allowed)."
+        return "Previous response failed validation: \(error.localizedDescription). Use only: \(allowed)."
     }
 
-    private func render(
-        _ response: RepositoryStructuredResponse,
-        catalog: RepositoryEvidenceCatalog
-    ) -> String {
-        var sections: [String] = []
-
-        sections.append(response.summary)
+    private func render(_ response: RepositoryStructuredResponse, catalog: RepositoryEvidenceCatalog) -> String {
+        var sections: [String] = [response.summary]
 
         if !response.observations.isEmpty {
-            var lines: [String] = ["VERIFIED OBSERVATIONS"]
-
+            var lines = ["VERIFIED OBSERVATIONS"]
             for (index, observation) in response.observations.enumerated() {
-                let evidence = catalog.paths(for: observation.evidenceRefs)
-                    .map { "`\($0)`" }
-                    .joined(separator: ", ")
-
-                lines.append(
-                    "\(index + 1). \(observation.statement)\n   Evidence: \(evidence)"
-                )
+                let evidence = catalog.paths(for: observation.evidenceRefs).map { "`\($0)`" }.joined(separator: ", ")
+                lines.append("\(index + 1). \(observation.statement)\n   Source evidence: \(observation.evidenceDetail)\n   Evidence: \(evidence)")
             }
-
             sections.append(lines.joined(separator: "\n"))
         }
 
         if !response.findings.isEmpty {
-            var lines: [String] = ["FINDINGS"]
-
+            var lines = ["FINDINGS"]
             for (index, finding) in response.findings.enumerated() {
                 let severity = finding.severity?.uppercased() ?? "UNRANKED"
-                let evidence = catalog.paths(for: finding.evidenceRefs)
-                    .map { "`\($0)`" }
-                    .joined(separator: ", ")
-
-                var block = "\(index + 1). [\(severity)] \(finding.title)\n   \(finding.explanation)"
-                block += "\n   Source evidence: \(finding.evidenceDetail)"
-
-                if let impact = finding.impact, !impact.isEmpty {
-                    block += "\n   Impact: \(impact)"
-                }
-
-                if let recommendation = finding.recommendation, !recommendation.isEmpty {
-                    block += "\n   Recommendation: \(recommendation)"
-                }
-
+                let evidence = catalog.paths(for: finding.evidenceRefs).map { "`\($0)`" }.joined(separator: ", ")
+                var block = "\(index + 1). [\(severity)] \(finding.title)\n   \(finding.explanation)\n   Source evidence: \(finding.evidenceDetail)"
+                if let impact = finding.impact, !impact.isEmpty { block += "\n   Impact: \(impact)" }
+                if let recommendation = finding.recommendation, !recommendation.isEmpty { block += "\n   Recommendation: \(recommendation)" }
                 block += "\n   Evidence: \(evidence)"
                 lines.append(block)
             }
-
             sections.append(lines.joined(separator: "\n\n"))
         }
 
         if !response.limitations.isEmpty {
-            let limitations = response.limitations
-                .map { "- \($0)" }
-                .joined(separator: "\n")
-
-            sections.append("LIMITATIONS\n\(limitations)")
+            sections.append("LIMITATIONS\n" + response.limitations.map { "- \($0)" }.joined(separator: "\n"))
         }
 
         return sections.joined(separator: "\n\n")
     }
 }
-
-// MARK: - Structured repository response
 
 private struct RepositoryStructuredResponse: Decodable {
     let summary: String
@@ -410,6 +304,7 @@ private struct RepositoryStructuredResponse: Decodable {
 
 private struct RepositoryObservation: Decodable {
     let statement: String
+    let evidenceDetail: String
     let evidenceRefs: [String]
 }
 
@@ -424,10 +319,7 @@ private struct RepositoryFinding: Decodable {
 }
 
 private enum RepositoryFindingSeverity: String {
-    case critical
-    case high
-    case medium
-    case low
+    case critical, high, medium, low
 }
 
 private struct RepositoryEvidenceCatalog {
@@ -440,63 +332,59 @@ private struct RepositoryEvidenceCatalog {
     let allowedIDs: Set<String>
 
     init(paths: [String]) {
-        self.entries = paths.enumerated().map { index, path in
-            Entry(id: "E\(index + 1)", path: path)
-        }
-        self.allowedIDs = Set(entries.map(\.id))
+        entries = paths.enumerated().map { Entry(id: "E\($0.offset + 1)", path: $0.element) }
+        allowedIDs = Set(entries.map(\.id))
     }
 
     func paths(for references: [String]) -> [String] {
         let requested = Set(references)
-        return entries
-            .filter { requested.contains($0.id) }
-            .map(\.path)
+        return entries.filter { requested.contains($0.id) }.map(\.path)
     }
 
-    /// Replaces exact source-path headers with evidence IDs before the text is
-    /// sent to the model. The model can inspect content but is instructed to
-    /// cite only the opaque IDs in its response.
     func annotatedSources(_ sources: String) -> String {
         var value = sources
-
         for entry in entries {
             value = value.replacingOccurrences(
                 of: "===== FILE: \(entry.path) =====",
                 with: "===== EVIDENCE \(entry.id) ====="
             )
         }
-
         return value
     }
+}
+
+enum RepositoryEvidenceProfile: String {
+    case bootstrap
+    case runtime
+    case persistence
+    case capabilities
+    case security
+    case resilience
+    case concurrency
+    case observability
+    case selfImprovement
+    case general
 }
 
 struct RepositoryContextSnapshot {
     let repository: String
     let branch: String
+    let profile: RepositoryEvidenceProfile
     let tree: String
     let sources: String
-    let repositoryPaths: [String]
     let loadedSourcePaths: [String]
+    let evidenceCoverage: [String: String]
 }
 
-/// Read-only GitHub repository reader used by RepositoryContextCapability.
-///
-/// Runtime v1 intentionally caches the immutable branch snapshot and file
-/// contents in memory. Without this cache, every autonomous analysis step
-/// would refetch the same recursive tree plus the same source files and can
-/// exhaust GitHub's unauthenticated API quota very quickly.
 final class GitHubRepositoryContextService {
     private let owner: String
     private let repository: String
     private let branch: String
     private let session: URLSession
 
-    // Evidence depth is intentionally biased toward fewer, more complete files.
-    // The verifier can reason about real control flow far more reliably from six
-    // mostly complete source units than from twelve shallow first-page excerpts.
-    private let maxSelectedFiles = 7
-    private let maxCharactersPerFile = 28_000
-    private let maxTotalSourceCharacters = 150_000
+    private let maxSelectedFiles = 10
+    private let maxCharactersPerFile = 40_000
+    private let maxTotalSourceCharacters = 220_000
     private let maxRequestAttempts = 3
 
     private var repositoryPathsCache: [String]?
@@ -515,22 +403,22 @@ final class GitHubRepositoryContextService {
         configuration.timeoutIntervalForRequest = 60
         configuration.timeoutIntervalForResource = 120
         configuration.waitsForConnectivity = true
-        self.session = URLSession(configuration: configuration)
+        session = URLSession(configuration: configuration)
     }
 
     func context(for task: String) async throws -> RepositoryContextSnapshot {
         let repositoryPaths = try await fetchRepositoryPaths()
         let swiftPaths = repositoryPaths.filter { $0.hasSuffix(".swift") }
-        let selected = select(paths: swiftPaths, task: task)
+        let profile = profile(for: task)
+        let selected = select(paths: swiftPaths, task: task, profile: profile)
 
         var chunks: [String] = []
-        var loadedSourcePaths: [String] = []
+        var loaded: [String] = []
         var totalCharacters = 0
+        var coverage: [String: String] = [:]
 
         for path in selected {
-            guard totalCharacters < maxTotalSourceCharacters else {
-                break
-            }
+            guard totalCharacters < maxTotalSourceCharacters else { break }
 
             let text: String
             do {
@@ -544,98 +432,214 @@ final class GitHubRepositoryContextService {
             let remaining = maxTotalSourceCharacters - totalCharacters
             let allowed = min(maxCharactersPerFile, remaining)
             let clipped = String(text.prefix(allowed))
+            let full = clipped.count == text.count
+            let coverageLabel = full ? "FULL" : "TRUNCATED"
+            coverage["E\(loaded.count + 1)"] = coverageLabel
 
-            let truncationNotice = text.count > clipped.count
-                ? "\n[EVIDENCE TRUNCATED: ABSENCE CLAIMS NOT PERMITTED FOR THIS FILE]"
-                : "\n[EVIDENCE COMPLETE FOR THIS FILE]"
-
-            chunks.append(
-                """
-                ===== FILE: \(path) =====
-                \(clipped)\(truncationNotice)
-                """
-            )
-
-            loadedSourcePaths.append(path)
+            let notice = full ? "" : "\n[FILE TRUNCATED BY REPOSITORY CONTEXT BUDGET]"
+            chunks.append("===== FILE: \(path) =====\n\(clipped)\(notice)")
+            loaded.append(path)
             totalCharacters += clipped.count
         }
 
-        guard !chunks.isEmpty else {
-            throw URLError(.cannotDecodeContentData)
-        }
+        guard !chunks.isEmpty else { throw URLError(.cannotDecodeContentData) }
 
-        let tree = repositoryPaths
-            .sorted()
-            .prefix(300)
-            .joined(separator: "\n")
+        let tree = repositoryPaths.sorted().prefix(400).joined(separator: "\n")
 
         return RepositoryContextSnapshot(
             repository: "\(owner)/\(repository)",
             branch: branch,
+            profile: profile,
             tree: tree,
             sources: chunks.joined(separator: "\n\n"),
-            repositoryPaths: repositoryPaths,
-            loadedSourcePaths: loadedSourcePaths
+            loadedSourcePaths: loaded,
+            evidenceCoverage: coverage
         )
     }
 
-    private func fetchRepositoryPaths() async throws -> [String] {
-        if let cached = repositoryPathsCache {
-            return cached
+    private func profile(for task: String) -> RepositoryEvidenceProfile {
+        let value = task.lowercased()
+
+        if value.contains("entry point") || value.contains("bootstrap") || value.contains("top-level") || value.contains("map repository") || value.contains("χαρτογράφ") {
+            return .bootstrap
+        }
+        if value.contains("persist") || value.contains("state management") || value.contains("memory") || value.contains("checkpoint") {
+            return .persistence
+        }
+        if value.contains("capability") || value.contains("tool") || value.contains("plugin") || value.contains("routing") {
+            return .capabilities
+        }
+        if value.contains("security") || value.contains("auth") || value.contains("secret") || value.contains("permission") || value.contains("approval") {
+            return .security
+        }
+        if value.contains("error") || value.contains("retry") || value.contains("resilien") || value.contains("recovery") || value.contains("timeout") {
+            return .resilience
+        }
+        if value.contains("concurr") || value.contains("race") || value.contains("locking") || value.contains("async") {
+            return .concurrency
+        }
+        if value.contains("observ") || value.contains("logging") || value.contains("audit") || value.contains("telemetry") {
+            return .observability
+        }
+        if value.contains("self-improvement") || value.contains("self modification") || value.contains("self-modification") {
+            return .selfImprovement
+        }
+        if value.contains("runtime") || value.contains("executor") || value.contains("planner") || value.contains("autonomous") {
+            return .runtime
+        }
+        return .general
+    }
+
+    private func select(paths: [String], task: String, profile: RepositoryEvidenceProfile) -> [String] {
+        let bundles: [RepositoryEvidenceProfile: [String]] = [
+            .bootstrap: [
+                "Travis_Multiplatform_Ai/Travis_Multiplatform_Ai/Travis_Multiplatform_AiApp.swift",
+                "Travis_Multiplatform_Ai/App/TRAVISAppState.swift",
+                "Travis_Multiplatform_Ai/App/TRAVISRootView.swift",
+                "Travis_Multiplatform_Ai/platform/Macos/MacAppShell.swift",
+                "Travis_Multiplatform_Ai/platform/Ios/iOSAppShell.swift",
+                "Travis_Multiplatform_Ai/Agent/AgentOrchestrator.swift",
+                "Travis_Multiplatform_Ai/Agent/AgentCapability.swift",
+                "Travis_Multiplatform_Ai/Services/AIService.swift",
+                "Travis_Multiplatform_Ai/Services/PersistenceService.swift",
+                "Travis_Multiplatform_Ai/Services/KeychainService.swift"
+            ],
+            .runtime: [
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentRuntimeModels.swift",
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskRuntime.swift",
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskExecutor.swift",
+                "Travis_Multiplatform_Ai/Agent/Runtime/TaskPlanner.swift",
+                "Travis_Multiplatform_Ai/Agent/AgentOrchestrator.swift",
+                "Travis_Multiplatform_Ai/Agent/AgentCapability.swift",
+                "Travis_Multiplatform_Ai/App/TRAVISAppState.swift"
+            ],
+            .persistence: [
+                "Travis_Multiplatform_Ai/Services/PersistenceService.swift",
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentRuntimeModels.swift",
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskRuntime.swift",
+                "Travis_Multiplatform_Ai/App/TRAVISAppState.swift",
+                "Travis_Multiplatform_Ai/Models/PersistedChatMessage.swift",
+                "Travis_Multiplatform_Ai/Models/PersistedProposedAction.swift",
+                "Travis_Multiplatform_Ai/Models/PersistedFile.swift"
+            ],
+            .capabilities: [
+                "Travis_Multiplatform_Ai/Agent/AgentCapability.swift",
+                "Travis_Multiplatform_Ai/Agent/AgentOrchestrator.swift",
+                "Travis_Multiplatform_Ai/Agent/TextTaskCapability.swift",
+                "Travis_Multiplatform_Ai/Agent/RepositoryContextCapability.swift",
+                "Travis_Multiplatform_Ai/Agent/SelfImprovementCapability.swift",
+                "Travis_Multiplatform_Ai/Agent/CryptoTradingCapability.swift",
+                "Travis_Multiplatform_Ai/Agent/ApprovalGateService.swift"
+            ],
+            .security: [
+                "Travis_Multiplatform_Ai/Agent/ApprovalGateService.swift",
+                "Travis_Multiplatform_Ai/Services/PermissionService.swift",
+                "Travis_Multiplatform_Ai/Services/KeychainService.swift",
+                "Travis_Multiplatform_Ai/Models/TravisPermission.swift",
+                "Travis_Multiplatform_Ai/Models/StandingPermission.swift",
+                "Travis_Multiplatform_Ai/Agent/SelfImprovementCapability.swift",
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskExecutor.swift"
+            ],
+            .resilience: [
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskExecutor.swift",
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskRuntime.swift",
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentRuntimeModels.swift",
+                "Travis_Multiplatform_Ai/Services/AIService.swift",
+                "Travis_Multiplatform_Ai/Agent/RepositoryContextCapability.swift"
+            ],
+            .concurrency: [
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskExecutor.swift",
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskRuntime.swift",
+                "Travis_Multiplatform_Ai/App/TRAVISAppState.swift",
+                "Travis_Multiplatform_Ai/Services/AIService.swift",
+                "Travis_Multiplatform_Ai/Agent/AgentOrchestrator.swift"
+            ],
+            .observability: [
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskRuntime.swift",
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentRuntimeModels.swift",
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskExecutor.swift",
+                "Travis_Multiplatform_Ai/App/TRAVISAppState.swift",
+                "Travis_Multiplatform_Ai/Services/PersistenceService.swift"
+            ],
+            .selfImprovement: [
+                "Travis_Multiplatform_Ai/Agent/SelfImprovementCapability.swift",
+                "Travis_Multiplatform_Ai/Agent/ApprovalGateService.swift",
+                "Travis_Multiplatform_Ai/Agent/AgentCapability.swift",
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskExecutor.swift",
+                "Travis_Multiplatform_Ai/App/TRAVISAppState.swift"
+            ],
+            .general: [
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskExecutor.swift",
+                "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskRuntime.swift",
+                "Travis_Multiplatform_Ai/Agent/Runtime/TaskPlanner.swift",
+                "Travis_Multiplatform_Ai/Agent/AgentOrchestrator.swift",
+                "Travis_Multiplatform_Ai/App/TRAVISAppState.swift",
+                "Travis_Multiplatform_Ai/Services/AIService.swift"
+            ]
+        ]
+
+        var result = (bundles[profile] ?? []).filter { paths.contains($0) }
+        let terms = task.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count >= 4 }
+
+        var ranked: [(path: String, score: Int)] = []
+        for path in paths where !result.contains(path) {
+            let lower = path.lowercased()
+            var score = 0
+            for term in terms where lower.contains(term) { score += 6 }
+            if lower.contains("/runtime/") { score += 3 }
+            if lower.contains("/agent/") { score += 2 }
+            if lower.contains("/services/") { score += 1 }
+            if score > 0 { ranked.append((path, score)) }
         }
 
-        let allowed = CharacterSet(
-            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
-        )
+        ranked.sort {
+            if $0.score == $1.score { return $0.path < $1.path }
+            return $0.score > $1.score
+        }
 
-        let encodedBranch = branch.addingPercentEncoding(
-            withAllowedCharacters: allowed
-        ) ?? branch
+        for item in ranked where result.count < maxSelectedFiles {
+            result.append(item.path)
+        }
 
-        guard let url = URL(
-            string: "https://api.github.com/repos/\(owner)/\(repository)/git/trees/\(encodedBranch)?recursive=1"
-        ) else {
+        return Array(result.prefix(maxSelectedFiles))
+    }
+
+    private func fetchRepositoryPaths() async throws -> [String] {
+        if let cached = repositoryPathsCache { return cached }
+
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+        let encodedBranch = branch.addingPercentEncoding(withAllowedCharacters: allowed) ?? branch
+
+        guard let url = URL(string: "https://api.github.com/repos/\(owner)/\(repository)/git/trees/\(encodedBranch)?recursive=1") else {
             throw URLError(.badURL)
         }
 
         let data = try await request(url)
         let tree = try JSONDecoder().decode(GitHubTreeResponse.self, from: data)
-
-        let paths = tree.tree.compactMap { item -> String? in
-            guard item.type == "blob" else { return nil }
-            return item.path
-        }
-
+        let paths = tree.tree.compactMap { $0.type == "blob" ? $0.path : nil }
         repositoryPathsCache = paths
         return paths
     }
 
     private func fetchFile(path: String) async throws -> String {
-        if let cached = fileCache[path] {
-            return cached
-        }
+        if let cached = fileCache[path] { return cached }
 
         var components = URLComponents()
         components.scheme = "https"
         components.host = "api.github.com"
         components.path = "/repos/\(owner)/\(repository)/contents/\(path)"
         components.queryItems = [URLQueryItem(name: "ref", value: branch)]
-
-        guard let url = components.url else {
-            throw URLError(.badURL)
-        }
+        guard let url = components.url else { throw URLError(.badURL) }
 
         let data = try await request(url)
         let response = try JSONDecoder().decode(GitHubContentResponse.self, from: data)
-
         let base64 = response.content.replacingOccurrences(of: "\n", with: "")
 
-        guard
-            let decoded = Data(base64Encoded: base64),
-            let text = String(data: decoded, encoding: .utf8)
-        else {
-            throw URLError(.cannotDecodeContentData)
-        }
+        guard let decoded = Data(base64Encoded: base64),
+              let text = String(data: decoded, encoding: .utf8)
+        else { throw URLError(.cannotDecodeContentData) }
 
         fileCache[path] = text
         return text
@@ -652,44 +656,30 @@ final class GitHubRepositoryContextService {
 
             do {
                 let (data, response) = try await session.data(for: request)
-
                 guard let http = response as? HTTPURLResponse else {
                     throw RepositoryTransportError.invalidResponse
                 }
 
-                if (200..<300).contains(http.statusCode) {
-                    return data
-                }
-
-                let message = Self.githubMessage(from: data)
-                let remaining = http.value(forHTTPHeaderField: "X-RateLimit-Remaining")
-                let reset = http.value(forHTTPHeaderField: "X-RateLimit-Reset")
+                if (200..<300).contains(http.statusCode) { return data }
 
                 let error = RepositoryTransportError.httpError(
                     status: http.statusCode,
-                    message: message,
-                    remaining: remaining,
-                    reset: reset
+                    message: Self.githubMessage(from: data),
+                    remaining: http.value(forHTTPHeaderField: "X-RateLimit-Remaining"),
+                    reset: http.value(forHTTPHeaderField: "X-RateLimit-Reset")
                 )
 
                 if Self.isRetryable(status: http.statusCode), attempt < maxRequestAttempts {
                     lastError = error
-                    let delay = UInt64(attempt * attempt)
-                    try? await Task.sleep(for: .seconds(delay))
+                    try? await Task.sleep(for: .seconds(UInt64(attempt * attempt)))
                     continue
                 }
-
                 throw error
             } catch {
                 lastError = error
-
-                if error is RepositoryTransportError {
-                    throw error
-                }
-
+                if error is RepositoryTransportError { throw error }
                 if attempt < maxRequestAttempts {
-                    let delay = UInt64(attempt * attempt)
-                    try? await Task.sleep(for: .seconds(delay))
+                    try? await Task.sleep(for: .seconds(UInt64(attempt * attempt)))
                     continue
                 }
             }
@@ -703,129 +693,23 @@ final class GitHubRepositoryContextService {
     }
 
     private static func githubMessage(from data: Data) -> String {
-        guard
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let message = object["message"] as? String
-        else {
-            return String(data: data, encoding: .utf8).map { String($0.prefix(300)) } ?? ""
-        }
-
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = object["message"] as? String
+        else { return String(data: data, encoding: .utf8).map { String($0.prefix(300)) } ?? "" }
         return message
-    }
-
-    /// Select evidence for the CURRENT execution step, rather than blindly
-    /// loading the same fixed bundle for every step.
-    private func select(paths: [String], task: String) -> [String] {
-        let taskLower = task.lowercased()
-        let terms = taskLower
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { $0.count >= 4 }
-
-        let coreNames = [
-            "agentruntimemodels.swift",
-            "agenttaskruntime.swift",
-            "agenttaskexecutor.swift",
-            "taskplanner.swift",
-            "agentcapability.swift",
-            "agentorchestrator.swift",
-            "approvalgateservice.swift",
-            "selfimprovementcapability.swift",
-            "travisappstate.swift",
-            "aiservice.swift",
-            "persistenceservice.swift",
-            "keychainservice.swift"
-        ]
-
-        let semanticRules: [(markers: [String], pathTokens: [String], weight: Int)] = [
-            (["concurrency", "race", "locking", "async", "parallel"],
-             ["agenttaskexecutor", "agenttaskruntime", "agentorchestrator", "aiservice", "persistence"], 24),
-            (["security", "auth", "secret", "permission", "approval", "trust"],
-             ["approvalgate", "keychain", "selfimprovement", "executionservice", "cryptotrading", "agentorchestrator"], 24),
-            (["planning", "planner", "scheduling", "replan", "retry", "error recovery"],
-             ["taskplanner", "agenttaskexecutor", "agenttaskruntime", "agentruntimemodels"], 24),
-            (["persistence", "state", "memory", "checkpoint", "recovery"],
-             ["persistence", "agentruntimemodels", "agenttaskruntime", "travisappstate"], 24),
-            (["observability", "logging", "telemetry", "audit", "trace"],
-             ["agenttaskexecutor", "travisappstate", "aiservice", "approvalgate"], 22),
-            (["capability", "plugin", "integration", "routing", "tool"],
-             ["agentcapability", "agentorchestrator", "selfimprovement", "texttask", "cryptotrading", "repositorycontext"], 22),
-            (["self-improvement", "self improvement", "self-modification", "self modification"],
-             ["selfimprovement", "approvalgate", "agentorchestrator", "persistence"], 28),
-            (["entry point", "top-level", "structure", "bootstrap"],
-             ["appstate", "rootview", "app.swift", "agentorchestrator"], 18)
-        ]
-
-        var ranked: [(path: String, score: Int)] = []
-
-        for path in paths {
-            let lower = path.lowercased()
-            var score = 0
-
-            if lower.contains("/runtime/") { score += 8 }
-            if lower.contains("/agent/") { score += 6 }
-            if lower.contains("/services/") { score += 3 }
-
-            if coreNames.contains(where: lower.hasSuffix) {
-                score += 5
-            }
-
-            for term in terms where lower.contains(term) {
-                score += 6
-            }
-
-            for rule in semanticRules {
-                guard rule.markers.contains(where: taskLower.contains) else { continue }
-                if rule.pathTokens.contains(where: lower.contains) {
-                    score += rule.weight
-                }
-            }
-
-            if score > 0 {
-                ranked.append((path: path, score: score))
-            }
-        }
-
-        ranked.sort { left, right in
-            if left.score == right.score {
-                return left.path < right.path
-            }
-            return left.score > right.score
-        }
-
-        var result = ranked.prefix(maxSelectedFiles).map(\.path)
-
-        // Always include at least one runtime/executor source unit when it exists.
-        let executorPath = "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskExecutor.swift"
-        if paths.contains(executorPath), !result.contains(executorPath), !result.isEmpty {
-            result[result.count - 1] = executorPath
-        }
-
-        if result.isEmpty {
-            result = Array(paths.sorted().prefix(maxSelectedFiles))
-        }
-
-        return result
     }
 }
 
 private enum SourcePathExtractor {
-    private static let pattern =
-        #"(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:swift|py|js|jsx|ts|tsx|json|ya?ml|toml|md|sh|pbxproj|xcconfig)"#
+    private static let pattern = #"(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:swift|py|js|jsx|ts|tsx|json|ya?ml|toml|md|sh|pbxproj|xcconfig)"#
 
     static func extract(from text: String) -> [String] {
-        guard let expression = try? NSRegularExpression(pattern: pattern) else {
-            return []
-        }
-
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
         let fullRange = NSRange(text.startIndex..<text.endIndex, in: text)
-        let matches = expression.matches(in: text, range: fullRange)
-
-        var paths: [String] = []
-        for match in matches {
-            guard let range = Range(match.range, in: text) else { continue }
-            paths.append(String(text[range]))
+        return expression.matches(in: text, range: fullRange).compactMap {
+            guard let range = Range($0.range, in: text) else { return nil }
+            return String(text[range])
         }
-        return paths
     }
 }
 
@@ -845,19 +729,13 @@ private struct GitHubContentResponse: Decodable {
 private extension String {
     func removingRepositoryJSONFence() -> String {
         var value = trimmingCharacters(in: .whitespacesAndNewlines)
-
         if value.hasPrefix("```json") {
             value.removeFirst("```json".count)
         } else if value.hasPrefix("```") {
             value.removeFirst(3)
         }
-
         value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if value.hasSuffix("```") {
-            value.removeLast(3)
-        }
-
+        if value.hasSuffix("```") { value.removeLast(3) }
         return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
