@@ -169,41 +169,43 @@ final class SpeechRecognitionService: NSObject {
         liveTranscript = ""
 
         if sendFinalTranscript, !finalText.isEmpty {
-            if isDeleteLatestConversationCommand(finalText) {
-                NotificationCenter.default.post(name: Self.deleteLatestConversationNotification, object: nil)
-            } else {
-                onFinalTranscript?(finalText)
+            if isDeleteConversationCommand(finalText) {
+                NotificationCenter.default.post(name: Self.deleteLatestConversationNotification, object: finalText)
+                return
             }
+
+            onFinalTranscript?(finalText)
         }
     }
 
-    private func isDeleteLatestConversationCommand(_ text: String) -> Bool {
+    /// Deterministic local command classification. We deliberately do not
+    /// require words such as "latest" or "last" because speech recognition
+    /// may omit or distort those words. A destructive verb plus an explicit
+    /// conversation/history target is enough to keep this command out of the
+    /// LLM routing path.
+    private func isDeleteConversationCommand(_ text: String) -> Bool {
         let normalized = text
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "el_GR"))
             .lowercased()
 
         let wantsDelete =
             normalized.contains("σβησ") ||
-            normalized.contains("σβησε") ||
-            normalized.contains("διαγραψ") ||
+            normalized.contains("σβηστ") ||
+            normalized.contains("διαγρα") ||
             normalized.contains("διαγραφ") ||
             normalized.contains("delete") ||
-            normalized.contains("remove")
+            normalized.contains("remove") ||
+            normalized.contains("erase")
 
         let targetsConversation =
             normalized.contains("συνομιλ") ||
             normalized.contains("συζητ") ||
             normalized.contains("ιστορικ") ||
+            normalized.contains("μηνυμα") ||
             normalized.contains("chat") ||
-            normalized.contains("conversation")
+            normalized.contains("conversation") ||
+            normalized.contains("history")
 
-        let targetsLatest =
-            normalized.contains("τελευται") ||
-            normalized.contains("προσφατ") ||
-            normalized.contains("latest") ||
-            normalized.contains("last") ||
-            normalized.contains("προηγουμεν")
-
-        return wantsDelete && targetsConversation && targetsLatest
+        return wantsDelete && targetsConversation
     }
 }
