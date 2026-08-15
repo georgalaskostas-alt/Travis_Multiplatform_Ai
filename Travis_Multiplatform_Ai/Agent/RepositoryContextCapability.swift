@@ -104,9 +104,6 @@ final class RepositoryContextCapability: AgentCapability {
         evidenceCatalog: RepositoryEvidenceCatalog,
         correctiveFeedback: String?
     ) -> String {
-        // Deliberately expose ONLY opaque evidence IDs to the model.
-        // Exact repository paths remain exclusively in Swift and are injected
-        // only after deterministic validation during render().
         let evidenceManifest = evidenceCatalog.entries
             .map(\.id)
             .joined(separator: ", ")
@@ -212,11 +209,8 @@ final class RepositoryContextCapability: AgentCapability {
         raw: String,
         catalog: RepositoryEvidenceCatalog
     ) throws {
-        let directlyWrittenPaths = SourcePathExtractor.extract(from: raw)
-        if !directlyWrittenPaths.isEmpty {
-            throw RepositoryGroundingError.rawPathReferenceForbidden(Array(Set(directlyWrittenPaths)).sorted())
-        }
-
+        // Free-text path-like tokens are sanitized deterministically during
+        // render(). Grounding authority comes exclusively from evidenceRefs.
         let refs = response.observations.flatMap(\.evidenceRefs) + response.findings.flatMap(\.evidenceRefs)
         let invalid = Array(Set(refs.filter { !catalog.allowedIDs.contains($0) })).sorted()
         guard invalid.isEmpty else { throw RepositoryGroundingError.invalidEvidenceReferences(invalid) }
@@ -245,7 +239,7 @@ final class RepositoryContextCapability: AgentCapability {
         if let groundingError = error as? RepositoryGroundingError {
             switch groundingError {
             case .rawPathReferenceForbidden:
-                return "You emitted forbidden path-like text. Exact paths are hidden and must never be guessed or written. Cite only evidence IDs: \(allowed)."
+                return "Do not emit path-like text. Cite only evidence IDs: \(allowed)."
             case .invalidEvidenceReferences(let references):
                 return "Invalid evidence IDs: \(references.joined(separator: ", ")). Allowed: \(allowed)."
             case .noLoadedSourceEvidence:
@@ -254,17 +248,19 @@ final class RepositoryContextCapability: AgentCapability {
                 return "Return only valid JSON matching the required schema and cite only: \(allowed)."
             }
         }
-        return "Previous response failed validation: \(error.localizedDescription). Use only: \(allowed)."
+        return "Previous response failed validation. Use only evidence IDs: \(allowed)."
     }
 
     private func render(_ response: RepositoryStructuredResponse, catalog: RepositoryEvidenceCatalog) -> String {
-        var sections: [String] = [response.summary]
+        var sections: [String] = [RepositoryFreeTextSanitizer.sanitize(response.summary)]
 
         if !response.observations.isEmpty {
             var lines = ["VERIFIED OBSERVATIONS"]
             for (index, observation) in response.observations.enumerated() {
                 let evidence = catalog.paths(for: observation.evidenceRefs).map { "`\($0)`" }.joined(separator: ", ")
-                lines.append("\(index + 1). \(observation.statement)\n   Source evidence: \(observation.evidenceDetail)\n   Evidence: \(evidence)")
+                let statement = RepositoryFreeTextSanitizer.sanitize(observation.statement)
+                let detail = RepositoryFreeTextSanitizer.sanitize(observation.evidenceDetail)
+                lines.append("\(index + 1). \(statement)\n   Source evidence: \(detail)\n   Evidence: \(evidence)")
             }
             sections.append(lines.joined(separator: "\n"))
         }
@@ -274,9 +270,16 @@ final class RepositoryContextCapability: AgentCapability {
             for (index, finding) in response.findings.enumerated() {
                 let severity = finding.severity?.uppercased() ?? "UNRANKED"
                 let evidence = catalog.paths(for: finding.evidenceRefs).map { "`\($0)`" }.joined(separator: ", ")
-                var block = "\(index + 1). [\(severity)] \(finding.title)\n   \(finding.explanation)\n   Source evidence: \(finding.evidenceDetail)"
-                if let impact = finding.impact, !impact.isEmpty { block += "\n   Impact: \(impact)" }
-                if let recommendation = finding.recommendation, !recommendation.isEmpty { block += "\n   Recommendation: \(recommendation)" }
+                let title = RepositoryFreeTextSanitizer.sanitize(finding.title)
+                let explanation = RepositoryFreeTextSanitizer.sanitize(finding.explanation)
+                let detail = RepositoryFreeTextSanitizer.sanitize(finding.evidenceDetail)
+                var block = "\(index + 1). [\(severity)] \(title)\n   \(explanation)\n   Source evidence: \(detail)"
+                if let impact = finding.impact, !impact.isEmpty {
+                    block += "\n   Impact: \(RepositoryFreeTextSanitizer.sanitize(impact))"
+                }
+                if let recommendation = finding.recommendation, !recommendation.isEmpty {
+                    block += "\n   Recommendation: \(RepositoryFreeTextSanitizer.sanitize(recommendation))"
+                }
                 block += "\n   Evidence: \(evidence)"
                 lines.append(block)
             }
@@ -284,7 +287,11 @@ final class RepositoryContextCapability: AgentCapability {
         }
 
         if !response.limitations.isEmpty {
-            sections.append("LIMITATIONS\n" + response.limitations.map { "- \($0)" }.joined(separator: "\n"))
+            sections.append(
+                "LIMITATIONS\n" + response.limitations
+                    .map { "- \(RepositoryFreeTextSanitizer.sanitize($0))" }
+                    .joined(separator: "\n")
+            )
         }
 
         return sections.joined(separator: "\n\n")
@@ -429,8 +436,7 @@ final class GitHubRepositoryContextService {
             let allowed = min(maxCharactersPerFile, remaining)
             let clipped = String(text.prefix(allowed))
             let full = clipped.count == text.count
-            let coverageLabel = full ? "FULL" : "TRUNCATED"
-            coverage["E\(loaded.count + 1)"] = coverageLabel
+            coverage["E\(loaded.count + 1)"] = full ? "FULL" : "TRUNCATED"
 
             let notice = full ? "" : "\n[FILE TRUNCATED BY REPOSITORY CONTEXT BUDGET]"
             chunks.append("===== FILE: \(path) =====\n\(clipped)\(notice)")
@@ -706,6 +712,23 @@ private enum SourcePathExtractor {
             guard let range = Range($0.range, in: text) else { return nil }
             return String(text[range])
         }
+    }
+}
+
+private enum RepositoryFreeTextSanitizer {
+    private static let pattern = #"(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:swift|py|js|jsx|ts|tsx|json|ya?ml|toml|md|sh|pbxproj|xcconfig)"#
+
+    static func sanitize(_ text: String) -> String {
+        guard let expression = try? NSRegularExpression(pattern: pattern) else {
+            return text
+        }
+
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return expression.stringByReplacingMatches(
+            in: text,
+            range: range,
+            withTemplate: "[source reference omitted]"
+        )
     }
 }
 
