@@ -4,6 +4,8 @@ struct ChatView: View {
     @Bindable var appState: TRAVISAppState
     @State private var draft: String = ""
 
+    private static let deleteLatestConversationNotification = Notification.Name("TRAVISDeleteLatestConversation")
+
     private var isViewingPastSession: Bool {
         appState.viewedSessionId != appState.currentSessionId
     }
@@ -238,6 +240,9 @@ struct ChatView: View {
                 endPoint: .bottomTrailing
             )
         )
+        .onReceive(NotificationCenter.default.publisher(for: Self.deleteLatestConversationNotification)) { _ in
+            deleteLatestPastConversation()
+        }
     }
 
     // MARK: - Chat Input
@@ -259,12 +264,57 @@ struct ChatView: View {
             rejectWaitingRuntimeStep()
             draft = ""
             return
+        case "/delete-last", "/delete-last-conversation":
+            deleteLatestPastConversation()
+            draft = ""
+            return
         default:
             break
         }
 
+        if isDeleteLatestConversationCommand(trimmed) {
+            deleteLatestPastConversation()
+            draft = ""
+            return
+        }
+
         appState.sendCommand(trimmed, source: .manual)
         draft = ""
+    }
+
+    private func isDeleteLatestConversationCommand(_ text: String) -> Bool {
+        let normalized = text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "el_GR"))
+            .lowercased()
+
+        let wantsDelete = normalized.contains("σβησε") || normalized.contains("διαγραψε") || normalized.contains("delete")
+        let targetsConversation = normalized.contains("συνομιλ") || normalized.contains("conversation")
+        let targetsLatest = normalized.contains("τελευται") || normalized.contains("προσφατ") || normalized.contains("latest") || normalized.contains("last")
+        return wantsDelete && targetsConversation && targetsLatest
+    }
+
+    private func deleteLatestPastConversation() {
+        guard let session = appState.pastSessions.first else {
+            appState.addAssistantMessage("Δεν υπάρχει παλαιότερη συνομιλία για διαγραφή.")
+            appState.lastResponseSummary = "No conversation to delete"
+            return
+        }
+        deleteConversation(session.id)
+    }
+
+    private func deleteConversation(_ sessionId: UUID) {
+        do {
+            try ChatHistoryStore.deleteSession(sessionId)
+            if appState.viewedSessionId == sessionId {
+                appState.returnToCurrentSession()
+            }
+            appState.lastResponseSummary = "Η συνομιλία διαγράφηκε"
+            appState.addAssistantMessage("Η συνομιλία διαγράφηκε οριστικά από το ιστορικό.")
+        } catch {
+            let message = "Αποτυχία διαγραφής συνομιλίας: \(error.localizedDescription)"
+            appState.lastResponseSummary = message
+            appState.addAssistantMessage(message)
+        }
     }
 
     private func resumeRecoveredTask() {
@@ -522,6 +572,13 @@ struct ChatView: View {
                         ForEach(recent) { session in
                             Button { appState.viewSession(session.id) } label: { recentSessionCard(session) }
                                 .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button(role: .destructive) {
+                                        deleteConversation(session.id)
+                                    } label: {
+                                        Label("Διαγραφή συνομιλίας", systemImage: "trash")
+                                    }
+                                }
                         }
                     }
                     .padding(.vertical, 2)
