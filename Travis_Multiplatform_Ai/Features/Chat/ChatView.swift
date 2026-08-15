@@ -246,10 +246,21 @@ struct ChatView: View {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        if trimmed.lowercased() == "/resume" {
+        switch trimmed.lowercased() {
+        case "/resume":
             resumeRecoveredTask()
             draft = ""
             return
+        case "/approve":
+            approveWaitingRuntimeStep()
+            draft = ""
+            return
+        case "/reject":
+            rejectWaitingRuntimeStep()
+            draft = ""
+            return
+        default:
+            break
         }
 
         appState.sendCommand(trimmed, source: .manual)
@@ -304,6 +315,77 @@ struct ChatView: View {
 
         appState.addAssistantMessage(response)
         appState.lastResponseSummary = "Recovered task resumed — \(progressPercent)%"
+    }
+
+    private func approveWaitingRuntimeStep() {
+        guard let task = appState.taskRuntime.tasks.last(where: { $0.status == .waitingForApproval }),
+              let stepId = task.executionState.currentStepId,
+              let step = task.plan.steps.first(where: { $0.id == stepId && $0.status == .waitingForApproval })
+        else {
+            appState.addAssistantMessage("Δεν υπάρχει autonomous step που περιμένει έγκριση.")
+            appState.lastResponseSummary = "No runtime approval pending"
+            return
+        }
+
+        appState.taskRuntime.markStepApprovalGranted(taskId: task.id, stepId: step.id)
+
+        guard let updated = appState.taskRuntime.task(id: task.id) else {
+            appState.addAssistantMessage("Η έγκριση δεν μπόρεσε να συνδεθεί με το runtime task.")
+            appState.lastResponseSummary = "Runtime approval failed"
+            return
+        }
+
+        let next = appState.taskRuntime.nextRunnableStep(taskId: updated.id)
+        let nextText = next.map { "#\($0.order) — \($0.title)" } ?? "κανένα"
+
+        appState.addAssistantMessage("""
+        RUNTIME APPROVAL GRANTED
+
+        TASK
+        \(updated.id.uuidString)
+
+        STEP
+        #\(step.order) — \(step.title)
+
+        STATUS
+        \(updated.status.rawValue)
+
+        NEXT RUNNABLE STEP
+        \(nextText)
+
+        Η έγκριση εφαρμόστηκε deterministic στο συγκεκριμένο task/step. Μπορείς να συνεχίσεις με /run ή /auto.
+        """)
+        appState.lastResponseSummary = "Runtime step approved"
+    }
+
+    private func rejectWaitingRuntimeStep() {
+        guard let task = appState.taskRuntime.tasks.last(where: { $0.status == .waitingForApproval }),
+              let stepId = task.executionState.currentStepId,
+              let step = task.plan.steps.first(where: { $0.id == stepId && $0.status == .waitingForApproval })
+        else {
+            appState.addAssistantMessage("Δεν υπάρχει autonomous step που περιμένει απόρριψη.")
+            appState.lastResponseSummary = "No runtime approval pending"
+            return
+        }
+
+        appState.taskRuntime.markStepApprovalRejected(
+            taskId: task.id,
+            stepId: step.id,
+            reason: "Rejected explicitly with /reject"
+        )
+
+        appState.addAssistantMessage("""
+        RUNTIME APPROVAL REJECTED
+
+        TASK
+        \(task.id.uuidString)
+
+        STEP
+        #\(step.order) — \(step.title)
+
+        Το task τέθηκε σε paused state και το step δεν θα εκτελεστεί.
+        """)
+        appState.lastResponseSummary = "Runtime step rejected"
     }
 
     private var unifiedChatSection: some View {
