@@ -104,9 +104,12 @@ final class RepositoryContextCapability: AgentCapability {
         evidenceCatalog: RepositoryEvidenceCatalog,
         correctiveFeedback: String?
     ) -> String {
+        // Deliberately expose ONLY opaque evidence IDs to the model.
+        // Exact repository paths remain exclusively in Swift and are injected
+        // only after deterministic validation during render().
         let evidenceManifest = evidenceCatalog.entries
-            .map { "\($0.id) = \($0.path)" }
-            .joined(separator: "\n")
+            .map(\.id)
+            .joined(separator: ", ")
 
         let coverageManifest = snapshot.evidenceCoverage
             .map { "\($0.key): \($0.value)" }
@@ -131,12 +134,6 @@ final class RepositoryContextCapability: AgentCapability {
         TASK:
         \(command)
 
-        REPOSITORY:
-        \(snapshot.repository)
-
-        BRANCH:
-        \(snapshot.branch)
-
         EVIDENCE PROFILE:
         \(snapshot.profile.rawValue)
 
@@ -145,8 +142,10 @@ final class RepositoryContextCapability: AgentCapability {
 
         STRICT GROUNDING CONTRACT:
         - Analyze only the evidence supplied below.
+        - Exact filenames and repository paths are intentionally hidden from you.
         - Evidence files are identified only by E1, E2, E3, etc.
         - NEVER write a filename, extension, directory path, or repository path inside any JSON text field.
+        - NEVER guess what an evidence ID's filename might be.
         - NEVER invent evidence IDs.
         - evidenceRefs may contain only IDs from ALLOWED EVIDENCE IDS.
         - Every observation and every finding must cite at least one evidenceRef.
@@ -159,9 +158,6 @@ final class RepositoryContextCapability: AgentCapability {
 
         ALLOWED EVIDENCE IDS:
         \(evidenceManifest)
-
-        REPOSITORY TREE FOR ORIENTATION ONLY:
-        \(snapshot.tree)
 
         LOADED SOURCE EVIDENCE:
         \(evidenceCatalog.annotatedSources(snapshot.sources))
@@ -248,8 +244,8 @@ final class RepositoryContextCapability: AgentCapability {
         let allowed = catalog.entries.map(\.id).joined(separator: ", ")
         if let groundingError = error as? RepositoryGroundingError {
             switch groundingError {
-            case .rawPathReferenceForbidden(let paths):
-                return "Forbidden path-like strings were written: \(paths.joined(separator: ", ")). Cite only evidence IDs: \(allowed)."
+            case .rawPathReferenceForbidden:
+                return "You emitted forbidden path-like text. Exact paths are hidden and must never be guessed or written. Cite only evidence IDs: \(allowed)."
             case .invalidEvidenceReferences(let references):
                 return "Invalid evidence IDs: \(references.joined(separator: ", ")). Allowed: \(allowed)."
             case .noLoadedSourceEvidence:
