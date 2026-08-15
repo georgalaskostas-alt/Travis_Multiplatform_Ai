@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Bindable var appState: TRAVISAppState
+    @State private var openAIAPIKey: String = KeychainService.shared.openAIAPIKey ?? ""
 
     private static let mandateDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -13,9 +14,7 @@ struct SettingsView: View {
 
     /// Splits a `"trading_paper_XRP"`/`"trading_testnet_XRP"` mandate key
     /// into its mode and asset for display — mirrors
-    /// `CryptoTradingCapability.parseMandateKey`. Falls back to showing
-    /// the raw remainder with no mode label for any key that predates
-    /// the mode-scoped scheme, rather than looking broken.
+    /// `CryptoTradingCapability.parseMandateKey`.
     private static func modeAndAsset(from mandateKey: String) -> (mode: String, asset: String) {
         let prefix = "trading_"
         guard mandateKey.hasPrefix(prefix) else { return ("", mandateKey) }
@@ -31,14 +30,34 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("Anthropic API") {
-                SecureField("API Key", text: $appState.anthropicAPIKey)
+            Section("OpenAI API — Primary") {
+                SecureField("OpenAI API Key", text: $openAIAPIKey)
+                    .onChange(of: openAIAPIKey) { _, newValue in
+                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if trimmed.isEmpty {
+                            KeychainService.shared.deleteOpenAIAPIKey()
+                        } else {
+                            KeychainService.shared.saveOpenAIAPIKey(trimmed)
+                        }
+                    }
 
-                if appState.anthropicAPIKey.isEmpty {
-                    Text("Χρειάζεται Anthropic API key για να λειτουργήσουν οι AI δυνατότητες.")
+                Text("Primary AI provider. TRAVIS χρησιμοποιεί GPT-5.6 Terra για planner/repository analysis και GPT-5.6 Luna για verifier/routine εργασίες.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if openAIAPIKey.isEmpty {
+                    Text("Πρόσθεσε OpenAI API key για να χρησιμοποιηθεί ως primary provider.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.orange)
                 }
+            }
+
+            Section("Anthropic API — Fallback") {
+                SecureField("Anthropic API Key", text: $appState.anthropicAPIKey)
+
+                Text("Χρησιμοποιείται ως fallback αν το OpenAI request αποτύχει και υπάρχει διαθέσιμο Anthropic credit.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Assistant") {
@@ -101,6 +120,12 @@ struct SettingsView: View {
                 }
             }
             .onAppear { appState.refreshTradingMandates() }
+
+            Section("AI Routing Status") {
+                Text(openAIAPIKey.isEmpty ? "Primary: OpenAI not configured" : "Primary: OpenAI configured")
+                Text(appState.anthropicAPIKey.isEmpty ? "Fallback: Anthropic not configured" : "Fallback: Anthropic configured")
+                    .foregroundStyle(.secondary)
+            }
 
             Section("Status") {
                 Text("Current State: \(appState.currentDeviceState.title)")
