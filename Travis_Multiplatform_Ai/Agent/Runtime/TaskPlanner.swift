@@ -26,9 +26,8 @@ enum TaskPlannerError: LocalizedError {
 /// AI-backed planner for long-lived TRAVIS tasks.
 ///
 /// The LLM proposes the plan. TRAVIS then validates and normalizes it before
-/// anything can execute. Capability routing and dependency repair for
-/// repository-grounded plans are deliberately deterministic so an LLM cannot
-/// route evidence-sensitive synthesis through an ungrounded text capability.
+/// anything can execute. Repository-grounded plans receive deterministic
+/// capability routing, dependency repair, and scope-bounded success criteria.
 final class TaskPlanner {
     static let shared = TaskPlanner()
 
@@ -44,12 +43,8 @@ final class TaskPlanner {
         availableCapabilities: [String] = [],
         context: String? = nil
     ) async throws -> TaskPlan {
-        let trimmedGoal = goal
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !trimmedGoal.isEmpty else {
-            throw TaskPlannerError.emptyGoal
-        }
+        let trimmedGoal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedGoal.isEmpty else { throw TaskPlannerError.emptyGoal }
 
         let prompt = buildPrompt(
             goal: trimmedGoal,
@@ -57,11 +52,7 @@ final class TaskPlanner {
             context: context
         )
 
-        let raw = try await aiService.generateText(
-            prompt: prompt,
-            maxTokens: 8192
-        )
-
+        let raw = try await aiService.generateText(prompt: prompt, maxTokens: 8192)
         let proposal = try decodeProposal(from: raw)
 
         return try materialize(
@@ -126,13 +117,15 @@ final class TaskPlanner {
         - synthesis of repository findings must use repository_context
         - evidence verification must use repository_context
         - final reports whose claims depend on source evidence must use repository_context
-        - do NOT route any repository-grounded synthesis/report/verification step through text_task
+        - do NOT route repository-grounded synthesis/report/verification through text_task
+        - each inspection step MUST have success criteria limited to that step's explicit scope
+        - NEVER require repository-wide completeness in a narrow inspection step
+        - NEVER make tests/docs/generated-artifact classification a criterion unless that exact step is dedicated to repository classification
+        - limitations outside the loaded evidence scope are acceptable and must not automatically make an inspection step fail
 
         Use text_task only for reasoning or writing whose correctness does not depend on repository evidence.
 
-        Return ONLY valid JSON.
-        Do not use markdown fences.
-        Do not include explanations before or after the JSON.
+        Return ONLY valid JSON. No markdown fences or commentary.
 
         Schema:
         {
@@ -185,7 +178,6 @@ final class TaskPlanner {
         - actions waiting for user approval cannot proceed until approval exists
 
         The final output must be syntactically complete JSON.
-        Ensure all braces, arrays and strings are properly closed before responding.
         """
     }
 
@@ -221,37 +213,25 @@ final class TaskPlanner {
         goal: String,
         availableCapabilities: [String]
     ) throws -> TaskPlan {
-        guard !proposal.steps.isEmpty else {
-            throw TaskPlannerError.noSteps
-        }
-
+        guard !proposal.steps.isEmpty else { throw TaskPlannerError.noSteps }
         guard proposal.steps.count <= maxPlanSteps else {
             throw TaskPlannerError.tooManySteps(proposal.steps.count)
         }
 
         let sorted = proposal.steps.sorted { $0.order < $1.order }
-        let expectedOrders = Array(1...sorted.count)
-
-        guard sorted.map(\.order) == expectedOrders else {
+        guard sorted.map(\.order) == Array(1...sorted.count) else {
             throw TaskPlannerError.invalidStructuredResponse
         }
 
         let capabilitySet = Set(availableCapabilities)
-        let repositoryGroundedPlan =
-            capabilitySet.contains("repository_context")
-            && isRepositoryGroundedGoal(goal)
+        let repositoryGroundedPlan = capabilitySet.contains("repository_context") && isRepositoryGroundedGoal(goal)
 
         var idsByOrder: [Int: UUID] = [:]
-        for step in sorted {
-            idsByOrder[step.order] = UUID()
-        }
+        for step in sorted { idsByOrder[step.order] = UUID() }
 
         let steps: [PlanStep] = try sorted.map { proposalStep in
             var dependencyOrders = proposalStep.dependsOn
 
-            // For repository analysis, aggregation/evidence-verification stages
-            // must not run while earlier evidence branches are still pending.
-            // Normalize them to depend on every prior stage deterministically.
             if repositoryGroundedPlan && isAggregationOrVerificationStep(proposalStep) {
                 dependencyOrders = Array(1..<proposalStep.order)
             }
@@ -259,30 +239,28 @@ final class TaskPlanner {
             dependencyOrders = Array(Set(dependencyOrders)).sorted()
 
             for dependency in dependencyOrders {
-                guard
-                    dependency > 0,
-                    dependency < proposalStep.order,
-                    idsByOrder[dependency] != nil
+                guard dependency > 0,
+                      dependency < proposalStep.order,
+                      idsByOrder[dependency] != nil
                 else {
-                    throw TaskPlannerError.invalidDependency(
-                        step: proposalStep.order,
-                        dependency: dependency
-                    )
+                    throw TaskPlannerError.invalidDependency(step: proposalStep.order, dependency: dependency)
                 }
             }
 
-            guard !proposalStep.successCriteria.isEmpty else {
-                throw TaskPlannerError.invalidStructuredResponse
-            }
-
-            guard let stepID = idsByOrder[proposalStep.order] else {
-                throw TaskPlannerError.invalidStructuredResponse
-            }
+            guard !proposalStep.successCriteria.isEmpty,
+                  let stepID = idsByOrder[proposalStep.order]
+            else { throw TaskPlannerError.invalidStructuredResponse }
 
             let capabilityId = normalizedCapabilityId(
                 proposed: proposalStep.capabilityId,
                 repositoryGroundedPlan: repositoryGroundedPlan,
                 availableCapabilities: capabilitySet
+            )
+
+            let successCriteria = normalizedSuccessCriteria(
+                proposalStep,
+                capabilityId: capabilityId,
+                repositoryGroundedPlan: repositoryGroundedPlan
             )
 
             return PlanStep(
@@ -293,7 +271,7 @@ final class TaskPlanner {
                 status: .pending,
                 capabilityId: capabilityId,
                 dependencyStepIds: dependencyOrders.compactMap { idsByOrder[$0] },
-                successCriteria: proposalStep.successCriteria,
+                successCriteria: successCriteria,
                 riskLevel: PlanStepRiskLevel(rawValue: proposalStep.risk.rawValue) ?? .low,
                 requiresApproval: proposalStep.requiresApproval,
                 canRunInBackground: proposalStep.canRunInBackground,
@@ -302,10 +280,29 @@ final class TaskPlanner {
             )
         }
 
-        return TaskPlan(
-            summary: proposal.summary,
-            steps: steps
-        )
+        return TaskPlan(summary: proposal.summary, steps: steps)
+    }
+
+    private func normalizedSuccessCriteria(
+        _ step: PlannerStepProposal,
+        capabilityId: String?,
+        repositoryGroundedPlan: Bool
+    ) -> [String] {
+        guard repositoryGroundedPlan, capabilityId == "repository_context" else {
+            return step.successCriteria
+        }
+
+        if isAggregationOrVerificationStep(step) {
+            return [
+                "The result synthesizes only verified dependency and repository evidence relevant to this step.",
+                "Claims without sufficient source evidence are explicitly marked as limitations rather than asserted as facts."
+            ]
+        }
+
+        return [
+            "The result provides concrete source-level evidence for the specific scope described by this step title and instructions.",
+            "The result does not claim repository-wide completeness beyond this step's loaded evidence scope; out-of-scope gaps are stated as limitations."
+        ]
     }
 
     private func normalizedCapabilityId(
@@ -313,17 +310,10 @@ final class TaskPlanner {
         repositoryGroundedPlan: Bool,
         availableCapabilities: Set<String>
     ) -> String? {
-        guard repositoryGroundedPlan else {
-            return proposed
-        }
+        guard repositoryGroundedPlan else { return proposed }
 
-        // Preserve explicit specialized state-changing capabilities, but never
-        // allow generic text_task/nil to become an escape hatch from repository
-        // grounding for a repository-analysis goal.
         if proposed == nil || proposed == "text_task" || proposed == "repository_context" {
-            return availableCapabilities.contains("repository_context")
-                ? "repository_context"
-                : proposed
+            return availableCapabilities.contains("repository_context") ? "repository_context" : proposed
         }
 
         return proposed
@@ -336,7 +326,6 @@ final class TaskPlanner {
             "κώδικ", "αρχιτεκτον", "architecture", "runtime", "project travis",
             "travis project"
         ]
-
         return markers.contains { value.contains($0) }
     }
 
@@ -347,7 +336,6 @@ final class TaskPlanner {
             "verify", "verification", "evidence", "finding", "remediation",
             "σύνοψ", "αναφορά", "επαλήθευσ"
         ]
-
         return markers.contains { value.contains($0) }
     }
 }
@@ -370,35 +358,19 @@ private struct PlannerStepProposal: Decodable {
     let estimatedEffort: PlannerEffort
 }
 
-private enum PlannerRisk: String, Codable {
-    case low
-    case medium
-    case high
-    case critical
-}
-
-private enum PlannerEffort: String, Codable {
-    case short
-    case medium
-    case long
-}
+private enum PlannerRisk: String, Codable { case low, medium, high, critical }
+private enum PlannerEffort: String, Codable { case short, medium, long }
 
 private extension String {
     func removingMarkdownJSONFence() -> String {
         var value = trimmingCharacters(in: .whitespacesAndNewlines)
-
         if value.hasPrefix("```json") {
             value.removeFirst("```json".count)
         } else if value.hasPrefix("```") {
             value.removeFirst(3)
         }
-
         value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if value.hasSuffix("```") {
-            value.removeLast(3)
-        }
-
+        if value.hasSuffix("```") { value.removeLast(3) }
         return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
