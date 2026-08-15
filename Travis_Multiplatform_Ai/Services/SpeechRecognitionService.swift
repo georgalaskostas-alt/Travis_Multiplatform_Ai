@@ -191,6 +191,7 @@ final class SpeechRecognitionService: NSObject {
         let wantsDelete =
             normalized.contains("σβησ") ||
             normalized.contains("σβηστ") ||
+            normalized.contains("διεγρα") ||
             normalized.contains("διαγρα") ||
             normalized.contains("διαγραφ") ||
             normalized.contains("delete") ||
