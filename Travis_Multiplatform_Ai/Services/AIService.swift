@@ -1,28 +1,49 @@
 import Foundation
 
+enum AIProvider: String {
+    case openAI = "OpenAI"
+    case anthropic = "Anthropic"
+}
+
 enum AIServiceError: LocalizedError {
     case missingAPIKey
-    case invalidResponse
-    case apiError(status: Int, type: String, message: String)
+    case invalidResponse(provider: AIProvider)
+    case apiError(provider: AIProvider, status: Int, type: String, message: String)
+    case allProvidersFailed(primary: String, fallback: String?)
 
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            return "Δεν έχει οριστεί Anthropic API key. Πρόσθεσέ το στις Ρυθμίσεις."
-        case .invalidResponse:
-            return "Μη αναμενόμενη απάντηση από το Anthropic API."
-        case .apiError(let status, let type, let message):
-            return "Anthropic API error \(status) (\(type)): \(message)"
+            return "Δεν έχει οριστεί OpenAI ή Anthropic API key. Πρόσθεσε τουλάχιστον ένα στις Ρυθμίσεις."
+        case .invalidResponse(let provider):
+            return "Μη αναμενόμενη απάντηση από το \(provider.rawValue) API."
+        case .apiError(let provider, let status, let type, let message):
+            return "\(provider.rawValue) API error \(status) (\(type)): \(message)"
+        case .allProvidersFailed(let primary, let fallback):
+            if let fallback {
+                return "Όλοι οι AI providers απέτυχαν. Primary: \(primary) | Fallback: \(fallback)"
+            }
+            return "Ο AI provider απέτυχε: \(primary)"
         }
     }
 }
 
+/// Central AI transport/router for TRAVIS.
+///
+/// Provider order:
+///   1. OpenAI Responses API (primary, when key exists)
+///   2. Anthropic Messages API (fallback, when key exists)
+///
+/// The public API intentionally remains `generateText(prompt:maxTokens:)` so
+/// planner, verifier, repository grounding and capabilities do not need to
+/// know which provider/model is serving a request.
 final class AIService {
     static let shared = AIService()
 
-    private let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-    private let apiVersion = "2023-06-01"
-    private let model = "claude-sonnet-4-6"
+    private let openAIEndpoint = URL(string: "https://api.openai.com/v1/responses")!
+    private let anthropicEndpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+    private let anthropicAPIVersion = "2023-06-01"
+    private let anthropicModel = "claude-sonnet-4-6"
     private let maxAttempts = 3
 
     private lazy var session: URLSession = {
@@ -36,19 +57,190 @@ final class AIService {
     private init() {}
 
     func generateText(prompt: String, maxTokens: Int = 1024) async throws -> String {
-        guard let apiKey = KeychainService.shared.anthropicAPIKey, !apiKey.isEmpty else {
+        let openAIKey = KeychainService.shared.openAIAPIKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let anthropicKey = KeychainService.shared.anthropicAPIKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let hasOpenAI = !(openAIKey ?? "").isEmpty
+        let hasAnthropic = !(anthropicKey ?? "").isEmpty
+
+        guard hasOpenAI || hasAnthropic else {
             throw AIServiceError.missingAPIKey
         }
 
-        var request = URLRequest(url: endpoint)
+        var primaryFailure: Error?
+
+        if let openAIKey, !openAIKey.isEmpty {
+            do {
+                return try await generateWithOpenAI(
+                    prompt: prompt,
+                    maxTokens: maxTokens,
+                    apiKey: openAIKey
+                )
+            } catch {
+                primaryFailure = error
+
+                // Do not fail the autonomous runtime immediately when a
+                // second configured provider can continue the task.
+                guard let anthropicKey, !anthropicKey.isEmpty else {
+                    throw error
+                }
+            }
+        }
+
+        if let anthropicKey, !anthropicKey.isEmpty {
+            do {
+                return try await generateWithAnthropic(
+                    prompt: prompt,
+                    maxTokens: maxTokens,
+                    apiKey: anthropicKey
+                )
+            } catch {
+                throw AIServiceError.allProvidersFailed(
+                    primary: primaryFailure?.localizedDescription ?? "OpenAI unavailable/not configured",
+                    fallback: error.localizedDescription
+                )
+            }
+        }
+
+        throw primaryFailure ?? AIServiceError.missingAPIKey
+    }
+
+    // MARK: - OpenAI Primary
+
+    private func generateWithOpenAI(
+        prompt: String,
+        maxTokens: Int,
+        apiKey: String
+    ) async throws -> String {
+        let model = Self.openAIModel(for: prompt)
+
+        var request = URLRequest(url: openAIEndpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 180
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        let body: [String: Any] = [
+            "model": model,
+            "input": prompt,
+            "max_output_tokens": maxTokens,
+            "reasoning": [
+                "effort": Self.openAIReasoningEffort(for: prompt)
+            ]
+        ]
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        return try await perform(
+            request: request,
+            provider: .openAI,
+            textParser: Self.openAITextContent,
+            errorTypeParser: Self.openAIErrorType,
+            errorMessageParser: Self.openAIErrorMessage
+        )
+    }
+
+    /// Cost-aware model routing.
+    /// - Planner/repository/source-code work gets Terra.
+    /// - Verification/routine conversational work gets Luna.
+    private static func openAIModel(for prompt: String) -> String {
+        let value = prompt.lowercased()
+        let complexMarkers = [
+            "planning component",
+            "repository-analysis component",
+            "repository tree",
+            "selected source files",
+            "source code",
+            "architecture",
+            "autonomous runtime",
+            "taskplanner"
+        ]
+
+        return complexMarkers.contains(where: value.contains)
+            ? "gpt-5.6-terra"
+            : "gpt-5.6-luna"
+    }
+
+    private static func openAIReasoningEffort(for prompt: String) -> String {
+        let value = prompt.lowercased()
+        if value.contains("repository-analysis component")
+            || value.contains("planning component")
+            || value.contains("architecture") {
+            return "medium"
+        }
+        return "low"
+    }
+
+    private static func openAITextContent(from data: Data) throws -> String {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AIServiceError.invalidResponse(provider: .openAI)
+        }
+
+        // Some Responses API representations expose a convenience output_text.
+        if let outputText = json["output_text"] as? String,
+           !outputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return outputText
+        }
+
+        // Canonical Responses API shape: output[] -> message -> content[] -> output_text.text
+        if let output = json["output"] as? [[String: Any]] {
+            var parts: [String] = []
+
+            for item in output {
+                guard let content = item["content"] as? [[String: Any]] else { continue }
+                for block in content {
+                    let type = block["type"] as? String
+                    if type == "output_text", let text = block["text"] as? String {
+                        parts.append(text)
+                    }
+                }
+            }
+
+            let text = parts.joined(separator: "\n")
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return text
+            }
+        }
+
+        throw AIServiceError.invalidResponse(provider: .openAI)
+    }
+
+    private static func openAIErrorType(from data: Data) -> String {
+        guard
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let error = json["error"] as? [String: Any]
+        else { return "unknown_error" }
+
+        return error["type"] as? String
+            ?? error["code"] as? String
+            ?? "unknown_error"
+    }
+
+    private static func openAIErrorMessage(from data: Data) -> String {
+        guard
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let error = json["error"] as? [String: Any]
+        else { return "" }
+
+        return error["message"] as? String ?? ""
+    }
+
+    // MARK: - Anthropic Fallback
+
+    private func generateWithAnthropic(
+        prompt: String,
+        maxTokens: Int,
+        apiKey: String
+    ) async throws -> String {
+        var request = URLRequest(url: anthropicEndpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = 180
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        request.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
+        request.setValue(anthropicAPIVersion, forHTTPHeaderField: "anthropic-version")
 
         let body: [String: Any] = [
-            "model": model,
+            "model": anthropicModel,
             "max_tokens": maxTokens,
             "messages": [
                 ["role": "user", "content": prompt]
@@ -56,6 +248,24 @@ final class AIService {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
+        return try await perform(
+            request: request,
+            provider: .anthropic,
+            textParser: Self.anthropicTextContent,
+            errorTypeParser: Self.anthropicErrorType,
+            errorMessageParser: Self.anthropicErrorMessage
+        )
+    }
+
+    // MARK: - Shared Transport
+
+    private func perform(
+        request: URLRequest,
+        provider: AIProvider,
+        textParser: (Data) throws -> String,
+        errorTypeParser: (Data) -> String,
+        errorMessageParser: (Data) -> String
+    ) async throws -> String {
         var lastError: Error?
 
         for attempt in 1...maxAttempts {
@@ -63,17 +273,18 @@ final class AIService {
                 let (data, response) = try await session.data(for: request)
 
                 guard let httpResponse = response as? HTTPURLResponse else {
-                    throw AIServiceError.invalidResponse
+                    throw AIServiceError.invalidResponse(provider: provider)
                 }
 
                 if (200..<300).contains(httpResponse.statusCode) {
-                    return try Self.textContent(from: data)
+                    return try textParser(data)
                 }
 
                 let apiError = AIServiceError.apiError(
+                    provider: provider,
                     status: httpResponse.statusCode,
-                    type: Self.errorType(from: data),
-                    message: Self.errorMessage(from: data)
+                    type: errorTypeParser(data),
+                    message: errorMessageParser(data)
                 )
 
                 guard Self.isRetryableHTTPStatus(httpResponse.statusCode),
@@ -98,7 +309,7 @@ final class AIService {
             }
         }
 
-        throw lastError ?? AIServiceError.invalidResponse
+        throw lastError ?? AIServiceError.invalidResponse(provider: provider)
     }
 
     private static func isRetryable(_ error: URLError) -> Bool {
@@ -129,12 +340,12 @@ final class AIService {
         try await Task.sleep(for: .seconds(seconds))
     }
 
-    private static func textContent(from data: Data) throws -> String {
+    private static func anthropicTextContent(from data: Data) throws -> String {
         guard
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
             let content = json["content"] as? [[String: Any]]
         else {
-            throw AIServiceError.invalidResponse
+            throw AIServiceError.invalidResponse(provider: .anthropic)
         }
 
         let text = content
@@ -142,11 +353,13 @@ final class AIService {
             .compactMap { $0["text"] as? String }
             .joined(separator: "\n")
 
-        guard !text.isEmpty else { throw AIServiceError.invalidResponse }
+        guard !text.isEmpty else {
+            throw AIServiceError.invalidResponse(provider: .anthropic)
+        }
         return text
     }
 
-    private static func errorType(from data: Data) -> String {
+    private static func anthropicErrorType(from data: Data) -> String {
         guard
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let error = json["error"] as? [String: Any]
@@ -154,7 +367,7 @@ final class AIService {
         return error["type"] as? String ?? "unknown_error"
     }
 
-    private static func errorMessage(from data: Data) -> String {
+    private static func anthropicErrorMessage(from data: Data) -> String {
         guard
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let error = json["error"] as? [String: Any]
