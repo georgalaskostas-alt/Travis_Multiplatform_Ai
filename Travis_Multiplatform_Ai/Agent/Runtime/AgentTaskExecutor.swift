@@ -30,11 +30,19 @@ enum AgentTaskExecutorError: LocalizedError {
     }
 }
 
+enum StepVerificationVerdict: String, Codable, Hashable {
+    case pass
+    case retry
+    case insufficientEvidence = "insufficient_evidence"
+}
+
 struct StepVerificationResult: Codable, Hashable {
-    let passed: Bool
+    let verdict: StepVerificationVerdict
     let confidence: Double
     let reason: String
     let unmetCriteria: [String]
+
+    var passed: Bool { verdict == .pass }
 }
 
 enum AutonomousRunStopReason: String, Codable, Hashable {
@@ -62,7 +70,7 @@ struct AutonomousRunReport: Codable, Hashable {
 @MainActor
 @Observable
 final class AgentTaskExecutor {
-    static let runtimeFingerprint = "runtime-v1.6-grounded"
+    static let runtimeFingerprint = "runtime-v1.7-scope-aware"
 
     private let runtime: AgentTaskRuntime
     private let orchestrator: AgentOrchestrator
@@ -91,17 +99,9 @@ final class AgentTaskExecutor {
         taskId: UUID,
         recentHistory: [ChatMessage] = []
     ) async throws -> PlanStep? {
-        guard let task = runtime.task(id: taskId) else {
-            throw AgentTaskExecutorError.taskNotFound
-        }
-
-        guard task.status == .running else {
-            throw AgentTaskExecutorError.taskNotRunning
-        }
-
-        guard let step = runtime.nextRunnableStep(taskId: taskId) else {
-            throw AgentTaskExecutorError.noRunnableStep
-        }
+        guard let task = runtime.task(id: taskId) else { throw AgentTaskExecutorError.taskNotFound }
+        guard task.status == .running else { throw AgentTaskExecutorError.taskNotRunning }
+        guard let step = runtime.nextRunnableStep(taskId: taskId) else { throw AgentTaskExecutorError.noRunnableStep }
 
         if step.requiresApproval {
             runtime.markStepWaitingForApproval(taskId: taskId, stepId: step.id)
@@ -112,11 +112,7 @@ final class AgentTaskExecutor {
         }
 
         guard let capabilityId = step.capabilityId else {
-            runtime.markStepFailed(
-                taskId: taskId,
-                stepId: step.id,
-                error: AgentTaskExecutorError.unassignedCapability.localizedDescription
-            )
+            runtime.markStepFailed(taskId: taskId, stepId: step.id, error: AgentTaskExecutorError.unassignedCapability.localizedDescription)
             throw AgentTaskExecutorError.unassignedCapability
         }
 
@@ -157,41 +153,74 @@ final class AgentTaskExecutor {
                     capabilityResult: text
                 )
 
-                guard verification.passed else {
+                switch verification.verdict {
+                case .pass:
+                    runtime.markStepCompleted(taskId: taskId, stepId: step.id, resultSummary: text)
+
+                    let checkpointSummary = "Step #\(step.order) verified with confidence " + String(format: "%.2f", verification.confidence)
+                    runtime.checkpoint(
+                        taskId: taskId,
+                        summary: checkpointSummary,
+                        nextAction: runtime.nextRunnableStep(taskId: taskId)?.title
+                    )
+
+                    lastExecutionSummary = checkpointSummary
+                    onProgress?("""
+                    \(trace)
+                    ✅ Step #\(step.order) ολοκληρώθηκε και επαληθεύτηκε.
+                    \(text)
+                    """)
+                    return runtime.nextRunnableStep(taskId: taskId)
+
+                case .insufficientEvidence:
+                    // Repository inspection is allowed to complete with an explicit,
+                    // verified limitation. This preserves honest evidence boundaries
+                    // and allows downstream synthesis to reason over the limitation
+                    // instead of killing the whole autonomous task.
+                    if capabilityId == "repository_context" {
+                        let limitedResult = """
+                        \(text)
+
+                        VERIFICATION LIMITATION
+                        \(verification.reason)
+                        Unmet scope: \(verification.unmetCriteria.joined(separator: " | "))
+                        """
+
+                        runtime.markStepCompleted(
+                            taskId: taskId,
+                            stepId: step.id,
+                            resultSummary: limitedResult
+                        )
+
+                        let checkpointSummary = "Step #\(step.order) completed with verified evidence limitation"
+                        runtime.checkpoint(
+                            taskId: taskId,
+                            summary: checkpointSummary,
+                            nextAction: runtime.nextRunnableStep(taskId: taskId)?.title
+                        )
+
+                        lastExecutionSummary = checkpointSummary
+                        onProgress?("""
+                        \(trace)
+                        ⚠️ Step #\(step.order) ολοκληρώθηκε με περιορισμό evidence — το task συνεχίζει.
+                        \(limitedResult)
+                        """)
+                        return runtime.nextRunnableStep(taskId: taskId)
+                    }
+
+                    let reason = verification.reason
+                    runtime.markStepFailed(taskId: taskId, stepId: step.id, error: reason)
+                    throw AgentTaskExecutorError.verificationFailed(reason)
+
+                case .retry:
                     let reason = verification.reason
                     runtime.markStepFailed(taskId: taskId, stepId: step.id, error: reason)
                     throw AgentTaskExecutorError.verificationFailed(reason)
                 }
 
-                runtime.markStepCompleted(
-                    taskId: taskId,
-                    stepId: step.id,
-                    resultSummary: text
-                )
-
-                let checkpointSummary =
-                    "Step #\(step.order) verified with confidence "
-                    + String(format: "%.2f", verification.confidence)
-
-                runtime.checkpoint(
-                    taskId: taskId,
-                    summary: checkpointSummary,
-                    nextAction: runtime.nextRunnableStep(taskId: taskId)?.title
-                )
-
-                lastExecutionSummary = checkpointSummary
-                onProgress?("""
-                \(trace)
-                ✅ Step #\(step.order) ολοκληρώθηκε και επαληθεύτηκε.
-                \(text)
-                """)
-
-                return runtime.nextRunnableStep(taskId: taskId)
-
             case .proposal(let action):
                 approvalGate.submit(action)
                 runtime.markStepWaitingForApproval(taskId: taskId, stepId: step.id)
-
                 let message = "\(trace)\n🔐 Step #\(step.order) δημιούργησε ενέργεια που απαιτεί έγκριση."
                 lastExecutionSummary = message
                 onProgress?(message)
@@ -204,11 +233,7 @@ final class AgentTaskExecutor {
             if let latestTask = runtime.task(id: taskId),
                let latestStep = latestTask.plan.steps.first(where: { $0.id == step.id }),
                latestStep.status == .running {
-                runtime.markStepFailed(
-                    taskId: taskId,
-                    stepId: step.id,
-                    error: error.localizedDescription
-                )
+                runtime.markStepFailed(taskId: taskId, stepId: step.id, error: error.localizedDescription)
             }
 
             lastExecutionSummary = error.localizedDescription
@@ -222,9 +247,7 @@ final class AgentTaskExecutor {
         recentHistory: [ChatMessage] = [],
         maxStepsPerCycle: Int = 8
     ) async throws -> AutonomousRunReport {
-        guard let initialTask = runtime.task(id: taskId) else {
-            throw AgentTaskExecutorError.taskNotFound
-        }
+        guard let initialTask = runtime.task(id: taskId) else { throw AgentTaskExecutorError.taskNotFound }
 
         let retryBudgetPerStep = max(1, initialTask.budget.maxRetriesPerStep)
         let planAttemptBudget = max(1, initialTask.plan.steps.count * retryBudgetPerStep)
@@ -234,9 +257,7 @@ final class AgentTaskExecutor {
         var attempted = 0
 
         while attempted < safeLimit {
-            guard let task = runtime.task(id: taskId) else {
-                throw AgentTaskExecutorError.taskNotFound
-            }
+            guard let task = runtime.task(id: taskId) else { throw AgentTaskExecutorError.taskNotFound }
 
             switch task.status {
             case .completed:
@@ -254,9 +275,7 @@ final class AgentTaskExecutor {
             }
 
             guard runtime.nextRunnableStep(taskId: taskId) != nil else {
-                guard let latest = runtime.task(id: taskId) else {
-                    throw AgentTaskExecutorError.taskNotFound
-                }
+                guard let latest = runtime.task(id: taskId) else { throw AgentTaskExecutorError.taskNotFound }
                 return makeRunReport(task: latest, reason: .noRunnableStep, stepsAttempted: attempted)
             }
 
@@ -266,9 +285,7 @@ final class AgentTaskExecutor {
             } catch {
                 attempted += 1
 
-                guard let latest = runtime.task(id: taskId) else {
-                    throw AgentTaskExecutorError.taskNotFound
-                }
+                guard let latest = runtime.task(id: taskId) else { throw AgentTaskExecutorError.taskNotFound }
 
                 if latest.status == .running,
                    let retryStep = runtime.nextRunnableStep(taskId: taskId) {
@@ -283,26 +300,17 @@ final class AgentTaskExecutor {
                 if latest.status == .waitingForApproval {
                     return makeRunReport(task: latest, reason: .waitingForApproval, stepsAttempted: attempted)
                 }
-
                 if latest.status == .failed || latest.status == .cancelled {
                     return makeRunReport(task: latest, reason: .failed, stepsAttempted: attempted)
                 }
-
                 throw error
             }
 
             await Task.yield()
         }
 
-        guard let latest = runtime.task(id: taskId) else {
-            throw AgentTaskExecutorError.taskNotFound
-        }
-
-        return makeRunReport(
-            task: latest,
-            reason: .safetyStepLimitReached,
-            stepsAttempted: attempted
-        )
+        guard let latest = runtime.task(id: taskId) else { throw AgentTaskExecutorError.taskNotFound }
+        return makeRunReport(task: latest, reason: .safetyStepLimitReached, stepsAttempted: attempted)
     }
 
     private func makeRunReport(
@@ -311,7 +319,6 @@ final class AgentTaskExecutor {
         stepsAttempted: Int
     ) -> AutonomousRunReport {
         let nextStep = runtime.nextRunnableStep(taskId: task.id)
-
         return AutonomousRunReport(
             taskId: task.id,
             stopReason: reason,
@@ -327,15 +334,8 @@ final class AgentTaskExecutor {
     }
 
     private func executionCommand(task: AgentTask, step: PlanStep) -> String {
-        let criteria = step.successCriteria
-            .enumerated()
-            .map { "\($0.offset + 1). \($0.element)" }
-            .joined(separator: "\n")
-
-        let dependencyEvidence = dependencyEvidenceBlock(
-            task: task,
-            step: step
-        )
+        let criteria = step.successCriteria.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+        let dependencyEvidence = dependencyEvidenceBlock(task: task, step: step)
 
         return """
         RUNTIME FINGERPRINT:
@@ -343,7 +343,7 @@ final class AgentTaskExecutor {
 
         Εκτελείς ένα συγκεκριμένο βήμα ενός ήδη εγκεκριμένου execution plan του TRAVIS.
 
-        ΣΥΝΟΛΙΚΟΣ ΣΤΟΧΟΣ:
+        ΣΥΝΟΛΙΚΟΣ ΣΤΟΧΟΣ (context only — do not expand this step's scope to the whole goal):
         \(task.goal)
 
         ΤΡΕΧΟΝ STEP:
@@ -355,25 +355,19 @@ final class AgentTaskExecutor {
         VERIFIED DEPENDENCY EVIDENCE:
         \(dependencyEvidence)
 
-        SUCCESS CRITERIA:
+        SUCCESS CRITERIA FOR THIS STEP ONLY:
         \(criteria)
 
-        Παρήγαγε το πραγματικό αποτέλεσμα αυτού του step.
-        Χρησιμοποίησε τα VERIFIED DEPENDENCY EVIDENCE ως canonical outputs των προηγούμενων βημάτων.
-        Μην παρουσιάσεις ως verified κάτι που δεν υπάρχει σε αυτά ή στο capability evidence που θα φορτωθεί τώρα.
-        Μην ισχυριστείς ότι έκανες ενέργεια ή έλεγχο που δεν έγινε.
+        Παρήγαγε το πραγματικό αποτέλεσμα μόνο αυτού του step.
+        Χρησιμοποίησε τα VERIFIED DEPENDENCY EVIDENCE ως canonical outputs προηγούμενων βημάτων.
+        Μην παρουσιάσεις ως verified κάτι που δεν υπάρχει στα dependency outputs ή στο capability evidence που φορτώνεται τώρα.
+        Αν το loaded evidence δεν καλύπτει κάτι έξω από το scope αυτού του step, κατέγραψέ το ως limitation — μην προσπαθήσεις να αποδείξεις ολόκληρο το repository.
         Μην προχωρήσεις σε επόμενο step.
-        Αν το ζητούμενο απαιτεί state-changing action, ακολούθησε το υπάρχον capability approval flow.
         """
     }
 
-    private func dependencyEvidenceBlock(
-        task: AgentTask,
-        step: PlanStep
-    ) -> String {
-        guard !step.dependencyStepIds.isEmpty else {
-            return "None — this step has no dependencies."
-        }
+    private func dependencyEvidenceBlock(task: AgentTask, step: PlanStep) -> String {
+        guard !step.dependencyStepIds.isEmpty else { return "None — this step has no dependencies." }
 
         let dependencyIds = Set(step.dependencyStepIds)
         let dependencies = task.plan.steps
@@ -386,43 +380,26 @@ final class AgentTaskExecutor {
         let maxCharactersPerDependency = 14_000
 
         for dependency in dependencies {
-            guard totalCharacters < maxTotalCharacters else {
-                break
-            }
+            guard totalCharacters < maxTotalCharacters else { break }
 
             guard dependency.status == .completed,
                   let result = dependency.resultSummary,
                   !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             else {
-                sections.append(
-                    """
-                    --- DEPENDENCY STEP #\(dependency.order): \(dependency.title) ---
-                    No verified result is available.
-                    """
-                )
+                sections.append("--- DEPENDENCY STEP #\(dependency.order): \(dependency.title) ---\nNo verified result is available.")
                 continue
             }
 
             let remaining = maxTotalCharacters - totalCharacters
             let allowed = min(maxCharactersPerDependency, remaining)
             let clipped = String(result.prefix(allowed))
-            let truncation = result.count > clipped.count
-                ? "\n[DEPENDENCY RESULT TRUNCATED BY EXECUTION CONTEXT BUDGET]"
-                : ""
+            let truncation = result.count > clipped.count ? "\n[DEPENDENCY RESULT TRUNCATED BY EXECUTION CONTEXT BUDGET]" : ""
 
-            sections.append(
-                """
-                --- DEPENDENCY STEP #\(dependency.order): \(dependency.title) ---
-                \(clipped)\(truncation)
-                """
-            )
-
+            sections.append("--- DEPENDENCY STEP #\(dependency.order): \(dependency.title) ---\n\(clipped)\(truncation)")
             totalCharacters += clipped.count
         }
 
-        return sections.isEmpty
-            ? "No completed dependency evidence is available."
-            : sections.joined(separator: "\n\n")
+        return sections.isEmpty ? "No completed dependency evidence is available." : sections.joined(separator: "\n\n")
     }
 }
 
@@ -438,28 +415,25 @@ final class AgentStepVerifier {
         step: PlanStep,
         capabilityResult: String
     ) async throws -> StepVerificationResult {
-        let criteria = step.successCriteria
-            .enumerated()
-            .map { "\($0.offset + 1). \($0.element)" }
-            .joined(separator: "\n")
+        let criteria = step.successCriteria.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
 
         let prompt = """
-        You are the verification component of TRAVIS.
+        You are the scope-aware verification component of TRAVIS.
 
-        Evaluate whether the produced result actually satisfies the step.
-        Be strict. Do not reward confident wording. Judge only evidence in
-        the result. Do not execute tools and do not invent missing evidence.
+        Verify ONLY the current step. The overall task goal is context, not an
+        instruction to demand repository-wide completeness from this step.
+        Judge only evidence in the produced result. Do not invent missing evidence.
 
-        TASK GOAL:
+        OVERALL TASK GOAL (context only):
         \(taskGoal)
 
-        STEP:
+        CURRENT STEP:
         \(step.title)
 
         STEP INSTRUCTIONS:
         \(step.instructions)
 
-        SUCCESS CRITERIA:
+        SUCCESS CRITERIA FOR THIS STEP ONLY:
         \(criteria)
 
         PRODUCED RESULT:
@@ -467,36 +441,34 @@ final class AgentStepVerifier {
 
         Return ONLY valid JSON:
         {
-          "passed": true,
+          "verdict": "pass|retry|insufficient_evidence",
           "confidence": 0.0,
           "reason": "short reason",
           "unmetCriteria": []
         }
 
-        Rules:
-        - confidence must be from 0.0 to 1.0
-        - passed may be true only when all essential success criteria are met
-        - if evidence is missing, passed must be false
-        - unmetCriteria must contain each criterion that was not demonstrated
+        Verdict rules:
+        - pass: the current step's scoped criteria are demonstrated.
+        - retry: evidence was available but the result is materially wrong, contradictory, malformed, or failed to use it.
+        - insufficient_evidence: the result is honest and grounded, but the loaded evidence cannot establish part of the requested scope.
+        - A stated limitation about OUT-OF-SCOPE repository areas is NOT a failure when the current step's own scope is satisfied.
+        - Do not require tests, docs, generated artifacts, unrelated subsystems, or repository-wide classification unless the step title/instructions explicitly request them.
+        - For repository inspection, source-level evidence for the named subsystem is enough; absence of unrelated evidence must not trigger retry.
+        - confidence must be 0.0...1.0.
+        - unmetCriteria lists only current-step criteria not demonstrated.
         """
 
         let raw = try await aiService.generateText(prompt: prompt, maxTokens: 1200)
-        let cleaned = raw
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .removingVerifierJSONFence()
+        let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines).removingVerifierJSONFence()
 
         guard let data = cleaned.data(using: .utf8) else {
-            throw AgentTaskExecutorError.verificationFailed(
-                "Verifier response was not UTF-8 JSON."
-            )
+            throw AgentTaskExecutorError.verificationFailed("Verifier response was not UTF-8 JSON.")
         }
 
         let result = try JSONDecoder().decode(StepVerificationResult.self, from: data)
-        let boundedConfidence = min(max(result.confidence, 0), 1)
-
         return StepVerificationResult(
-            passed: result.passed,
-            confidence: boundedConfidence,
+            verdict: result.verdict,
+            confidence: min(max(result.confidence, 0), 1),
             reason: result.reason,
             unmetCriteria: result.unmetCriteria
         )
@@ -506,19 +478,13 @@ final class AgentStepVerifier {
 private extension String {
     func removingVerifierJSONFence() -> String {
         var value = trimmingCharacters(in: .whitespacesAndNewlines)
-
         if value.hasPrefix("```json") {
             value.removeFirst("```json".count)
         } else if value.hasPrefix("```") {
             value.removeFirst(3)
         }
-
         value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if value.hasSuffix("```") {
-            value.removeLast(3)
-        }
-
+        if value.hasSuffix("```") { value.removeLast(3) }
         return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
