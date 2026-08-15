@@ -182,9 +182,28 @@ final class SpeechRecognitionService: NSObject {
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "el_GR"))
             .lowercased()
 
-        let wantsDelete = normalized.contains("σβησε") || normalized.contains("διαγραψε") || normalized.contains("delete")
-        let targetsConversation = normalized.contains("συνομιλ") || normalized.contains("conversation")
-        let targetsLatest = normalized.contains("τελευται") || normalized.contains("προσφατ") || normalized.contains("latest") || normalized.contains("last")
+        let wantsDelete =
+            normalized.contains("σβησ") ||
+            normalized.contains("σβησε") ||
+            normalized.contains("διαγραψ") ||
+            normalized.contains("διαγραφ") ||
+            normalized.contains("delete") ||
+            normalized.contains("remove")
+
+        let targetsConversation =
+            normalized.contains("συνομιλ") ||
+            normalized.contains("συζητ") ||
+            normalized.contains("ιστορικ") ||
+            normalized.contains("chat") ||
+            normalized.contains("conversation")
+
+        let targetsLatest =
+            normalized.contains("τελευται") ||
+            normalized.contains("προσφατ") ||
+            normalized.contains("latest") ||
+            normalized.contains("last") ||
+            normalized.contains("προηγουμεν")
+
         return wantsDelete && targetsConversation && targetsLatest
     }
 }
