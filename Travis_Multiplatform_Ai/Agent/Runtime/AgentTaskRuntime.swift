@@ -82,9 +82,23 @@ final class AgentTaskRuntime {
         }
     }
 
+    /// Pauses execution at a safe resumable boundary. If cancellation arrives
+    /// while a step is in-flight, that step is returned to `.pending` rather
+    /// than being counted as a failure/retry. No unverified result is accepted.
     func pause(taskId: UUID, reason: String = "Paused") {
         mutate(taskId) { task in
             guard [.running, .waitingForDependency, .waitingForApproval].contains(task.status) else { return }
+
+            if let stepId = task.executionState.currentStepId,
+               let index = task.plan.steps.firstIndex(where: { $0.id == stepId }),
+               task.plan.steps[index].status == .running {
+                task.plan.steps[index].status = .pending
+                task.plan.steps[index].lastError = reason
+            }
+
+            task.executionState.currentStepId = nil
+            task.executionState.nextEligibleRunAt = nil
+            task.executionState.lastHeartbeatAt = Date()
             task.status = .paused
             task.events.append(TaskEvent(type: .paused, message: reason))
         }
@@ -199,9 +213,6 @@ final class AgentTaskRuntime {
             guard let index = task.plan.steps.firstIndex(where: { $0.id == stepId }),
                   task.plan.steps[index].status == .waitingForApproval else { return }
 
-            // Approval is consumed for this planned step. Keeping the step in
-            // `.ready` while clearing `requiresApproval` prevents the executor
-            // from immediately re-entering the same approval gate.
             task.plan.steps[index].requiresApproval = false
             task.plan.steps[index].status = .ready
             task.status = .running
@@ -248,7 +259,6 @@ final class AgentTaskRuntime {
         return Double(completed) / Double(task.plan.steps.count)
     }
 
-    /// Reloads the last durable snapshot. Primarily useful for recovery tests.
     func reloadFromDisk() {
         restorePersistedTasks()
     }
@@ -275,9 +285,6 @@ final class AgentTaskRuntime {
         do {
             var restored = try store.load()
 
-            // A process may have terminated while a step was marked running.
-            // Never assume that side effects completed. Recover that step as
-            // pending and pause the task so continuation is explicit/idempotent.
             for taskIndex in restored.indices {
                 guard restored[taskIndex].status == .running else { continue }
 
@@ -302,9 +309,6 @@ final class AgentTaskRuntime {
 
             if !restored.isEmpty { persist() }
         } catch {
-            // Corrupt/incompatible runtime state must never be deleted silently.
-            // Keep the snapshot on disk for diagnosis and start with no loaded
-            // autonomous tasks rather than fabricating recovery state.
             tasks = []
             persistenceError = error.localizedDescription
             print("TRAVIS runtime recovery failed: \(error.localizedDescription)")
