@@ -183,6 +183,9 @@ final class RepositoryContextCapability: AgentCapability {
         - evidenceRefs may contain ONLY IDs from ALLOWED EVIDENCE IDS.
         - Every substantive observation must have at least one evidenceRef.
         - Every finding must have at least one evidenceRef.
+        - Every finding must describe concrete source-level evidence in evidenceDetail: a real type, method, state transition, condition, call path, retry rule, data mutation, or control-flow behavior visible in the supplied source.
+        - Prefer positive evidence (what the code demonstrably does) over absence claims.
+        - A claim that a guard, timeout, recovery path, validation, telemetry, lock, or other mechanism is ABSENT is allowed only when the relevant evidence unit is complete. If an evidence block contains an EVIDENCE TRUNCATED notice, do NOT use that evidence to prove absence. State the uncertainty in limitations instead.
         - If evidence is insufficient, state that in limitations instead of guessing.
         - Do not invent types, APIs, persistence, workers, tests, behavior, capabilities, entry points, or configuration.
         - Recommendations may describe proposed architecture, but must never be presented as existing code.
@@ -211,6 +214,7 @@ final class RepositoryContextCapability: AgentCapability {
               "title": "finding title without any filename/path text",
               "severity": "critical|high|medium|low|null",
               "explanation": "what the evidence demonstrates",
+              "evidenceDetail": "specific symbol/control-flow/state behavior observed in the loaded source; do not include a filename/path",
               "impact": "technical impact or null",
               "recommendation": "specific remediation or null",
               "evidenceRefs": ["E1", "E2"]
@@ -226,7 +230,9 @@ final class RepositoryContextCapability: AgentCapability {
         - findings may be empty for inspection/mapping steps
         - the combined observations + findings must contain at least one evidence reference
         - severity must be one of critical, high, medium, low, or null
-        - do not include source excerpts unless essential; describe behavior precisely instead
+        - evidenceDetail must be non-empty for every finding
+        - do not infer repository-wide absence from a partial or truncated source excerpt
+        - do not include invented source excerpts; describe the exact observed implementation/control flow instead
         \(retryBlock)
         """
     }
@@ -294,6 +300,10 @@ final class RepositoryContextCapability: AgentCapability {
                 throw RepositoryGroundingError.noLoadedSourceEvidence
             }
 
+            guard !finding.evidenceDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw RepositoryGroundingError.invalidStructuredResponse
+            }
+
             if let severity = finding.severity {
                 guard RepositoryFindingSeverity(rawValue: severity.lowercased()) != nil else {
                     throw RepositoryGroundingError.invalidStructuredResponse
@@ -319,7 +329,7 @@ final class RepositoryContextCapability: AgentCapability {
             case .noLoadedSourceEvidence:
                 return "The response lacked evidence references. Every substantive observation/finding must cite at least one of: \(allowed)."
             case .invalidStructuredResponse:
-                return "The response was not valid JSON matching the required schema. Return only the requested JSON object and use only evidence IDs: \(allowed)."
+                return "The response was not valid JSON matching the required schema, or a finding lacked evidenceDetail. Return only the requested JSON object and use only evidence IDs: \(allowed)."
             }
         }
 
@@ -360,6 +370,7 @@ final class RepositoryContextCapability: AgentCapability {
                     .joined(separator: ", ")
 
                 var block = "\(index + 1). [\(severity)] \(finding.title)\n   \(finding.explanation)"
+                block += "\n   Source evidence: \(finding.evidenceDetail)"
 
                 if let impact = finding.impact, !impact.isEmpty {
                     block += "\n   Impact: \(impact)"
@@ -406,6 +417,7 @@ private struct RepositoryFinding: Decodable {
     let title: String
     let severity: String?
     let explanation: String
+    let evidenceDetail: String
     let impact: String?
     let recommendation: String?
     let evidenceRefs: [String]
@@ -479,9 +491,12 @@ final class GitHubRepositoryContextService {
     private let branch: String
     private let session: URLSession
 
-    private let maxSelectedFiles = 12
-    private let maxCharactersPerFile = 12_000
-    private let maxTotalSourceCharacters = 80_000
+    // Evidence depth is intentionally biased toward fewer, more complete files.
+    // The verifier can reason about real control flow far more reliably from six
+    // mostly complete source units than from twelve shallow first-page excerpts.
+    private let maxSelectedFiles = 7
+    private let maxCharactersPerFile = 28_000
+    private let maxTotalSourceCharacters = 150_000
     private let maxRequestAttempts = 3
 
     private var repositoryPathsCache: [String]?
@@ -531,8 +546,8 @@ final class GitHubRepositoryContextService {
             let clipped = String(text.prefix(allowed))
 
             let truncationNotice = text.count > clipped.count
-                ? "\n[FILE TRUNCATED BY REPOSITORY CONTEXT BUDGET]"
-                : ""
+                ? "\n[EVIDENCE TRUNCATED: ABSENCE CLAIMS NOT PERMITTED FOR THIS FILE]"
+                : "\n[EVIDENCE COMPLETE FOR THIS FILE]"
 
             chunks.append(
                 """
@@ -698,38 +713,51 @@ final class GitHubRepositoryContextService {
         return message
     }
 
+    /// Select evidence for the CURRENT execution step, rather than blindly
+    /// loading the same fixed bundle for every step.
     private func select(paths: [String], task: String) -> [String] {
-        let preferred = [
-            "Travis_Multiplatform_Ai/Agent/Runtime/AgentRuntimeModels.swift",
-            "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskRuntime.swift",
-            "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskExecutor.swift",
-            "Travis_Multiplatform_Ai/Agent/Runtime/TaskPlanner.swift",
-            "Travis_Multiplatform_Ai/Agent/AgentCapability.swift",
-            "Travis_Multiplatform_Ai/Agent/AgentOrchestrator.swift",
-            "Travis_Multiplatform_Ai/Agent/ApprovalGateService.swift",
-            "Travis_Multiplatform_Ai/Agent/SelfImprovementCapability.swift",
-            "Travis_Multiplatform_Ai/App/TRAVISAppState.swift",
-            "Travis_Multiplatform_Ai/Services/AIService.swift",
-            "Travis_Multiplatform_Ai/Services/PersistenceService.swift",
-            "Travis_Multiplatform_Ai/Features/Chat/ChatView.swift"
-        ]
-
-        var result: [String] = []
-
-        for preferredPath in preferred where paths.contains(preferredPath) {
-            result.append(preferredPath)
-        }
-
-        let terms = task
-            .lowercased()
+        let taskLower = task.lowercased()
+        let terms = taskLower
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { $0.count >= 4 }
+
+        let coreNames = [
+            "agentruntimemodels.swift",
+            "agenttaskruntime.swift",
+            "agenttaskexecutor.swift",
+            "taskplanner.swift",
+            "agentcapability.swift",
+            "agentorchestrator.swift",
+            "approvalgateservice.swift",
+            "selfimprovementcapability.swift",
+            "travisappstate.swift",
+            "aiservice.swift",
+            "persistenceservice.swift",
+            "keychainservice.swift"
+        ]
+
+        let semanticRules: [(markers: [String], pathTokens: [String], weight: Int)] = [
+            (["concurrency", "race", "locking", "async", "parallel"],
+             ["agenttaskexecutor", "agenttaskruntime", "agentorchestrator", "aiservice", "persistence"], 24),
+            (["security", "auth", "secret", "permission", "approval", "trust"],
+             ["approvalgate", "keychain", "selfimprovement", "executionservice", "cryptotrading", "agentorchestrator"], 24),
+            (["planning", "planner", "scheduling", "replan", "retry", "error recovery"],
+             ["taskplanner", "agenttaskexecutor", "agenttaskruntime", "agentruntimemodels"], 24),
+            (["persistence", "state", "memory", "checkpoint", "recovery"],
+             ["persistence", "agentruntimemodels", "agenttaskruntime", "travisappstate"], 24),
+            (["observability", "logging", "telemetry", "audit", "trace"],
+             ["agenttaskexecutor", "travisappstate", "aiservice", "approvalgate"], 22),
+            (["capability", "plugin", "integration", "routing", "tool"],
+             ["agentcapability", "agentorchestrator", "selfimprovement", "texttask", "cryptotrading", "repositorycontext"], 22),
+            (["self-improvement", "self improvement", "self-modification", "self modification"],
+             ["selfimprovement", "approvalgate", "agentorchestrator", "persistence"], 28),
+            (["entry point", "top-level", "structure", "bootstrap"],
+             ["appstate", "rootview", "app.swift", "agentorchestrator"], 18)
+        ]
 
         var ranked: [(path: String, score: Int)] = []
 
         for path in paths {
-            guard !result.contains(path) else { continue }
-
             let lower = path.lowercased()
             var score = 0
 
@@ -737,8 +765,19 @@ final class GitHubRepositoryContextService {
             if lower.contains("/agent/") { score += 6 }
             if lower.contains("/services/") { score += 3 }
 
-            for term in terms where lower.contains(term) {
+            if coreNames.contains(where: lower.hasSuffix) {
                 score += 5
+            }
+
+            for term in terms where lower.contains(term) {
+                score += 6
+            }
+
+            for rule in semanticRules {
+                guard rule.markers.contains(where: taskLower.contains) else { continue }
+                if rule.pathTokens.contains(where: lower.contains) {
+                    score += rule.weight
+                }
             }
 
             if score > 0 {
@@ -753,12 +792,19 @@ final class GitHubRepositoryContextService {
             return left.score > right.score
         }
 
-        for item in ranked {
-            guard result.count < maxSelectedFiles else { break }
-            result.append(item.path)
+        var result = ranked.prefix(maxSelectedFiles).map(\.path)
+
+        // Always include at least one runtime/executor source unit when it exists.
+        let executorPath = "Travis_Multiplatform_Ai/Agent/Runtime/AgentTaskExecutor.swift"
+        if paths.contains(executorPath), !result.contains(executorPath), !result.isEmpty {
+            result[result.count - 1] = executorPath
         }
 
-        return Array(result.prefix(maxSelectedFiles))
+        if result.isEmpty {
+            result = Array(paths.sorted().prefix(maxSelectedFiles))
+        }
+
+        return result
     }
 }
 
