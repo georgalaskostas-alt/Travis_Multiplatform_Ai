@@ -198,6 +198,11 @@ final class AgentTaskRuntime {
         mutate(taskId) { task in
             guard let index = task.plan.steps.firstIndex(where: { $0.id == stepId }),
                   task.plan.steps[index].status == .waitingForApproval else { return }
+
+            // Approval is consumed for this planned step. Keeping the step in
+            // `.ready` while clearing `requiresApproval` prevents the executor
+            // from immediately re-entering the same approval gate.
+            task.plan.steps[index].requiresApproval = false
             task.plan.steps[index].status = .ready
             task.status = .running
             task.executionState.currentStepId = nil
