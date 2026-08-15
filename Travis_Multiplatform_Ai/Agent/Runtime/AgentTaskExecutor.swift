@@ -5,6 +5,7 @@ enum AgentTaskExecutorError: LocalizedError {
     case taskNotFound
     case taskNotRunning
     case noRunnableStep
+    case taskAlreadyExecuting(UUID)
     case missingCapability(String)
     case unassignedCapability
     case verificationFailed(String)
@@ -18,6 +19,8 @@ enum AgentTaskExecutorError: LocalizedError {
             return "Το task δεν βρίσκεται σε running state."
         case .noRunnableStep:
             return "Δεν υπάρχει runnable step αυτή τη στιγμή."
+        case .taskAlreadyExecuting(let taskId):
+            return "Το autonomous task \(taskId.uuidString) εκτελείται ήδη. Περίμενε να ολοκληρωθεί ο τρέχων execution cycle."
         case .missingCapability(let id):
             return "Δεν βρέθηκε capability με id \(id)."
         case .unassignedCapability:
@@ -70,12 +73,17 @@ struct AutonomousRunReport: Codable, Hashable {
 @MainActor
 @Observable
 final class AgentTaskExecutor {
-    static let runtimeFingerprint = "runtime-v1.7-scope-aware"
+    static let runtimeFingerprint = "runtime-v1.8-execution-lease"
 
     private let runtime: AgentTaskRuntime
     private let orchestrator: AgentOrchestrator
     private let approvalGate: ApprovalGateService
     private let verifier: AgentStepVerifier
+
+    /// Process-local execution leases. A task ID may have at most one active
+    /// executor cycle at a time. Because AgentTaskExecutor is @MainActor,
+    /// acquisition/release is serialized and deterministic.
+    private var leasedTaskIds: Set<UUID> = []
 
     private(set) var isExecuting = false
     private(set) var lastExecutionSummary: String?
@@ -94,16 +102,43 @@ final class AgentTaskExecutor {
         self.verifier = verifier
     }
 
+    func isTaskExecuting(_ taskId: UUID) -> Bool {
+        leasedTaskIds.contains(taskId)
+    }
+
     @discardableResult
     func executeNextStep(
         taskId: UUID,
         recentHistory: [ChatMessage] = []
     ) async throws -> PlanStep? {
+        try acquireExecutionLease(taskId: taskId)
+        defer { releaseExecutionLease(taskId: taskId) }
+
+        return try await executeNextStepWithLease(
+            taskId: taskId,
+            recentHistory: recentHistory
+        )
+    }
+
+    /// Executes one step while the caller already owns the task lease.
+    /// `executeUntilBlocked` uses this path so it holds one lease across the
+    /// entire autonomous cycle instead of re-acquiring between steps.
+    @discardableResult
+    private func executeNextStepWithLease(
+        taskId: UUID,
+        recentHistory: [ChatMessage]
+    ) async throws -> PlanStep? {
+        guard leasedTaskIds.contains(taskId) else {
+            throw AgentTaskExecutorError.taskAlreadyExecuting(taskId)
+        }
         guard let task = runtime.task(id: taskId) else { throw AgentTaskExecutorError.taskNotFound }
         guard task.status == .running else { throw AgentTaskExecutorError.taskNotRunning }
         guard let step = runtime.nextRunnableStep(taskId: taskId) else { throw AgentTaskExecutorError.noRunnableStep }
 
-        if step.requiresApproval {
+        // A `.ready` step has already consumed explicit approval. Do not put it
+        // back into waitingForApproval simply because its static plan metadata
+        // still says requiresApproval.
+        if step.requiresApproval && step.status != .ready {
             runtime.markStepWaitingForApproval(taskId: taskId, stepId: step.id)
             let message = "Το step #\(step.order) περιμένει έγκριση: \(step.title)"
             lastExecutionSummary = message
@@ -121,9 +156,6 @@ final class AgentTaskExecutor {
             runtime.markStepFailed(taskId: taskId, stepId: step.id, error: error.localizedDescription)
             throw error
         }
-
-        isExecuting = true
-        defer { isExecuting = false }
 
         runtime.markStepRunning(taskId: taskId, stepId: step.id)
         runtime.checkpoint(
@@ -173,10 +205,6 @@ final class AgentTaskExecutor {
                     return runtime.nextRunnableStep(taskId: taskId)
 
                 case .insufficientEvidence:
-                    // Repository inspection is allowed to complete with an explicit,
-                    // verified limitation. This preserves honest evidence boundaries
-                    // and allows downstream synthesis to reason over the limitation
-                    // instead of killing the whole autonomous task.
                     if capabilityId == "repository_context" {
                         let limitedResult = """
                         \(text)
@@ -247,6 +275,9 @@ final class AgentTaskExecutor {
         recentHistory: [ChatMessage] = [],
         maxStepsPerCycle: Int = 8
     ) async throws -> AutonomousRunReport {
+        try acquireExecutionLease(taskId: taskId)
+        defer { releaseExecutionLease(taskId: taskId) }
+
         guard let initialTask = runtime.task(id: taskId) else { throw AgentTaskExecutorError.taskNotFound }
 
         let retryBudgetPerStep = max(1, initialTask.budget.maxRetriesPerStep)
@@ -280,7 +311,10 @@ final class AgentTaskExecutor {
             }
 
             do {
-                _ = try await executeNextStep(taskId: taskId, recentHistory: recentHistory)
+                _ = try await executeNextStepWithLease(
+                    taskId: taskId,
+                    recentHistory: recentHistory
+                )
                 attempted += 1
             } catch {
                 attempted += 1
@@ -311,6 +345,20 @@ final class AgentTaskExecutor {
 
         guard let latest = runtime.task(id: taskId) else { throw AgentTaskExecutorError.taskNotFound }
         return makeRunReport(task: latest, reason: .safetyStepLimitReached, stepsAttempted: attempted)
+    }
+
+    private func acquireExecutionLease(taskId: UUID) throws {
+        guard !leasedTaskIds.contains(taskId) else {
+            throw AgentTaskExecutorError.taskAlreadyExecuting(taskId)
+        }
+
+        leasedTaskIds.insert(taskId)
+        isExecuting = true
+    }
+
+    private func releaseExecutionLease(taskId: UUID) {
+        leasedTaskIds.remove(taskId)
+        isExecuting = !leasedTaskIds.isEmpty
     }
 
     private func makeRunReport(
