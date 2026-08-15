@@ -6,6 +6,7 @@ struct ChatView: View {
     @State private var historyRevision = 0
 
     private static let deleteLatestConversationNotification = Notification.Name("TRAVISDeleteLatestConversation")
+    private static let stopAutonomousExecutionNotification = Notification.Name("TRAVISStopAutonomousExecution")
 
     private var refreshedPastSessions: [ChatSession] {
         _ = historyRevision
@@ -187,9 +188,7 @@ struct ChatView: View {
                 .animation(orbState.animation, value: orbState)
 
                 if orbState == .listening {
-                    Text(SpeechRecognitionService.shared.liveTranscript.isEmpty
-                         ? "..."
-                         : SpeechRecognitionService.shared.liveTranscript)
+                    Text(SpeechRecognitionService.shared.liveTranscript.isEmpty ? "..." : SpeechRecognitionService.shared.liveTranscript)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.82))
                         .multilineTextAlignment(.center)
@@ -249,6 +248,9 @@ struct ChatView: View {
         .onReceive(NotificationCenter.default.publisher(for: Self.deleteLatestConversationNotification)) { _ in
             deleteLatestPastConversation()
         }
+        .onReceive(NotificationCenter.default.publisher(for: Self.stopAutonomousExecutionNotification)) { _ in
+            stopActiveAutonomousExecution()
+        }
     }
 
     private func submitDraft() {
@@ -268,6 +270,10 @@ struct ChatView: View {
             rejectWaitingRuntimeStep()
             draft = ""
             return
+        case "/stop", "/cancel-run", "/pause-run":
+            stopActiveAutonomousExecution()
+            draft = ""
+            return
         case "/delete-last", "/delete-last-conversation":
             deleteLatestPastConversation()
             draft = ""
@@ -284,6 +290,47 @@ struct ChatView: View {
 
         appState.sendCommand(trimmed, source: .manual)
         draft = ""
+    }
+
+    private func stopActiveAutonomousExecution() {
+        guard let task = appState.taskRuntime.tasks.last(where: { appState.taskExecutor.isTaskExecuting($0.id) }) else {
+            appState.addAssistantMessage("Δεν υπάρχει ενεργό autonomous execution για διακοπή.")
+            appState.lastResponseSummary = "No active autonomous execution"
+            return
+        }
+
+        let stopped = appState.taskExecutor.requestCancellation(
+            taskId: task.id,
+            reason: "Paused explicitly by user"
+        )
+
+        guard stopped else {
+            appState.addAssistantMessage("Το execution είχε ήδη ολοκληρωθεί ή σταματήσει.")
+            appState.lastResponseSummary = "Execution already stopped"
+            return
+        }
+
+        let progressPercent = Int(appState.taskRuntime.progress(taskId: task.id) * 100)
+        let checkpoint = appState.taskRuntime.task(id: task.id)?.executionState.lastCheckpoint?.summary ?? "κανένα"
+
+        appState.addAssistantMessage("""
+        AUTONOMOUS EXECUTION PAUSED
+
+        TASK
+        \(task.id.uuidString)
+
+        STATUS
+        paused
+
+        PROGRESS
+        \(progressPercent)%
+
+        LAST VERIFIED CHECKPOINT
+        \(checkpoint)
+
+        Το in-flight execution ακυρώθηκε και το task μπορεί να συνεχιστεί αργότερα με /resume.
+        """)
+        appState.lastResponseSummary = "Autonomous execution paused"
     }
 
     private func isDeleteLatestConversationCommand(_ text: String) -> Bool {
