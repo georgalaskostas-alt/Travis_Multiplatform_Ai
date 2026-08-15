@@ -3,8 +3,14 @@ import SwiftUI
 struct ChatView: View {
     @Bindable var appState: TRAVISAppState
     @State private var draft: String = ""
+    @State private var historyRevision = 0
 
     private static let deleteLatestConversationNotification = Notification.Name("TRAVISDeleteLatestConversation")
+
+    private var refreshedPastSessions: [ChatSession] {
+        _ = historyRevision
+        return appState.pastSessions
+    }
 
     private var isViewingPastSession: Bool {
         appState.viewedSessionId != appState.currentSessionId
@@ -245,8 +251,6 @@ struct ChatView: View {
         }
     }
 
-    // MARK: - Chat Input
-
     private func submitDraft() {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -294,7 +298,7 @@ struct ChatView: View {
     }
 
     private func deleteLatestPastConversation() {
-        guard let session = appState.pastSessions.first else {
+        guard let session = refreshedPastSessions.first else {
             appState.addAssistantMessage("Δεν υπάρχει παλαιότερη συνομιλία για διαγραφή.")
             appState.lastResponseSummary = "No conversation to delete"
             return
@@ -304,12 +308,17 @@ struct ChatView: View {
 
     private func deleteConversation(_ sessionId: UUID) {
         do {
-            try ChatHistoryStore.deleteSession(sessionId)
+            let deletedCount = try PersistenceService.shared.deleteChatSession(sessionId)
             if appState.viewedSessionId == sessionId {
                 appState.returnToCurrentSession()
             }
-            appState.lastResponseSummary = "Η συνομιλία διαγράφηκε"
-            appState.addAssistantMessage("Η συνομιλία διαγράφηκε οριστικά από το ιστορικό.")
+            historyRevision += 1
+            if deletedCount > 0 {
+                appState.lastResponseSummary = "Η συνομιλία διαγράφηκε"
+                appState.addAssistantMessage("Η συνομιλία διαγράφηκε οριστικά από το ιστορικό.")
+            } else {
+                appState.lastResponseSummary = "Δεν βρέθηκαν μηνύματα για διαγραφή"
+            }
         } catch {
             let message = "Αποτυχία διαγραφής συνομιλίας: \(error.localizedDescription)"
             appState.lastResponseSummary = message
@@ -561,7 +570,7 @@ struct ChatView: View {
 
     @ViewBuilder
     private var recentSessionsPanel: some View {
-        let recent = Array(appState.pastSessions.prefix(5))
+        let recent = Array(refreshedPastSessions.prefix(5))
         if !recent.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Πρόσφατες συνομιλίες")
