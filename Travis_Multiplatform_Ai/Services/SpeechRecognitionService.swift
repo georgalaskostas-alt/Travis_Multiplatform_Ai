@@ -4,16 +4,12 @@ import AVFoundation
 
 /// Speech-to-text half of voice mode — captures the microphone live via
 /// `AVAudioEngine` and transcribes it with `SFSpeechRecognizer` while
-/// `TRAVISAppState.isListening` is on. Companion to `SpeechService`
-/// (text-to-speech); the two never run their audio I/O at the same
-/// time — see the pause/resume coordination in
-/// `TRAVISAppState.addAssistantMessage`, which stops recognition before
-/// TRAVIS speaks and restarts it once the reply finishes, so the
-/// microphone never picks up TRAVIS's own voice as a new command.
+/// `TRAVISAppState.isListening` is on. Companion to `SpeechService`.
 ///
-/// `NSObject` subclass for the same reason as `SpeechService`: framework
-/// delegate/callback types here aren't actor-isolated, so callbacks hop
-/// back to the MainActor explicitly.
+/// Final transcripts pass through a semantic intent classifier before they
+/// reach the general orchestrator. Local application actions are therefore
+/// understood from meaning rather than hard-coded phrases, while the actual
+/// side effect remains deterministic inside the app.
 @MainActor
 @Observable
 final class SpeechRecognitionService: NSObject {
@@ -21,18 +17,11 @@ final class SpeechRecognitionService: NSObject {
 
     private static let deleteLatestConversationNotification = Notification.Name("TRAVISDeleteLatestConversation")
 
-    /// Whether the microphone is actively capturing right now — distinct
-    /// from `TRAVISAppState.isListening`, which tracks whether voice mode
-    /// is on overall (recognition pauses during TTS playback without
-    /// voice mode itself turning off).
     private(set) var isListening = false
-    /// The in-progress transcription, updated live as the user talks and
-    /// shown in the UI before anything is sent.
     private(set) var liveTranscript = ""
 
-    /// Fired with the finished utterance once silence is detected. Not
-    /// fired when listening is stopped explicitly (`stop()`) with nothing
-    /// meaningful said yet.
+    /// Fired only when the transcript is not consumed by a local semantic
+    /// intent. Normal requests continue through TRAVISAppState/orchestrator.
     var onFinalTranscript: ((String) -> Void)?
 
     private let audioEngine = AVAudioEngine()
@@ -40,18 +29,12 @@ final class SpeechRecognitionService: NSObject {
     private var recognitionTask: SFSpeechRecognitionTask?
     private var silenceTimer: Timer?
 
-    /// How long to wait after the last new word before treating the
-    /// utterance as finished.
     private static let silenceTimeout: TimeInterval = 1.5
 
     private override init() {
         super.init()
     }
 
-    /// Requests speech-recognition + microphone authorization (only
-    /// actually prompts the first time; subsequent calls resolve
-    /// immediately from the cached OS decision) and starts capturing on
-    /// success. No-ops if already listening.
     func start(language: AppLanguage) {
         guard !isListening else { return }
 
@@ -67,9 +50,6 @@ final class SpeechRecognitionService: NSObject {
         }
     }
 
-    /// Stops capturing without sending whatever partial transcript exists
-    /// — used for the explicit "Stop Listening" toggle, which is a
-    /// cancel, not a submit.
     func stop() {
         teardownCapture(sendFinalTranscript: false)
     }
@@ -168,45 +148,125 @@ final class SpeechRecognitionService: NSObject {
         let finalText = liveTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
         liveTranscript = ""
 
-        if sendFinalTranscript, !finalText.isEmpty {
-            if isDeleteConversationCommand(finalText) {
-                NotificationCenter.default.post(name: Self.deleteLatestConversationNotification, object: finalText)
+        guard sendFinalTranscript, !finalText.isEmpty else { return }
+
+        // Meaning-based routing. The LLM is used only to understand intent;
+        // it never performs the destructive action itself.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            if await self.consumeLocalSemanticIntent(finalText) {
                 return
             }
 
-            onFinalTranscript?(finalText)
+            self.onFinalTranscript?(finalText)
         }
     }
 
-    /// Deterministic local command classification. We deliberately do not
-    /// require words such as "latest" or "last" because speech recognition
-    /// may omit or distort those words. A destructive verb plus an explicit
-    /// conversation/history target is enough to keep this command out of the
-    /// LLM routing path.
-    private func isDeleteConversationCommand(_ text: String) -> Bool {
-        let normalized = text
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "el_GR"))
-            .lowercased()
+    // MARK: - Semantic Voice Intent
 
-        let wantsDelete =
-            normalized.contains("σβησ") ||
-            normalized.contains("σβηστ") ||
-            normalized.contains("διεγρα") ||
-            normalized.contains("διαγρα") ||
-            normalized.contains("διαγραφ") ||
-            normalized.contains("delete") ||
-            normalized.contains("remove") ||
-            normalized.contains("erase")
+    private struct VoiceIntent: Decodable {
+        let intent: String
+        let confidence: Double
+        let target: String?
+        let needsClarification: Bool
+    }
 
-        let targetsConversation =
-            normalized.contains("συνομιλ") ||
-            normalized.contains("συζητ") ||
-            normalized.contains("ιστορικ") ||
-            normalized.contains("μηνυμα") ||
-            normalized.contains("chat") ||
-            normalized.contains("conversation") ||
-            normalized.contains("history")
+    /// Returns true when a local app action consumed the transcript.
+    ///
+    /// For now the first local semantic action is chat-history deletion.
+    /// More local actions can be added to the same schema without teaching
+    /// the user command phrases.
+    private func consumeLocalSemanticIntent(_ transcript: String) async -> Bool {
+        let prompt = """
+        You are the semantic command router for TRAVIS, a personal AI assistant.
 
-        return wantsDelete && targetsConversation
+        Understand the USER'S MEANING, not keywords or exact phrases.
+        The user may speak Greek, English, mixed language, slang, pronouns, or elliptical phrases.
+
+        USER TRANSCRIPT:
+        \(transcript)
+
+        Classify whether the user intends a LOCAL CHAT-HISTORY ACTION.
+
+        Supported local intent right now:
+        - delete_conversation: the user wants to remove/delete/erase a conversation or chat from TRAVIS history.
+        - none: anything else.
+
+        Examples that all mean delete_conversation:
+        - "σβήσε την τελευταία συνομιλία"
+        - "αυτή τη συζήτηση δεν τη θέλω, πέταξέ την"
+        - "βγάλε την προηγούμενη κουβέντα από το ιστορικό"
+        - "delete that chat"
+        - "καθάρισε αυτή τη συνομιλία"
+
+        target values:
+        - latest: latest previous conversation
+        - viewed: conversation the user is currently viewing / deictic references like "αυτή"
+        - unspecified: delete intent is clear but the target is not safely resolvable
+        - null for intent none
+
+        Safety rule:
+        If deletion intent itself is uncertain, return none.
+        If deletion intent is clear but which conversation is ambiguous, return
+        delete_conversation with target "unspecified" and needsClarification true.
+
+        Return ONLY valid JSON, no markdown:
+        {
+          "intent": "delete_conversation|none",
+          "confidence": 0.0,
+          "target": "latest|viewed|unspecified|null",
+          "needsClarification": false
+        }
+        """
+
+        do {
+            let raw = try await AIService.shared.generateText(prompt: prompt, maxTokens: 220)
+            let cleaned = cleanJSON(raw)
+            guard let data = cleaned.data(using: .utf8),
+                  let parsed = try? JSONDecoder().decode(VoiceIntent.self, from: data)
+            else {
+                return false
+            }
+
+            guard parsed.intent == "delete_conversation", parsed.confidence >= 0.72 else {
+                return false
+            }
+
+            if parsed.needsClarification || parsed.target == "unspecified" {
+                // Do not risk deleting the wrong conversation. Pass a natural
+                // clarification request through the normal assistant path.
+                onFinalTranscript?("Θέλω να διαγράψω μια συνομιλία, αλλά δεν είναι σαφές ποια. Ρώτησέ με ποια συνομιλία εννοώ πριν διαγράψεις οτιδήποτε.")
+                return true
+            }
+
+            // Existing ChatView owns the deterministic persistence delete.
+            // The semantic target is attached for future target-aware UI
+            // routing; current behavior deletes the most recent previous chat.
+            NotificationCenter.default.post(
+                name: Self.deleteLatestConversationNotification,
+                object: parsed.target ?? "latest"
+            )
+            return true
+
+        } catch {
+            // AI intent routing failure must never block normal voice use.
+            // Fall back to the existing orchestrator path.
+            return false
+        }
+    }
+
+    private func cleanJSON(_ raw: String) -> String {
+        var value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("```json") {
+            value.removeFirst("```json".count)
+        } else if value.hasPrefix("```") {
+            value.removeFirst(3)
+        }
+        value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasSuffix("```") {
+            value.removeLast(3)
+        }
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
