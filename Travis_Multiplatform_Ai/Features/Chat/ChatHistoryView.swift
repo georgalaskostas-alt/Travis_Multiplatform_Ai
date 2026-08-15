@@ -36,10 +36,36 @@ struct ChatHistoryView: View {
                         .padding(.vertical, 4)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            delete(session.id)
+                        } label: {
+                            Label("Διαγραφή", systemImage: "trash")
+                        }
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            delete(session.id)
+                        } label: {
+                            Label("Διαγραφή", systemImage: "trash")
+                        }
+                    }
                 }
             }
         }
         .navigationTitle("Ιστορικό")
+    }
+
+    private func delete(_ sessionId: UUID) {
+        do {
+            try ChatHistoryStore.deleteSession(sessionId)
+            if appState.viewedSessionId == sessionId {
+                appState.returnToCurrentSession()
+            }
+            appState.lastResponseSummary = "Η συνομιλία διαγράφηκε"
+        } catch {
+            appState.lastResponseSummary = "Αποτυχία διαγραφής: \(error.localizedDescription)"
+        }
     }
 
     private static let dateFormatter: DateFormatter = {
