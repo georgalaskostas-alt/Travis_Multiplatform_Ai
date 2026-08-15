@@ -197,7 +197,6 @@ struct ChatView: View {
             .padding(.top)
 
             recentSessionsPanel
-
             unifiedChatSection
 
             HStack(spacing: 12) {
@@ -208,13 +207,9 @@ struct ChatView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .foregroundStyle(.white)
                     .submitLabel(.send)
-                    .onSubmit {
-                        submitDraft()
-                    }
+                    .onSubmit { submitDraft() }
 
-                Button {
-                    submitDraft()
-                } label: {
+                Button { submitDraft() } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 28))
                         .foregroundStyle(.cyan)
@@ -252,13 +247,63 @@ struct ChatView: View {
         guard !trimmed.isEmpty else { return }
 
         if trimmed.lowercased() == "/resume" {
-            appState.resumeRecoveredAutonomousTask()
+            resumeRecoveredTask()
             draft = ""
             return
         }
 
         appState.sendCommand(trimmed, source: .manual)
         draft = ""
+    }
+
+    private func resumeRecoveredTask() {
+        guard let recoveredTask = appState.taskRuntime.tasks.last(where: { $0.status == .paused }) else {
+            appState.addAssistantMessage("Δεν υπάρχει paused autonomous task για συνέχιση.")
+            appState.lastResponseSummary = "No paused autonomous task"
+            return
+        }
+
+        let checkpoint = recoveredTask.executionState.lastCheckpoint?.summary ?? "κανένα"
+        let progressPercent = Int(appState.taskRuntime.progress(taskId: recoveredTask.id) * 100)
+
+        appState.taskRuntime.resume(taskId: recoveredTask.id)
+
+        guard let resumedTask = appState.taskRuntime.task(id: recoveredTask.id) else {
+            appState.addAssistantMessage("Το recovered runtime task δεν βρέθηκε μετά το resume.")
+            appState.lastResponseSummary = "Runtime resume failed"
+            return
+        }
+
+        let nextStep = appState.taskRuntime.nextRunnableStep(taskId: resumedTask.id)
+        let nextText = nextStep.map { "#\($0.order) — \($0.title)" } ?? "κανένα"
+
+        let response = """
+        AUTONOMOUS TASK RECOVERED
+
+        TASK
+        \(resumedTask.id.uuidString)
+
+        STATUS
+        \(resumedTask.status.rawValue)
+
+        RECOVERY
+        Recovered from durable snapshot after application/process restart.
+        Continuation required explicit /resume.
+
+        PROGRESS
+        \(progressPercent)%
+
+        LAST VERIFIED CHECKPOINT
+        \(checkpoint)
+
+        NEXT RUNNABLE STEP
+        \(nextText)
+
+        Το task είναι ξανά διαθέσιμο για /run ή /auto.
+        """
+
+        appState.addAssistantMessage(response)
+        appState.lastResponseSummary = "Recovered task resumed — \(progressPercent)%"
     }
 
     private var unifiedChatSection: some View {
@@ -276,17 +321,14 @@ struct ChatView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 12) {
                             ForEach(timelineItems) { item in
-                                timelineRow(item)
-                                    .id(item.id)
+                                timelineRow(item).id(item.id)
                             }
                         }
                         .padding(.vertical, 4)
                     }
                     .onChange(of: timelineItems.count) { _, _ in
                         guard let lastId = timelineItems.last?.id else { return }
-                        withAnimation {
-                            proxy.scrollTo(lastId, anchor: .bottom)
-                        }
+                        withAnimation { proxy.scrollTo(lastId, anchor: .bottom) }
                     }
                     .onAppear {
                         guard let lastId = timelineItems.last?.id else { return }
@@ -304,10 +346,8 @@ struct ChatView: View {
     @ViewBuilder
     private func timelineRow(_ item: TimelineItem) -> some View {
         switch item {
-        case .message(let message):
-            messageBubble(message)
-        case .proposal(let action):
-            proposalCard(action)
+        case .message(let message): messageBubble(message)
+        case .proposal(let action): proposalCard(action)
         }
     }
 
@@ -368,15 +408,10 @@ struct ChatView: View {
                 Text("Ρίσκο: \(action.riskLevel.rawValue)")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.6))
-
                 Spacer()
-
-                Button("Reject") {
-                    appState.approvalGate.reject(action)
-                }
-                .buttonStyle(.bordered)
-                .tint(.red)
-
+                Button("Reject") { appState.approvalGate.reject(action) }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
                 Button("Approve") {
                     appState.approvalGate.approve(action)
                     if let text = action.payload {
@@ -395,22 +430,16 @@ struct ChatView: View {
     @ViewBuilder
     private var recentSessionsPanel: some View {
         let recent = Array(appState.pastSessions.prefix(5))
-
         if !recent.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Πρόσφατες συνομιλίες")
                     .font(.headline)
                     .foregroundStyle(.white)
-
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(recent) { session in
-                            Button {
-                                appState.viewSession(session.id)
-                            } label: {
-                                recentSessionCard(session)
-                            }
-                            .buttonStyle(.plain)
+                            Button { appState.viewSession(session.id) } label: { recentSessionCard(session) }
+                                .buttonStyle(.plain)
                         }
                     }
                     .padding(.vertical, 2)
@@ -428,15 +457,12 @@ struct ChatView: View {
             Text(Self.recentCardDateFormatter.string(from: session.startedAt))
                 .font(.caption2.bold())
                 .foregroundStyle(.cyan)
-
             Text(session.preview.isEmpty ? "…" : session.preview)
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.9))
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
-
             Spacer(minLength: 0)
-
             Text("\(session.messages.count) μηνύματα")
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.5))
@@ -445,18 +471,9 @@ struct ChatView: View {
         .frame(width: 150, height: 100, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(
-                    LinearGradient(
-                        colors: [Color.blue.opacity(0.3), Color.cyan.opacity(0.08)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(LinearGradient(colors: [Color.blue.opacity(0.3), Color.cyan.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing))
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.cyan.opacity(0.45), lineWidth: 1)
-        )
-        .shadow(color: Color.cyan.opacity(0.3), radius: 8, x: 0, y: 0)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.cyan.opacity(0.45), lineWidth: 1))
+        .shadow(color: Color.cyan.opacity(0.3), radius: 8)
     }
 }
