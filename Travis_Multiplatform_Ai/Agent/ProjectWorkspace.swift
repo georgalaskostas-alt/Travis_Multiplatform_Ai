@@ -15,6 +15,10 @@ struct ProjectWorkspace: Identifiable, Codable, Hashable {
     var notes: [ProjectNote]
     var artifactPaths: [String]
 
+    /// Optional for backwards-compatible decoding of v1 snapshots created
+    /// before session binding existed. New projects initialize it to [].
+    var sessionIds: [UUID]?
+
     init(id: UUID = UUID(), title: String, goal: String, summary: String = "") {
         self.id = id
         self.title = title
@@ -27,6 +31,7 @@ struct ProjectWorkspace: Identifiable, Codable, Hashable {
         self.decisions = []
         self.notes = []
         self.artifactPaths = []
+        self.sessionIds = []
     }
 }
 
@@ -35,8 +40,12 @@ struct ProjectDecision: Identifiable, Codable, Hashable {
     var text: String
     var rationale: String?
     var createdAt: Date
+
     init(id: UUID = UUID(), text: String, rationale: String? = nil, createdAt: Date = Date()) {
-        self.id = id; self.text = text; self.rationale = rationale; self.createdAt = createdAt
+        self.id = id
+        self.text = text
+        self.rationale = rationale
+        self.createdAt = createdAt
     }
 }
 
@@ -44,7 +53,10 @@ struct ProjectNote: Identifiable, Codable, Hashable {
     let id: UUID
     var text: String
     var createdAt: Date
+
     init(id: UUID = UUID(), text: String, createdAt: Date = Date()) {
-        self.id = id; self.text = text; self.createdAt = createdAt
+        self.id = id
+        self.text = text
+        self.createdAt = createdAt
     }
 }
