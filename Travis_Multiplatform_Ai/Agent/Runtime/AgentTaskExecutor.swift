@@ -65,7 +65,7 @@ struct AutonomousRunReport: Codable, Hashable {
 @MainActor
 @Observable
 final class AgentTaskExecutor {
-    static let runtimeFingerprint = "runtime-v1.9-owned-cancellation"
+    static let runtimeFingerprint = "runtime-v1.10-resilient-verifier"
 
     private let runtime: AgentTaskRuntime
     private let orchestrator: AgentOrchestrator
@@ -96,9 +96,6 @@ final class AgentTaskExecutor {
         leasedTaskIds.contains(taskId)
     }
 
-    /// Cancels the actual in-flight capability owned by this executor. The
-    /// runtime step is moved to a safe paused/pending state by the cancellation
-    /// handler below; the execution lease is released by the existing defer.
     @discardableResult
     func requestCancellation(taskId: UUID, reason: String = "Cancelled by user") -> Bool {
         guard leasedTaskIds.contains(taskId) else { return false }
@@ -171,8 +168,11 @@ final class AgentTaskExecutor {
                     throw AgentTaskExecutorError.emptyCapabilityResult
                 }
 
-                try throwIfCancellationRequested(taskId)
-                let verification = try await verifier.verify(taskGoal: task.goal, step: step, capabilityResult: text)
+                let verification = try await verifier.verify(
+                    taskGoal: task.goal,
+                    step: step,
+                    capabilityResult: text
+                )
                 try throwIfCancellationRequested(taskId)
 
                 switch verification.verdict {
@@ -395,15 +395,18 @@ final class AgentTaskExecutor {
 
 final class AgentStepVerifier {
     private let aiService: AIService
-    init(aiService: AIService = .shared) { self.aiService = aiService }
+    private let maxDecodeAttempts = 2
+
+    init(aiService: AIService = .shared) {
+        self.aiService = aiService
+    }
 
     func verify(taskGoal: String, step: PlanStep, capabilityResult: String) async throws -> StepVerificationResult {
         let criteria = step.successCriteria.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
-        let prompt = """
+        let basePrompt = """
         You are the scope-aware verification component of TRAVIS.
 
-        Verify ONLY the current step. The overall task goal is context, not an
-        instruction to demand repository-wide completeness from this step.
+        Verify ONLY the current step. The overall task goal is context, not an instruction to demand repository-wide completeness from this step.
         Judge only evidence in the produced result. Do not invent missing evidence.
 
         OVERALL TASK GOAL (context only):
@@ -421,32 +424,65 @@ final class AgentStepVerifier {
         PRODUCED RESULT:
         \(capabilityResult)
 
-        Return ONLY valid JSON:
-        {
-          "verdict": "pass|retry|insufficient_evidence",
-          "confidence": 0.0,
-          "reason": "short reason",
-          "unmetCriteria": []
-        }
+        Return ONLY one JSON object with exactly this schema:
+        {"verdict":"pass|retry|insufficient_evidence","confidence":0.0,"reason":"short reason","unmetCriteria":[]}
 
         Verdict rules:
         - pass: the current step's scoped criteria are demonstrated.
         - retry: evidence was available but the result is materially wrong, contradictory, malformed, or failed to use it.
         - insufficient_evidence: the result is honest and grounded, but the loaded evidence cannot establish part of the requested scope.
         - A stated limitation about OUT-OF-SCOPE repository areas is NOT a failure when the current step's own scope is satisfied.
-        - Do not require tests, docs, generated artifacts, unrelated subsystems, or repository-wide classification unless the step title/instructions explicitly request them.
-        - For repository inspection, source-level evidence for the named subsystem is enough; absence of unrelated evidence must not trigger retry.
+        - Do not require tests, docs, generated artifacts, unrelated subsystems, or repository-wide classification unless the step explicitly requests them.
         - confidence must be 0.0...1.0.
         - unmetCriteria lists only current-step criteria not demonstrated.
         """
 
-        try Task.checkCancellation()
-        let raw = try await aiService.generateText(prompt: prompt, maxTokens: 1200)
-        try Task.checkCancellation()
-        let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines).removingVerifierJSONFence()
-        guard let data = cleaned.data(using: .utf8) else {
+        var lastRaw = ""
+        var lastDiagnostic = "unknown decode error"
+
+        for attempt in 1...maxDecodeAttempts {
+            try Task.checkCancellation()
+
+            let prompt: String
+            if attempt == 1 {
+                prompt = basePrompt
+            } else {
+                prompt = """
+                Repair the following verifier response into VALID JSON ONLY.
+                Do not change its substantive verdict unless necessary to fit the allowed enum.
+                Required schema:
+                {"verdict":"pass|retry|insufficient_evidence","confidence":0.0,"reason":"short reason","unmetCriteria":[]}
+
+                MALFORMED RESPONSE:
+                \(lastRaw)
+
+                Return exactly one JSON object and nothing else.
+                """
+            }
+
+            let raw = try await aiService.generateText(prompt: prompt, maxTokens: attempt == 1 ? 1200 : 500)
+            try Task.checkCancellation()
+            lastRaw = raw
+
+            do {
+                return try decodeVerifierResult(raw)
+            } catch {
+                lastDiagnostic = verifierDecodeDiagnostic(error)
+            }
+        }
+
+        let preview = String(lastRaw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(400))
+        throw AgentTaskExecutorError.verificationFailed(
+            "Verifier returned malformed JSON after \(maxDecodeAttempts) attempts. \(lastDiagnostic). Response preview: \(preview)"
+        )
+    }
+
+    private func decodeVerifierResult(_ raw: String) throws -> StepVerificationResult {
+        let json = raw.extractFirstJSONObject() ?? raw.removingVerifierJSONFence()
+        guard let data = json.data(using: .utf8) else {
             throw AgentTaskExecutorError.verificationFailed("Verifier response was not UTF-8 JSON.")
         }
+
         let result = try JSONDecoder().decode(StepVerificationResult.self, from: data)
         return StepVerificationResult(
             verdict: result.verdict,
@@ -454,6 +490,25 @@ final class AgentStepVerifier {
             reason: result.reason,
             unmetCriteria: result.unmetCriteria
         )
+    }
+
+    private func verifierDecodeDiagnostic(_ error: Error) -> String {
+        guard let decodingError = error as? DecodingError else {
+            return error.localizedDescription
+        }
+
+        switch decodingError {
+        case .dataCorrupted(let context):
+            return "dataCorrupted at \(context.codingPath.map(\.stringValue).joined(separator: ".")): \(context.debugDescription)"
+        case .keyNotFound(let key, let context):
+            return "missing key '\(key.stringValue)' at \(context.codingPath.map(\.stringValue).joined(separator: "."))"
+        case .typeMismatch(let type, let context):
+            return "type mismatch for \(type) at \(context.codingPath.map(\.stringValue).joined(separator: ".")): \(context.debugDescription)"
+        case .valueNotFound(let type, let context):
+            return "missing value for \(type) at \(context.codingPath.map(\.stringValue).joined(separator: "."))"
+        @unknown default:
+            return decodingError.localizedDescription
+        }
     }
 }
 
@@ -465,5 +520,45 @@ private extension String {
         value = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.hasSuffix("```") { value.removeLast(3) }
         return value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func extractFirstJSONObject() -> String? {
+        let chars = Array(self)
+        var start: Int?
+        var depth = 0
+        var inString = false
+        var escaped = false
+
+        for index in chars.indices {
+            let char = chars[index]
+
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if char == "\\" {
+                    escaped = true
+                } else if char == "\"" {
+                    inString = false
+                }
+                continue
+            }
+
+            if char == "\"" {
+                inString = true
+                continue
+            }
+
+            if char == "{" {
+                if depth == 0 { start = index }
+                depth += 1
+            } else if char == "}", depth > 0 {
+                depth -= 1
+                if depth == 0, let start {
+                    return String(chars[start...index])
+                }
+            }
+        }
+
+        return nil
     }
 }
