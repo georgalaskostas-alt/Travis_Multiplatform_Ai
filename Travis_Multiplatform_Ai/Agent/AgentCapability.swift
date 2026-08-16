@@ -10,7 +10,10 @@ enum AgentCapabilityStatus: String, Codable, CaseIterable {
 /// - `reply`: plain conversational response, shown directly in chat, no approval needed.
 /// - `proposal`: a state-changing action that needs user approval before it happens.
 /// - `none`: the capability had nothing to say or do.
-enum CapabilityOutcome {
+///
+/// Capability implementations themselves remain MainActor-isolated. The envelope
+/// is immutable data crossing a structured-concurrency race in UniversalCapabilityRunner.
+enum CapabilityOutcome: @unchecked Sendable {
     case reply(String)
     case proposal(ProposedAction)
     case none
