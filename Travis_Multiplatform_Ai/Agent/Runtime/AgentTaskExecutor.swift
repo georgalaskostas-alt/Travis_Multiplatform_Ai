@@ -11,6 +11,7 @@ enum AgentTaskExecutorError: LocalizedError {
     case verificationFailed(String)
     case emptyCapabilityResult
     case capabilityTimedOut(seconds: Int)
+    case taskBudgetExceeded(String)
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +26,8 @@ enum AgentTaskExecutorError: LocalizedError {
         case .emptyCapabilityResult: return "Το capability δεν επέστρεψε αποτέλεσμα που μπορεί να επαληθευτεί."
         case .capabilityTimedOut(let seconds):
             return "Το capability ξεπέρασε το execution deadline των \(seconds) δευτερολέπτων και ακυρώθηκε από το watchdog."
+        case .taskBudgetExceeded(let reason):
+            return "Το autonomous task σταμάτησε επειδή εξαντλήθηκε το execution budget: \(reason)"
         }
     }
 }
@@ -50,6 +53,7 @@ enum AutonomousRunStopReason: String, Codable, Hashable {
     case failed
     case noRunnableStep
     case safetyStepLimitReached
+    case budgetExceeded
 }
 
 struct AutonomousRunReport: Codable, Hashable {
@@ -68,7 +72,7 @@ struct AutonomousRunReport: Codable, Hashable {
 @MainActor
 @Observable
 final class AgentTaskExecutor {
-    static let runtimeFingerprint = "runtime-v1.11-watchdog-backoff"
+    static let runtimeFingerprint = "runtime-v1.12-budget-enforced"
     private static let capabilityTimeoutSeconds = 120
 
     private let runtime: AgentTaskRuntime
@@ -323,6 +327,14 @@ final class AgentTaskExecutor {
                 break
             }
 
+            if let budgetReason = budgetViolationReason(task) {
+                runtime.pause(taskId: taskId, reason: "Execution budget exhausted: \(budgetReason)")
+                guard let pausedTask = runtime.task(id: taskId) else { throw AgentTaskExecutorError.taskNotFound }
+                lastExecutionSummary = "Execution budget exhausted: \(budgetReason)"
+                onProgress?("⛔️ Execution budget exhausted: \(budgetReason)")
+                return makeRunReport(task: pausedTask, reason: .budgetExceeded, stepsAttempted: attempted)
+            }
+
             guard runtime.nextRunnableStep(taskId: taskId) != nil else {
                 guard let latest = runtime.task(id: taskId) else { throw AgentTaskExecutorError.taskNotFound }
                 return makeRunReport(task: latest, reason: .noRunnableStep, stepsAttempted: attempted)
@@ -364,6 +376,25 @@ final class AgentTaskExecutor {
 
         guard let latest = runtime.task(id: taskId) else { throw AgentTaskExecutorError.taskNotFound }
         return makeRunReport(task: latest, reason: .safetyStepLimitReached, stepsAttempted: attempted)
+    }
+
+    private func budgetViolationReason(_ task: AgentTask) -> String? {
+        if let maxSteps = task.budget.maxSteps {
+            let totalExecutionAttempts = task.plan.steps.reduce(0) { $0 + $1.attemptCount }
+            if totalExecutionAttempts >= maxSteps {
+                return "step execution budget reached (\(totalExecutionAttempts)/\(maxSteps) attempts)"
+            }
+        }
+
+        if let maxRuntimeSeconds = task.budget.maxRuntimeSeconds,
+           let startedAt = task.startedAt {
+            let elapsed = Date().timeIntervalSince(startedAt)
+            if elapsed >= maxRuntimeSeconds {
+                return "wall-clock runtime budget reached (\(Int(elapsed))s/\(Int(maxRuntimeSeconds))s)"
+            }
+        }
+
+        return nil
     }
 
     private func triggerCapabilityTimeout(taskId: UUID, step: PlanStep) {
@@ -555,6 +586,8 @@ final class AgentStepVerifier {
         - insufficient_evidence: the result is honest and grounded, but the loaded evidence cannot establish part of the requested scope.
         - A stated limitation about OUT-OF-SCOPE repository areas is NOT a failure when the current step's own scope is satisfied.
         - Do not require tests, docs, generated artifacts, unrelated subsystems, or repository-wide classification unless the step explicitly requests them.
+        - For repository-grounded results, a real source path plus a concrete symbol, control-flow branch, state transition, API call, or data-flow behavior is sufficient source evidence when it supports the claim.
+        - Do NOT require exact line numbers unless the current step instructions or success criteria explicitly require line-level references.
         - confidence must be 0.0...1.0.
         - unmetCriteria lists only current-step criteria not demonstrated.
         """
