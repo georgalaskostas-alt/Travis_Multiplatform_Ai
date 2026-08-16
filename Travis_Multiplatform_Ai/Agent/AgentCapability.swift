@@ -25,6 +25,12 @@ protocol AgentCapability: AnyObject, Identifiable {
     /// as a catch-all/default capability, used when no other capability's keywords match.
     var keywords: [String] { get }
 
+    /// Universal metadata consumed by policy, scheduling, diagnostics and
+    /// capability discovery. A backward-compatible default is supplied by
+    /// UniversalCapabilityContract.swift, so existing capabilities can migrate
+    /// incrementally without changing their execution behaviour.
+    var descriptor: CapabilityDescriptor { get }
+
     func handle(command: String, recentHistory: [ChatMessage]) async throws -> CapabilityOutcome
     func resolve(_ action: ProposedAction)
 }
