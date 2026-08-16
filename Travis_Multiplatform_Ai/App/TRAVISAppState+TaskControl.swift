@@ -2,10 +2,38 @@ import Foundation
 
 @MainActor
 extension TRAVISAppState {
-    /// Deterministic task lookup shared by explicit runtime-control commands.
-    /// UUID/prefix is authoritative; ambiguous natural references never mutate.
     func resolveRuntimeTask(reference: String?) -> AgentTaskResolver.Resolution {
         AgentTaskResolver().resolve(reference, in: taskRuntime.tasks)
+    }
+
+    /// Handles explicit slash commands immediately and natural-language
+    /// runtime control semantically. Returns true when normal capability
+    /// routing must stop because this message was consumed as system control.
+    func handleSystemIntent(_ text: String, recentHistory: [ChatMessage]) async -> Bool {
+        let intent = await systemIntentRouter.classify(text, recentHistory: recentHistory)
+        switch intent {
+        case .none:
+            return false
+        case .listTasks:
+            await orchestrator.route("/tasks", liveSessionId: currentSessionId, recentHistory: recentHistory)
+        case .taskStatus(let reference):
+            await orchestrator.route(command("/task-status", reference), liveSessionId: currentSessionId, recentHistory: recentHistory)
+        case .taskLog(let reference):
+            await orchestrator.route(command("/task-log", reference), liveSessionId: currentSessionId, recentHistory: recentHistory)
+        case .run(let reference):
+            runAutonomousTask(reference: reference, continuous: false)
+        case .auto(let reference):
+            runAutonomousTask(reference: reference, continuous: true)
+        case .resume(let reference):
+            resumeAutonomousTask(reference: reference)
+        case .retry(let reference):
+            retryAutonomousTask(reference: reference)
+        case .cancel(let reference):
+            cancelAutonomousTask(reference: reference)
+        case .schedulerCycle:
+            runSchedulerCycle()
+        }
+        return true
     }
 
     func runAutonomousTask(reference: String?, continuous: Bool) {
@@ -14,29 +42,18 @@ extension TRAVISAppState {
             addAssistantMessage("Το autonomous task \(shortTaskId(task)) δεν είναι running (status: \(task.status.rawValue)).")
             return
         }
-
         let recentHistory = Array(chatMessages.suffix(Self.runtimeControlContextWindow))
         isProcessing = true
         lastResponseSummary = "Executing task \(shortTaskId(task))…"
-
         Task {
             defer { isProcessing = false }
             do {
                 if continuous {
-                    let report = try await taskExecutor.executeUntilBlocked(
-                        taskId: task.id,
-                        recentHistory: recentHistory,
-                        maxStepsPerCycle: 8
-                    )
+                    let report = try await taskExecutor.executeUntilBlocked(taskId: task.id, recentHistory: recentHistory, maxStepsPerCycle: 8)
                     addAssistantMessage(renderRunReport(report))
                 } else {
-                    _ = try await taskExecutor.executeNextStep(
-                        taskId: task.id,
-                        recentHistory: recentHistory
-                    )
-                    guard let updated = taskRuntime.task(id: task.id) else {
-                        throw RuntimeIntegrationControlError.taskNotFound
-                    }
+                    _ = try await taskExecutor.executeNextStep(taskId: task.id, recentHistory: recentHistory)
+                    guard let updated = taskRuntime.task(id: task.id) else { throw RuntimeIntegrationControlError.taskNotFound }
                     addAssistantMessage(renderStepResult(updated))
                 }
             } catch {
@@ -59,17 +76,11 @@ extension TRAVISAppState {
 
     func cancelAutonomousTask(reference: String?) {
         guard let task = resolvedTaskForMutation(reference, action: "cancel") else { return }
-        if taskExecutor.isTaskExecuting(task.id) {
-            _ = taskExecutor.requestCancellation(taskId: task.id, reason: "Cancelled by user")
-        } else {
-            taskRuntime.cancel(taskId: task.id)
-        }
+        if taskExecutor.isTaskExecuting(task.id) { _ = taskExecutor.requestCancellation(taskId: task.id, reason: "Cancelled by user") }
+        else { taskRuntime.cancel(taskId: task.id) }
         addAssistantMessage("TASK CANCELLED\n\n\(shortTaskId(task)) — \(task.title)")
     }
 
-    /// A failed task is not silently reset because exhausted retries may have
-    /// side effects. Retry converts only the failed step back to pending and
-    /// clears terminal task state after explicit user intent.
     func retryAutonomousTask(reference: String?) {
         guard let task = resolvedTaskForMutation(reference, action: "retry") else { return }
         guard task.status == .failed else {
@@ -88,11 +99,7 @@ extension TRAVISAppState {
         isProcessing = true
         Task {
             defer { isProcessing = false }
-            let report = await taskScheduler.runCycle(
-                recentHistory: recentHistory,
-                backgroundOnly: backgroundOnly,
-                maxTasksPerCycle: 4
-            )
+            let report = await taskScheduler.runCycle(recentHistory: recentHistory, backgroundOnly: backgroundOnly, maxTasksPerCycle: 4)
             addAssistantMessage("""
             SCHEDULER CYCLE COMPLETE
 
@@ -113,68 +120,34 @@ extension TRAVISAppState {
 
     private static var runtimeControlContextWindow: Int { 8 }
 
+    private func command(_ base: String, _ reference: String?) -> String {
+        guard let reference, !reference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return base }
+        return base + " " + reference
+    }
+
     private func resolvedTaskForMutation(_ reference: String?, action: String) -> AgentTask? {
         switch resolveRuntimeTask(reference: reference) {
-        case .found(let task):
-            return task
+        case .found(let task): return task
         case .notFound:
             addAssistantMessage("Δεν βρέθηκε autonomous task για \(action). Χρησιμοποίησε /tasks.")
             return nil
         case .ambiguous(let tasks):
-            let rows = tasks.prefix(8).map {
-                "\(shortTaskId($0)) [\($0.status.rawValue)] — \($0.title)"
-            }.joined(separator: "\n")
+            let rows = tasks.prefix(8).map { "\(shortTaskId($0)) [\($0.status.rawValue)] — \($0.title)" }.joined(separator: "\n")
             addAssistantMessage("Βρήκα περισσότερα από ένα tasks. Δεν θα επιλέξω αυθαίρετα:\n\n\(rows)\n\nΔώσε το short ID.")
             return nil
         }
     }
 
-    private func shortTaskId(_ task: AgentTask) -> String {
-        String(task.id.uuidString.prefix(8))
-    }
+    private func shortTaskId(_ task: AgentTask) -> String { String(task.id.uuidString.prefix(8)) }
 
     private func renderStepResult(_ task: AgentTask) -> String {
         let progress = Int(taskRuntime.progress(taskId: task.id) * 100)
         let next = taskRuntime.nextRunnableStep(taskId: task.id)
-        return """
-        RUNTIME STEP RESULT
-
-        TASK
-        \(task.id.uuidString)
-
-        STATUS
-        \(task.status.rawValue)
-
-        PROGRESS
-        \(progress)%
-
-        NEXT RUNNABLE STEP
-        \(next.map { "#\($0.order) — \($0.title)" } ?? "κανένα")
-        """
+        return "RUNTIME STEP RESULT\n\nTASK\n\(task.id.uuidString)\n\nSTATUS\n\(task.status.rawValue)\n\nPROGRESS\n\(progress)%\n\nNEXT RUNNABLE STEP\n\(next.map { "#\($0.order) — \($0.title)" } ?? "κανένα")"
     }
 
     private func renderRunReport(_ report: AutonomousRunReport) -> String {
-        """
-        AUTONOMOUS RUN STOPPED
-
-        TASK
-        \(report.taskId.uuidString)
-
-        STOP REASON
-        \(report.stopReason.rawValue)
-
-        STEPS ATTEMPTED THIS CYCLE
-        \(report.stepsAttempted)
-
-        PROGRESS
-        \(Int(report.progress * 100))%
-
-        LAST CHECKPOINT
-        \(report.lastCheckpoint ?? "κανένα")
-
-        NEXT RUNNABLE STEP
-        \(report.nextStepTitle ?? "κανένα")
-        """
+        "AUTONOMOUS RUN STOPPED\n\nTASK\n\(report.taskId.uuidString)\n\nSTOP REASON\n\(report.stopReason.rawValue)\n\nSTEPS ATTEMPTED THIS CYCLE\n\(report.stepsAttempted)\n\nPROGRESS\n\(Int(report.progress * 100))%\n\nLAST CHECKPOINT\n\(report.lastCheckpoint ?? "κανένα")\n\nNEXT RUNNABLE STEP\n\(report.nextStepTitle ?? "κανένα")"
     }
 }
 
