@@ -23,7 +23,6 @@ final class AgentOrchestrator {
         self.taskStore = taskStore
         self.capabilityRunner = capabilityRunner
 
-        // Core capabilities that should exist for every TRAVIS runtime.
         let builtIns: [AgentCapability] = [
             RepositoryContextCapability(),
             WebResearchCapability(),
@@ -95,7 +94,18 @@ final class AgentOrchestrator {
         })
         let defaultCapability = capabilities.first(where: { $0.keywords.isEmpty })
 
-        guard let capability = keywordMatch ?? defaultCapability else {
+        let selectedCapability: AgentCapability?
+        if let keywordMatch {
+            selectedCapability = keywordMatch
+        } else {
+            selectedCapability = await CapabilitySelectionService().select(
+                message: message,
+                capabilities: capabilities,
+                recentHistory: recentHistory
+            ) ?? defaultCapability
+        }
+
+        guard let capability = selectedCapability else {
             onAssistantMessage?("Δεν κατάλαβα ποια δραστηριότητα αφορά αυτό.")
             return
         }
