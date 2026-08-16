@@ -42,6 +42,64 @@ final class AgentTaskRuntime {
         tasks.first { $0.id == id }
     }
 
+    /// Scheduler-facing deterministic view of tasks that can execute now.
+    ///
+    /// Ordering is stable and policy-free:
+    /// 1. priority (critical → low)
+    /// 2. earliest due date
+    /// 3. oldest update time (prevents starvation among equal peers)
+    /// 4. UUID as a final deterministic tie-breaker
+    ///
+    /// The scheduler may ask for background-only work so foreground-only
+    /// steps never run merely because a worker became available.
+    func dispatchableTasks(
+        backgroundOnly: Bool = false,
+        limit: Int = 8,
+        now: Date = Date()
+    ) -> [AgentTask] {
+        let boundedLimit = max(1, min(limit, 64))
+
+        return tasks
+            .filter { task in
+                guard task.status == .running else { return false }
+                if let nextEligible = task.executionState.nextEligibleRunAt,
+                   nextEligible > now {
+                    return false
+                }
+
+                guard let step = nextRunnableStep(taskId: task.id, now: now) else {
+                    return false
+                }
+
+                if backgroundOnly && !step.canRunInBackground {
+                    return false
+                }
+
+                return true
+            }
+            .sorted(by: schedulerPrecedes)
+            .prefix(boundedLimit)
+            .map { $0 }
+    }
+
+    /// Read-only stale-task detection for a future worker/supervisor.
+    /// It deliberately does not mutate state because a long-running capability
+    /// may still be legitimately active; the supervisor decides whether to
+    /// cancel, pause, probe, or wait.
+    func staleRunningTasks(
+        heartbeatOlderThan interval: TimeInterval,
+        now: Date = Date()
+    ) -> [AgentTask] {
+        let threshold = now.addingTimeInterval(-max(1, interval))
+        return tasks
+            .filter { task in
+                guard task.status == .running else { return false }
+                guard let heartbeat = task.executionState.lastHeartbeatAt else { return true }
+                return heartbeat < threshold
+            }
+            .sorted(by: schedulerPrecedes)
+    }
+
     func attachPlan(taskId: UUID, plan: TaskPlan) {
         mutate(taskId) { task in
             task.plan = plan
@@ -124,8 +182,12 @@ final class AgentTaskRuntime {
     }
 
     func nextRunnableStep(taskId: UUID) -> PlanStep? {
+        nextRunnableStep(taskId: taskId, now: Date())
+    }
+
+    private func nextRunnableStep(taskId: UUID, now: Date) -> PlanStep? {
         guard let task = task(id: taskId), task.status == .running else { return nil }
-        if let next = task.executionState.nextEligibleRunAt, next > Date() { return nil }
+        if let next = task.executionState.nextEligibleRunAt, next > now { return nil }
 
         let completed = Set(task.plan.steps.filter { $0.status == .completed }.map(\.id))
         return task.plan.steps
@@ -261,6 +323,35 @@ final class AgentTaskRuntime {
 
     func reloadFromDisk() {
         restorePersistedTasks()
+    }
+
+    private func schedulerPrecedes(_ lhs: AgentTask, _ rhs: AgentTask) -> Bool {
+        let lhsPriority = priorityRank(lhs.priority)
+        let rhsPriority = priorityRank(rhs.priority)
+        if lhsPriority != rhsPriority { return lhsPriority > rhsPriority }
+
+        switch (lhs.dueDate, rhs.dueDate) {
+        case let (left?, right?) where left != right:
+            return left < right
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        default:
+            break
+        }
+
+        if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt < rhs.updatedAt }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private func priorityRank(_ priority: AgentTaskPriority) -> Int {
+        switch priority {
+        case .low: return 0
+        case .medium: return 1
+        case .high: return 2
+        case .critical: return 3
+        }
     }
 
     private func mutate(_ taskId: UUID, _ body: (inout AgentTask) -> Void) {
