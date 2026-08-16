@@ -216,7 +216,7 @@ final class TRAVISAppState {
         let text = chatInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         chatInput = ""
-        sendCommand(text, source: .text)
+        sendCommand(text, source: .manual)
     }
 
     func addAssistantMessage(_ text: String) {
