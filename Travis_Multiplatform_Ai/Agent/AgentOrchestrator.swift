@@ -25,6 +25,7 @@ final class AgentOrchestrator {
 
         let builtIns: [AgentCapability] = [
             RepositoryContextCapability(),
+            CodingRepositoryCapability(),
             WebResearchCapability(),
             PublicAPICapability(),
             ManagedFilesCapability()
