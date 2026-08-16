@@ -23,16 +23,22 @@ final class AgentOrchestrator {
         self.taskStore = taskStore
         self.capabilityRunner = capabilityRunner
 
+        let codingCapability = CodingRepositoryCapability()
         let builtIns: [AgentCapability] = [
             RepositoryContextCapability(),
-            CodingRepositoryCapability(),
+            codingCapability,
             WebResearchCapability(),
             PublicAPICapability(),
-            ManagedFilesCapability()
+            ManagedFilesCapability(),
+            DocumentProcessingCapability()
         ]
         for capability in builtIns {
             capabilities.append(capability)
             approvalGate.register(capability: capability)
+        }
+
+        codingCapability.onExecutionUpdate = { [weak self] text in
+            self?.onAssistantMessage?(text)
         }
     }
 
