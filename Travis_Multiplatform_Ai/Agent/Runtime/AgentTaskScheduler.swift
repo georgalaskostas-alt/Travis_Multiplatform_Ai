@@ -12,10 +12,12 @@ final class AgentTaskScheduler {
         let executedTaskIds: [UUID]
         let skippedLeasedTaskIds: [UUID]
         let staleTaskIds: [UUID]
+        let pausedOrphanTaskIds: [UUID]
     }
 
     private let runtime: AgentTaskRuntime
     private let executor: AgentTaskExecutor
+    private let supervisor: AgentRuntimeSupervisor
 
     private(set) var isRunningCycle = false
     private(set) var lastCycleAt: Date?
@@ -24,6 +26,7 @@ final class AgentTaskScheduler {
     init(runtime: AgentTaskRuntime, executor: AgentTaskExecutor) {
         self.runtime = runtime
         self.executor = executor
+        self.supervisor = AgentRuntimeSupervisor(runtime: runtime, executor: executor)
     }
 
     /// Executes at most one verified step per selected task. This keeps a
@@ -41,7 +44,8 @@ final class AgentTaskScheduler {
                 consideredTaskIds: [],
                 executedTaskIds: [],
                 skippedLeasedTaskIds: [],
-                staleTaskIds: []
+                staleTaskIds: [],
+                pausedOrphanTaskIds: []
             )
         }
 
@@ -51,7 +55,7 @@ final class AgentTaskScheduler {
             lastCycleAt = Date()
         }
 
-        let stale = runtime.staleRunningTasks(
+        let health = supervisor.inspect(
             heartbeatOlderThan: staleHeartbeatSeconds
         )
 
@@ -78,9 +82,8 @@ final class AgentTaskScheduler {
             } catch AgentTaskExecutorError.taskAlreadyExecuting {
                 skippedLeased.append(task.id)
             } catch {
-                // AgentTaskExecutor persists the canonical failure/retry state.
-                // One task failure must not prevent other runnable tasks from
-                // receiving their fair turn in the same scheduler cycle.
+                // The executor persists canonical retry/failure state. A single
+                // task failure must not starve unrelated runnable tasks.
                 continue
             }
         }
@@ -89,7 +92,8 @@ final class AgentTaskScheduler {
             consideredTaskIds: candidates.map(\.id),
             executedTaskIds: executed,
             skippedLeasedTaskIds: skippedLeased,
-            staleTaskIds: stale.map(\.id)
+            staleTaskIds: health.staleTaskIds,
+            pausedOrphanTaskIds: health.pausedOrphanTaskIds
         )
         lastCycleReport = report
         return report
