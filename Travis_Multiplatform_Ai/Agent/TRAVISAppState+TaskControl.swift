@@ -48,12 +48,25 @@ extension TRAVISAppState {
             defer { isProcessing = false }
             do {
                 if continuous {
-                    let report = try await taskExecutor.executeUntilBlocked(taskId: task.id, recentHistory: recentHistory, maxStepsPerCycle: 8)
+                    let report = try await taskExecutor.executeUntilBlocked(
+                        taskId: task.id,
+                        recentHistory: recentHistory,
+                        maxStepsPerCycle: 8
+                    )
                     addAssistantMessage(renderRunReport(report))
                 } else {
-                    _ = try await taskExecutor.executeNextStep(taskId: task.id, recentHistory: recentHistory)
-                    guard let updated = taskRuntime.task(id: task.id) else { throw RuntimeIntegrationControlError.taskNotFound }
+                    _ = try await taskExecutor.executeNextStep(
+                        taskId: task.id,
+                        recentHistory: recentHistory
+                    )
+                    guard let updated = taskRuntime.task(id: task.id) else {
+                        throw RuntimeIntegrationControlError.taskNotFound
+                    }
                     addAssistantMessage(renderStepResult(updated))
+                }
+
+                if taskRuntime.task(id: task.id)?.status == .completed {
+                    await ProjectMemoryCoordinator().synchronize(taskId: task.id, runtime: taskRuntime)
                 }
             } catch {
                 addAssistantMessage("Autonomous runtime error: \(error.localizedDescription)")
@@ -75,8 +88,11 @@ extension TRAVISAppState {
 
     func cancelAutonomousTask(reference: String?) {
         guard let task = resolvedTaskForMutation(reference, action: "cancel") else { return }
-        if taskExecutor.isTaskExecuting(task.id) { _ = taskExecutor.requestCancellation(taskId: task.id, reason: "Cancelled by user") }
-        else { taskRuntime.cancel(taskId: task.id) }
+        if taskExecutor.isTaskExecuting(task.id) {
+            _ = taskExecutor.requestCancellation(taskId: task.id, reason: "Cancelled by user")
+        } else {
+            taskRuntime.cancel(taskId: task.id)
+        }
         addAssistantMessage("TASK CANCELLED\n\n\(shortTaskId(task)) — \(task.title)")
     }
 
@@ -99,7 +115,17 @@ extension TRAVISAppState {
         Task {
             defer { isProcessing = false }
             let scheduler = AgentTaskScheduler(runtime: taskRuntime, executor: taskExecutor)
-            let report = await scheduler.runCycle(recentHistory: recentHistory, backgroundOnly: backgroundOnly, maxTasksPerCycle: 4)
+            let report = await scheduler.runCycle(
+                recentHistory: recentHistory,
+                backgroundOnly: backgroundOnly,
+                maxTasksPerCycle: 4
+            )
+
+            let coordinator = ProjectMemoryCoordinator()
+            for taskId in report.executedTaskIds where taskRuntime.task(id: taskId)?.status == .completed {
+                await coordinator.synchronize(taskId: taskId, runtime: taskRuntime)
+            }
+
             addAssistantMessage("""
             SCHEDULER CYCLE COMPLETE
 
@@ -144,18 +170,23 @@ extension TRAVISAppState {
         }
 
         switch resolveRuntimeTask(reference: effectiveReference) {
-        case .found(let task): return task
+        case .found(let task):
+            return task
         case .notFound:
             addAssistantMessage("Δεν βρέθηκε autonomous task για \(action). Χρησιμοποίησε /tasks.")
             return nil
         case .ambiguous(let tasks):
-            let rows = tasks.prefix(8).map { "\(shortTaskId($0)) [\($0.status.rawValue)] — \($0.title)" }.joined(separator: "\n")
+            let rows = tasks.prefix(8).map {
+                "\(shortTaskId($0)) [\($0.status.rawValue)] — \($0.title)"
+            }.joined(separator: "\n")
             addAssistantMessage("Βρήκα περισσότερα από ένα tasks. Δεν θα επιλέξω αυθαίρετα:\n\n\(rows)\n\nΔώσε το short ID ή πιο συγκεκριμένη αναφορά.")
             return nil
         }
     }
 
-    private func shortTaskId(_ task: AgentTask) -> String { String(task.id.uuidString.prefix(8)) }
+    private func shortTaskId(_ task: AgentTask) -> String {
+        String(task.id.uuidString.prefix(8))
+    }
 
     private func renderStepResult(_ task: AgentTask) -> String {
         let progress = Int(taskRuntime.progress(taskId: task.id) * 100)
