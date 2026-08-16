@@ -262,6 +262,10 @@ struct ChatView: View {
             resumeRecoveredTask()
             draft = ""
             return
+        case "/retry":
+            retryFailedRuntimeTask()
+            draft = ""
+            return
         case "/approve":
             approveWaitingRuntimeStep()
             draft = ""
@@ -290,6 +294,71 @@ struct ChatView: View {
 
         appState.sendCommand(trimmed, source: .manual)
         draft = ""
+    }
+
+    private func retryFailedRuntimeTask() {
+        guard let failedTask = appState.taskRuntime.tasks.last(where: { $0.status == .failed }) else {
+            appState.addAssistantMessage("Δεν υπάρχει failed autonomous task για retry.")
+            appState.lastResponseSummary = "No failed autonomous task"
+            return
+        }
+
+        guard let failedIndex = failedTask.plan.steps.firstIndex(where: { $0.status == .failed }) else {
+            appState.addAssistantMessage("Το failed task δεν περιέχει failed step που μπορεί να επαναληφθεί με ασφάλεια.")
+            appState.lastResponseSummary = "No retryable failed step"
+            return
+        }
+
+        var retrySteps = failedTask.plan.steps
+        let failedStep = retrySteps[failedIndex]
+        retrySteps[failedIndex].status = .pending
+        retrySteps[failedIndex].attemptCount = 0
+        retrySteps[failedIndex].lastError = nil
+        retrySteps[failedIndex].startedAt = nil
+        retrySteps[failedIndex].completedAt = nil
+        retrySteps[failedIndex].resultSummary = nil
+
+        appState.taskRuntime.replacePlan(
+            taskId: failedTask.id,
+            summary: failedTask.plan.summary + " — safe retry of step #\(failedStep.order)",
+            steps: retrySteps
+        )
+        appState.taskRuntime.start(taskId: failedTask.id)
+
+        guard let retriedTask = appState.taskRuntime.task(id: failedTask.id) else {
+            appState.addAssistantMessage("Το runtime task δεν βρέθηκε μετά το retry reset.")
+            appState.lastResponseSummary = "Runtime retry failed"
+            return
+        }
+
+        let progressPercent = Int(appState.taskRuntime.progress(taskId: retriedTask.id) * 100)
+        let nextStep = appState.taskRuntime.nextRunnableStep(taskId: retriedTask.id)
+        let nextText = nextStep.map { "#\($0.order) — \($0.title)" } ?? "κανένα"
+
+        appState.addAssistantMessage("""
+        AUTONOMOUS TASK RETRY READY
+
+        TASK
+        \(retriedTask.id.uuidString)
+
+        STATUS
+        \(retriedTask.status.rawValue)
+
+        PLAN VERSION
+        v\(retriedTask.plan.version)
+
+        RETRY STEP
+        #\(failedStep.order) — \(failedStep.title)
+
+        PROGRESS PRESERVED
+        \(progressPercent)%
+
+        NEXT RUNNABLE STEP
+        \(nextText)
+
+        Τα verified/completed προηγούμενα steps διατηρήθηκαν. Μπορείς να συνεχίσεις με /run ή /auto.
+        """)
+        appState.lastResponseSummary = "Failed task ready for safe retry — \(progressPercent)%"
     }
 
     private func stopActiveAutonomousExecution() {
