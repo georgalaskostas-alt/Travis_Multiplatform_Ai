@@ -61,16 +61,21 @@ final class PublicAPICapability: AgentCapability {
         }
 
         let bodyPreview = String((spec.body ?? "").prefix(1000))
+        let payloadObject: [String: String] = [
+            "method": method,
+            "url": url.absoluteString,
+            "body": bodyPreview
+        ]
+        let payloadData = try JSONSerialization.data(withJSONObject: payloadObject, options: [.sortedKeys])
+        let payload = String(data: payloadData, encoding: .utf8)
+
         let action = ProposedAction(
             capabilityId: id,
             summary: "HTTP \(method) προς \(url.absoluteString)",
             reasoning: "Η κλήση μπορεί να αλλάξει εξωτερικό σύστημα, επομένως δεν εκτελείται χωρίς ρητή έγκριση.",
+            expectedImpact: "Εξωτερική HTTP mutation στο συγκεκριμένο endpoint. Δεν έχει εκτελεστεί ακόμη.",
             riskLevel: method == "DELETE" ? .high : .medium,
-            payload: [
-                "method": method,
-                "url": url.absoluteString,
-                "body": bodyPreview
-            ]
+            payload: payload
         )
         return .proposal(action)
     }
