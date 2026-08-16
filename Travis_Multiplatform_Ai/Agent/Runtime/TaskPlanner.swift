@@ -122,6 +122,9 @@ final class TaskPlanner {
         - NEVER require repository-wide completeness in a narrow inspection step
         - NEVER make tests/docs/generated-artifact classification a criterion unless that exact step is dedicated to repository classification
         - limitations outside the loaded evidence scope are acceptable and must not automatically make an inspection step fail
+        - source evidence is sufficient when it identifies the source file plus a concrete symbol, control-flow branch, state transition, API call, or data-flow behavior
+        - exact line numbers or line ranges are OPTIONAL provenance metadata, not a success requirement, unless the user's goal or that exact step explicitly asks for line-level citations
+        - NEVER add a line-number requirement merely because the task asks for "source evidence", "code evidence", "real evidence", or "specific evidence"
 
         Use text_task only for reasoning or writing whose correctness does not depend on repository evidence.
 
@@ -292,16 +295,20 @@ final class TaskPlanner {
             return step.successCriteria
         }
 
+        let evidenceContract = "Source evidence may be identified by source path plus concrete symbol/control-flow/state/data-flow behavior; exact line numbers are not required unless this step explicitly requests line-level citations."
+
         if isAggregationOrVerificationStep(step) {
             return [
                 "The result synthesizes only verified dependency and repository evidence relevant to this step.",
-                "Claims without sufficient source evidence are explicitly marked as limitations rather than asserted as facts."
+                "Claims without sufficient source evidence are explicitly marked as limitations rather than asserted as facts.",
+                evidenceContract
             ]
         }
 
         return [
             "The result provides concrete source-level evidence for the specific scope described by this step title and instructions.",
-            "The result does not claim repository-wide completeness beyond this step's loaded evidence scope; out-of-scope gaps are stated as limitations."
+            "The result does not claim repository-wide completeness beyond this step's loaded evidence scope; out-of-scope gaps are stated as limitations.",
+            evidenceContract
         ]
     }
 
