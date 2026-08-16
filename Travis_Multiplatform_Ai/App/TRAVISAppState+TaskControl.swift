@@ -6,9 +6,6 @@ extension TRAVISAppState {
         AgentTaskResolver().resolve(reference, in: taskRuntime.tasks)
     }
 
-    /// Handles explicit slash commands immediately and natural-language
-    /// runtime control semantically. Returns true when normal capability
-    /// routing must stop because this message was consumed as system control.
     func handleSystemIntent(_ text: String, recentHistory: [ChatMessage]) async -> Bool {
         let router = SystemIntentRouter()
         let intent = await router.classify(text, recentHistory: recentHistory)
@@ -38,7 +35,8 @@ extension TRAVISAppState {
     }
 
     func runAutonomousTask(reference: String?, continuous: Bool) {
-        guard let task = resolvedTaskForMutation(reference, action: continuous ? "auto" : "run") else { return }
+        let action = continuous ? "auto" : "run"
+        guard let task = resolvedTaskForMutation(reference, action: action) else { return }
         guard task.status == .running else {
             addAssistantMessage("Το autonomous task \(shortTaskId(task)) δεν είναι running (status: \(task.status.rawValue)).")
             return
@@ -116,6 +114,9 @@ extension TRAVISAppState {
 
             STALE HEARTBEATS OBSERVED
             \(report.staleTaskIds.count)
+
+            ORPHAN TASKS SAFELY PAUSED
+            \(report.pausedOrphanTaskIds.count)
             """)
         }
     }
@@ -128,14 +129,28 @@ extension TRAVISAppState {
     }
 
     private func resolvedTaskForMutation(_ reference: String?, action: String) -> AgentTask? {
-        switch resolveRuntimeTask(reference: reference) {
+        let effectiveReference: String?
+        if let reference, !reference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            effectiveReference = reference
+        } else {
+            switch action {
+            case "run", "auto": effectiveReference = "running"
+            case "resume": effectiveReference = "paused"
+            case "retry": effectiveReference = "failed"
+            case "cancel":
+                effectiveReference = taskRuntime.tasks.contains(where: { $0.status == .running }) ? "running" : "paused"
+            default: effectiveReference = nil
+            }
+        }
+
+        switch resolveRuntimeTask(reference: effectiveReference) {
         case .found(let task): return task
         case .notFound:
             addAssistantMessage("Δεν βρέθηκε autonomous task για \(action). Χρησιμοποίησε /tasks.")
             return nil
         case .ambiguous(let tasks):
             let rows = tasks.prefix(8).map { "\(shortTaskId($0)) [\($0.status.rawValue)] — \($0.title)" }.joined(separator: "\n")
-            addAssistantMessage("Βρήκα περισσότερα από ένα tasks. Δεν θα επιλέξω αυθαίρετα:\n\n\(rows)\n\nΔώσε το short ID.")
+            addAssistantMessage("Βρήκα περισσότερα από ένα tasks. Δεν θα επιλέξω αυθαίρετα:\n\n\(rows)\n\nΔώσε το short ID ή πιο συγκεκριμένη αναφορά.")
             return nil
         }
     }
