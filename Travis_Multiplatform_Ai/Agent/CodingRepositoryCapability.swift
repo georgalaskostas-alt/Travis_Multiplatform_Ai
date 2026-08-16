@@ -37,11 +37,11 @@ final class CodingRepositoryCapability: AgentCapability {
 
     init(
         aiService: AIService = .shared,
-        repositoryAnalysis: RepositoryContextCapability = RepositoryContextCapability(),
+        repositoryAnalysis: RepositoryContextCapability? = nil,
         github: GitHubCodingService = .shared
     ) {
         self.aiService = aiService
-        self.repositoryAnalysis = repositoryAnalysis
+        self.repositoryAnalysis = repositoryAnalysis ?? RepositoryContextCapability()
         self.github = github
     }
 
@@ -57,8 +57,6 @@ final class CodingRepositoryCapability: AgentCapability {
         case "modify":
             guard let requestedPath = intent.path?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !requestedPath.isEmpty else {
-                // Without an exact path, first perform grounded repository analysis.
-                // This avoids asking the model to invent a repository location.
                 let analysis = try await repositoryAnalysis.handle(command: command, recentHistory: recentHistory)
                 guard case .reply(let text) = analysis else { return analysis }
                 return .reply("""
