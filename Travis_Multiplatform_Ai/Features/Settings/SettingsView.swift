@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Bindable var appState: TRAVISAppState
     @State private var openAIAPIKey: String = KeychainService.shared.openAIAPIKey ?? ""
+    @State private var githubToken: String = KeychainService.shared.githubToken ?? ""
 
     private static let mandateDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -58,6 +59,28 @@ struct SettingsView: View {
                 Text("Χρησιμοποιείται ως fallback αν το OpenAI request αποτύχει και υπάρχει διαθέσιμο Anthropic credit.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            Section("GitHub Coding") {
+                SecureField("GitHub Fine-grained Token", text: $githubToken)
+                    .onChange(of: githubToken) { _, newValue in
+                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if trimmed.isEmpty {
+                            KeychainService.shared.deleteGitHubToken()
+                        } else {
+                            KeychainService.shared.saveGitHubToken(trimmed)
+                        }
+                    }
+
+                Text("Χρησιμοποιείται μόνο για approved source-code commits από το coding_repository capability. Read-only repository analysis δεν χρειάζεται write token. Προτίμησε fine-grained token περιορισμένο μόνο στο TRAVIS repository και Contents: Read and write.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if githubToken.isEmpty {
+                    Text("Χωρίς token ο TRAVIS μπορεί να αναλύει το repository, αλλά δεν μπορεί να εφαρμόζει approved commits.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             Section("Assistant") {
@@ -124,6 +147,8 @@ struct SettingsView: View {
             Section("AI Routing Status") {
                 Text(openAIAPIKey.isEmpty ? "Primary: OpenAI not configured" : "Primary: OpenAI configured")
                 Text(appState.anthropicAPIKey.isEmpty ? "Fallback: Anthropic not configured" : "Fallback: Anthropic configured")
+                    .foregroundStyle(.secondary)
+                Text(githubToken.isEmpty ? "GitHub coding: read-only" : "GitHub coding: write token configured")
                     .foregroundStyle(.secondary)
             }
 
