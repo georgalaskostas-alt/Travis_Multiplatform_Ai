@@ -16,6 +16,12 @@ extension TRAVISAppState {
                 .suffix(Self.commandContextWindow)
         )
 
+        if trimmed.lowercased() == "/capabilities" {
+            let registry = CapabilityRegistry(capabilities: orchestrator.capabilities)
+            addAssistantMessage(registry.diagnosticReport())
+            return
+        }
+
         if trimmed.lowercased().hasPrefix("/plan ") {
             let goal = String(trimmed.dropFirst("/plan ".count))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -136,10 +142,11 @@ extension TRAVISAppState {
             defer { isProcessing = false }
             do {
                 let planningGoal = enrichedGoal(goal, projectId: projectId)
-                let capabilityIds = orchestrator.capabilities.map(\.id)
+                let registry = CapabilityRegistry(capabilities: orchestrator.capabilities)
                 let plan = try await TaskPlanner.shared.makePlan(
                     for: planningGoal,
-                    availableCapabilities: capabilityIds
+                    availableCapabilities: registry.ids,
+                    context: registry.promptCatalog()
                 )
 
                 let createdTask = taskRuntime.createTask(
