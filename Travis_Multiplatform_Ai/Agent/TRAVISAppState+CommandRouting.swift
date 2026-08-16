@@ -31,8 +31,41 @@ extension TRAVISAppState {
         Task {
             defer { isProcessing = false }
 
+            // Runtime/task control has highest precedence.
             if await handleSystemIntent(trimmed, recentHistory: recentHistory) {
                 return
+            }
+
+            // Durable project-memory operations are resolved before ordinary
+            // project creation and capability routing.
+            let memoryRouter = ProjectMemoryIntentRouter()
+            switch await memoryRouter.classify(trimmed, recentHistory: recentHistory) {
+            case .addDecision(let reference, let text, let rationale):
+                guard let project = resolveProjectForMemory(reference) else { return }
+                ProjectWorkspaceStore.shared.addDecision(text, rationale: rationale, to: project.id)
+                addAssistantMessage("PROJECT DECISION SAVED\n\n\(project.title)\n\n\(text)")
+                lastResponseSummary = "Project decision saved"
+                return
+
+            case .addNote(let reference, let text):
+                guard let project = resolveProjectForMemory(reference) else { return }
+                ProjectWorkspaceStore.shared.addNote(text, to: project.id)
+                addAssistantMessage("PROJECT NOTE SAVED\n\n\(project.title)\n\n\(text)")
+                lastResponseSummary = "Project note saved"
+                return
+
+            case .showProject(let reference):
+                guard let project = resolveProjectForMemory(reference) else { return }
+                addAssistantMessage(renderProjectContext(project, includeMemory: true))
+                return
+
+            case .continueLatest:
+                guard let project = resolveProjectForMemory(nil) else { return }
+                continueProject(project, userRequest: trimmed)
+                return
+
+            case .none:
+                break
             }
 
             let goalRouter = GoalIntentRouter()
@@ -57,19 +90,15 @@ extension TRAVISAppState {
                 return
 
             case .continueProject(let reference):
-                let matches = ProjectWorkspaceStore.shared.find(reference)
-                if matches.count == 1, let project = matches.first {
-                    addAssistantMessage(renderProjectContext(project))
-                    await orchestrator.route(
-                        "Συνέχισε το project '\(project.title)'. Project goal: \(project.goal). Current summary: \(project.summary). User request: \(trimmed)",
-                        liveSessionId: currentSessionId,
-                        recentHistory: recentHistory
-                    )
+                switch ProjectWorkspaceStore.shared.resolve(reference) {
+                case .found(let project):
+                    continueProject(project, userRequest: trimmed)
                     return
-                }
-                if matches.count > 1 {
-                    let rows = matches.prefix(8).map { "\($0.id.uuidString.prefix(8)) — \($0.title)" }.joined(separator: "\n")
-                    addAssistantMessage("Βρήκα περισσότερα από ένα projects:\n\n\(rows)\n\nΔώσε πιο συγκεκριμένη αναφορά.")
+                case .ambiguous(let projects):
+                    addAssistantMessage(renderProjectAmbiguity(projects))
+                    return
+                case .notFound:
+                    addAssistantMessage("Δεν βρήκα project που να ταιριάζει με '\(reference)'. Γράψε /projects για τα διαθέσιμα workspaces.")
                     return
                 }
 
@@ -104,14 +133,16 @@ extension TRAVISAppState {
         Task {
             defer { isProcessing = false }
             do {
+                let planningGoal = enrichedGoal(goal, projectId: projectId)
                 let capabilityIds = orchestrator.capabilities.map(\.id)
                 let plan = try await TaskPlanner.shared.makePlan(
-                    for: goal,
+                    for: planningGoal,
                     availableCapabilities: capabilityIds
                 )
 
                 let createdTask = taskRuntime.createTask(
-                    goal: goal,
+                    goal: planningGoal,
+                    title: projectId.flatMap { ProjectWorkspaceStore.shared.project(id: $0)?.title },
                     priority: .medium
                 )
                 taskRuntime.attachPlan(taskId: createdTask.id, plan: plan)
@@ -181,17 +212,75 @@ extension TRAVISAppState {
         }
     }
 
+    private func continueProject(_ project: ProjectWorkspace, userRequest: String) {
+        let memory = ProjectWorkspaceStore.shared.contextBlock(for: project, taskRuntime: taskRuntime)
+        addAssistantMessage("""
+        PROJECT CONTEXT LOADED
+
+        \(project.title)
+        \(String(project.id.uuidString.prefix(8)))
+
+        Δημιουργώ νέο autonomous task μέσα στο ίδιο project και συνεχίζω από το αποθηκευμένο context.
+        """)
+
+        let continuationGoal = """
+        Continue this existing project from its canonical persisted state.
+
+        \(memory)
+
+        CURRENT USER REQUEST
+        \(userRequest)
+
+        Preserve established project decisions and constraints. Do not restart the project from scratch. Produce only the next useful body of work required by the current request.
+        """
+        createAutonomousPlan(goal: continuationGoal, projectId: project.id)
+    }
+
+    private func enrichedGoal(_ goal: String, projectId: UUID?) -> String {
+        guard let projectId,
+              let memory = ProjectWorkspaceStore.shared.contextBlock(for: projectId, taskRuntime: taskRuntime) else {
+            return goal
+        }
+        return """
+        \(goal)
+
+        \(memory)
+
+        PROJECT CONTINUITY RULES
+        - Treat project memory above as canonical unless the user explicitly changes a decision.
+        - Do not discard prior verified work.
+        - Prefer extending existing artifacts/tasks over recreating them.
+        - If current evidence conflicts with project memory, surface the conflict explicitly instead of silently overwriting memory.
+        """
+    }
+
+    private func resolveProjectForMemory(_ reference: String?) -> ProjectWorkspace? {
+        switch ProjectWorkspaceStore.shared.resolve(reference) {
+        case .found(let project):
+            return project
+        case .ambiguous(let projects):
+            addAssistantMessage(renderProjectAmbiguity(projects))
+            return nil
+        case .notFound:
+            addAssistantMessage("Δεν βρέθηκε project workspace. Δημιούργησε πρώτα ένα project ή γράψε /projects.")
+            return nil
+        }
+    }
+
     private func renderProjectList() -> String {
         let projects = ProjectWorkspaceStore.shared.load()
         guard !projects.isEmpty else { return "Δεν υπάρχουν αποθηκευμένα project workspaces." }
         let rows = projects.prefix(20).map {
-            "\($0.id.uuidString.prefix(8)) [\($0.status.rawValue)] tasks:\($0.taskIds.count) — \($0.title)"
+            "\($0.id.uuidString.prefix(8)) [\($0.status.rawValue)] tasks:\($0.taskIds.count) decisions:\($0.decisions.count) notes:\($0.notes.count) — \($0.title)"
         }.joined(separator: "\n")
         return "PROJECT WORKSPACES\n\n\(rows)"
     }
 
-    private func renderProjectContext(_ project: ProjectWorkspace) -> String {
-        """
+    private func renderProjectContext(_ project: ProjectWorkspace, includeMemory: Bool = false) -> String {
+        if includeMemory {
+            return ProjectWorkspaceStore.shared.contextBlock(for: project, taskRuntime: taskRuntime)
+        }
+        return """
         PROJECT CONTEXT
 
         \(project.title)
@@ -203,6 +292,13 @@ extension TRAVISAppState {
         Notes: \(project.notes.count)
         Artifacts: \(project.artifactPaths.count)
         """
+    }
+
+    private func renderProjectAmbiguity(_ projects: [ProjectWorkspace]) -> String {
+        let rows = projects.prefix(8).map {
+            "\($0.id.uuidString.prefix(8)) [\($0.status.rawValue)] — \($0.title)"
+        }.joined(separator: "\n")
+        return "Βρήκα περισσότερα από ένα projects. Δεν θα επιλέξω αυθαίρετα:\n\n\(rows)\n\nΔώσε short ID ή πιο συγκεκριμένο όνομα."
     }
 }
 
