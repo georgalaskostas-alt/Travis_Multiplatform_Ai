@@ -29,6 +29,7 @@ final class SystemIntentRouter {
     func classify(_ message: String, recentHistory: [ChatMessage]) async -> Intent {
         if let explicit = explicitCommand(message) { return explicit }
 
+        let transcript = Array(recentHistory.suffix(6)).promptTranscript
         let prompt = """
         Είσαι deterministic intent classifier για τον TRAVIS.
         Τα επιτρεπτά intents είναι ΜΟΝΟ:
@@ -39,7 +40,7 @@ final class SystemIntentRouter {
         Το reference πρέπει να κρατά όσο γίνεται αυτούσια την αναφορά του χρήστη στο task (ID, τίτλος, failed, προηγούμενο κλπ).
 
         Πρόσφατο context:
-        \(recentHistory.suffix(6).promptTranscript)
+        \(transcript)
 
         Μήνυμα:
         \(message)
