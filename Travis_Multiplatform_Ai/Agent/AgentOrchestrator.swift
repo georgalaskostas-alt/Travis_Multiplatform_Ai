@@ -10,8 +10,6 @@ final class AgentOrchestrator {
     private let taskStore: AgentTaskStore
     private let capabilityRunner: UniversalCapabilityRunner
     var onAssistantMessage: ((String) -> Void)?
-    /// Fired instead of normal routing when the message is recognized as a
-    /// "bring back an old conversation" request and a match was found.
     var onSessionRecall: ((UUID) -> Void)?
 
     init(
@@ -25,12 +23,21 @@ final class AgentOrchestrator {
         self.taskStore = taskStore
         self.capabilityRunner = capabilityRunner
 
-        let repositoryContext = RepositoryContextCapability()
-        capabilities.append(repositoryContext)
-        approvalGate.register(capability: repositoryContext)
+        // Core capabilities that should exist for every TRAVIS runtime.
+        let builtIns: [AgentCapability] = [
+            RepositoryContextCapability(),
+            WebResearchCapability(),
+            PublicAPICapability(),
+            ManagedFilesCapability()
+        ]
+        for capability in builtIns {
+            capabilities.append(capability)
+            approvalGate.register(capability: capability)
+        }
     }
 
     func register(_ capability: AgentCapability) {
+        guard !capabilities.contains(where: { $0.id == capability.id }) else { return }
         capabilities.append(capability)
         approvalGate.register(capability: capability)
     }
@@ -59,6 +66,10 @@ final class AgentOrchestrator {
         if lowered.hasPrefix("/task-log ") {
             let reference = String(trimmed.dropFirst("/task-log ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
             onAssistantMessage?(renderTaskLog(reference: reference))
+            return
+        }
+        if lowered == "/capabilities" {
+            onAssistantMessage?(CapabilityRegistry(capabilities: capabilities).diagnosticReport())
             return
         }
         if lowered == "/capability-log" {
@@ -195,7 +206,15 @@ final class AgentOrchestrator {
         if let currentStep { activeStepText = "#\(currentStep.order) — \(currentStep.title) [\(currentStep.status.rawValue)]" }
         else if let nextStep { activeStepText = "#\(nextStep.order) — \(nextStep.title) [\(nextStep.status.rawValue)]" }
         else { activeStepText = "κανένα" }
-        return "AUTONOMOUS TASK STATUS\n\nTASK\n\(task.id.uuidString)\n\nTITLE\n\(task.title)\n\nSTATUS\n\(task.status.rawValue)\n\nPLAN VERSION\nv\(task.plan.version)\n\nPROGRESS\n\(progress)% (\(completedSteps)/\(totalSteps) steps)\n\nCURRENT / NEXT STEP\n\(activeStepText)\n\nTOTAL EXECUTION ATTEMPTS\n\(task.executionState.totalExecutionAttempts)\n\nLAST CHECKPOINT\n\(task.executionState.lastCheckpoint?.summary ?? "κανένα")\n\nFAILURE / PAUSE DETAIL\n\(task.failureReason ?? task.pauseReason ?? "κανένα")\n\nBUDGET\nmaxSteps: \(task.executionBudget.maxTotalStepExecutions)\nmaxRuntime: \(task.executionBudget.maxRuntimeSeconds.map(String.init) ?? "unlimited")\nmaxRetriesPerStep: \(task.executionBudget.maxRetriesPerStep)"
+
+        let attempts = task.plan.steps.reduce(0) { $0 + $1.attemptCount }
+        let pauseDetail = task.status == .paused
+            ? task.events.reversed().first(where: { $0.type == .paused })?.message
+            : nil
+        let maxStepsText = task.budget.maxSteps.map(String.init) ?? "unlimited"
+        let maxRuntimeText = task.budget.maxRuntimeSeconds.map { String(Int($0)) + "s" } ?? "unlimited"
+
+        return "AUTONOMOUS TASK STATUS\n\nTASK\n\(task.id.uuidString)\n\nTITLE\n\(task.title)\n\nSTATUS\n\(task.status.rawValue)\n\nPLAN VERSION\nv\(task.plan.version)\n\nPROGRESS\n\(progress)% (\(completedSteps)/\(totalSteps) steps)\n\nCURRENT / NEXT STEP\n\(activeStepText)\n\nTOTAL EXECUTION ATTEMPTS\n\(attempts)\n\nLAST CHECKPOINT\n\(task.executionState.lastCheckpoint?.summary ?? "κανένα")\n\nFAILURE / PAUSE DETAIL\n\(task.failureReason ?? pauseDetail ?? "κανένα")\n\nBUDGET\nmaxSteps: \(maxStepsText)\nmaxRuntime: \(maxRuntimeText)\nmaxRetriesPerStep: \(task.budget.maxRetriesPerStep)"
     }
 
     private func renderTaskLog(reference: String?) -> String {
@@ -205,7 +224,7 @@ final class AgentOrchestrator {
             case .ambiguous(let tasks): return renderAmbiguousTaskSelection(tasks, command: "/task-log")
             case .found(let task):
                 let formatter = ISO8601DateFormatter()
-                let events = task.executionState.events.map { "[\(formatter.string(from: $0.timestamp))] \($0.kind.rawValue.uppercased()) — \($0.message)" }.joined(separator: "\n")
+                let events = task.events.map { "[\(formatter.string(from: $0.createdAt))] \($0.type.rawValue.uppercased()) — \($0.message)" }.joined(separator: "\n")
                 return "AUTONOMOUS TASK LOG\n\nTASK\n\(task.id.uuidString)\n\nSTATUS\n\(task.status.rawValue)\n\nEVENTS\n\(events.isEmpty ? "κανένα" : events)"
             }
         } catch { return "Αποτυχία ανάγνωσης autonomous task log: \(error.localizedDescription)" }
