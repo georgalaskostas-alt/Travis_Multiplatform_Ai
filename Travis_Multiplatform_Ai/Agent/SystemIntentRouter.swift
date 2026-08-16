@@ -28,6 +28,7 @@ final class SystemIntentRouter {
 
     func classify(_ message: String, recentHistory: [ChatMessage]) async -> Intent {
         if let explicit = explicitCommand(message) { return explicit }
+        guard looksLikeRuntimeControl(message) else { return .none }
 
         let transcript = Array(recentHistory.suffix(6)).promptTranscript
         let prompt = """
@@ -52,6 +53,21 @@ final class SystemIntentRouter {
         guard let raw = try? await aiService.generateText(prompt: prompt),
               let decision = decode(raw) else { return .none }
         return map(decision)
+    }
+
+    private func looksLikeRuntimeControl(_ message: String) -> Bool {
+        let text = message.folding(
+            options: [.diacriticInsensitive, .caseInsensitive],
+            locale: Locale(identifier: "el_GR")
+        ).lowercased()
+
+        let markers = [
+            "task", "autonomous", "runtime", "scheduler", "checkpoint", "log",
+            "resume", "retry", "cancel", "continue", "run it", "run the",
+            "συνεχ", "ξανατρε", "επανεκτελ", "ακυρ", "σταματα", "σταματησε",
+            "αποτυχη", "ολοκληρω", "προηγουμενο task", "εργασια που", "τρεχει"
+        ]
+        return markers.contains { text.contains($0) }
     }
 
     private func explicitCommand(_ message: String) -> Intent? {
