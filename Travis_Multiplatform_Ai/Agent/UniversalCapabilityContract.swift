@@ -22,7 +22,7 @@ enum CapabilityDomain: String, Codable, CaseIterable, Hashable {
 }
 
 struct CapabilityExecutionPolicy: Codable, Hashable {
-    var effect: CapabilityEffect
+    var declaredEffects: [CapabilityEffect]
     var permissionKeys: [String]
     var requiresExplicitApproval: Bool
     var supportsBackgroundExecution: Bool
@@ -31,7 +31,7 @@ struct CapabilityExecutionPolicy: Codable, Hashable {
     var maxAttempts: Int
 
     init(
-        effect: CapabilityEffect = .readOnly,
+        declaredEffects: [CapabilityEffect] = [.readOnly],
         permissionKeys: [String] = [],
         requiresExplicitApproval: Bool = false,
         supportsBackgroundExecution: Bool = true,
@@ -39,13 +39,18 @@ struct CapabilityExecutionPolicy: Codable, Hashable {
         timeoutSeconds: Int = 120,
         maxAttempts: Int = 3
     ) {
-        self.effect = effect
-        self.permissionKeys = permissionKeys
+        let effects = declaredEffects.isEmpty ? [.readOnly] : declaredEffects
+        self.declaredEffects = Array(Set(effects)).sorted { $0.rawValue < $1.rawValue }
+        self.permissionKeys = Array(Set(permissionKeys)).sorted()
         self.requiresExplicitApproval = requiresExplicitApproval
         self.supportsBackgroundExecution = supportsBackgroundExecution
         self.supportsProjectContext = supportsProjectContext
         self.timeoutSeconds = max(5, timeoutSeconds)
         self.maxAttempts = max(1, maxAttempts)
+    }
+
+    func declares(_ effect: CapabilityEffect) -> Bool {
+        declaredEffects.contains(effect)
     }
 }
 
