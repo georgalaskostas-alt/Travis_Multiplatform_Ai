@@ -1,5 +1,6 @@
 import Foundation
 
+@MainActor
 final class ProjectWorkspaceStore {
     static let shared = ProjectWorkspaceStore()
 
@@ -65,9 +66,6 @@ final class ProjectWorkspaceStore {
         }
     }
 
-    /// Deterministic project selection. Exact UUID/prefix wins; otherwise
-    /// title/goal token scoring is used. Ambiguity is surfaced instead of
-    /// silently choosing a workspace.
     func resolve(_ rawReference: String?) -> Resolution {
         let projects = load()
         guard !projects.isEmpty else { return .notFound }
@@ -134,7 +132,6 @@ final class ProjectWorkspaceStore {
         mutate(projectId) { $0.status = status }
     }
 
-    /// Canonical bounded memory block for planner/capability prompts.
     func contextBlock(for projectId: UUID, taskRuntime: AgentTaskRuntime? = nil) -> String? {
         guard let project = project(id: projectId) else { return nil }
         return contextBlock(for: project, taskRuntime: taskRuntime)
