@@ -23,7 +23,7 @@ extension TRAVISAppState {
                 addAssistantMessage("Χρήση: /plan <στόχος>")
                 return
             }
-            createAutonomousPlan(goal: goal)
+            createAutonomousPlan(goal: goal, projectId: nil)
             return
         }
 
@@ -33,6 +33,52 @@ extension TRAVISAppState {
 
             if await handleSystemIntent(trimmed, recentHistory: recentHistory) {
                 return
+            }
+
+            let goalRouter = GoalIntentRouter()
+            switch await goalRouter.classify(trimmed, recentHistory: recentHistory) {
+            case .createProject(let title, let goal):
+                let project = ProjectWorkspaceStore.shared.create(title: title, goal: goal)
+                addAssistantMessage("""
+                PROJECT WORKSPACE CREATED
+
+                PROJECT
+                \(project.title)
+
+                ID
+                \(project.id.uuidString)
+
+                GOAL
+                \(project.goal)
+
+                Δημιουργώ τώρα το πρώτο autonomous execution plan για αυτό το project.
+                """)
+                createAutonomousPlan(goal: goal, projectId: project.id)
+                return
+
+            case .continueProject(let reference):
+                let matches = ProjectWorkspaceStore.shared.find(reference)
+                if matches.count == 1, let project = matches.first {
+                    addAssistantMessage(renderProjectContext(project))
+                    await orchestrator.route(
+                        "Συνέχισε το project '\(project.title)'. Project goal: \(project.goal). Current summary: \(project.summary). User request: \(trimmed)",
+                        liveSessionId: currentSessionId,
+                        recentHistory: recentHistory
+                    )
+                    return
+                }
+                if matches.count > 1 {
+                    let rows = matches.prefix(8).map { "\($0.id.uuidString.prefix(8)) — \($0.title)" }.joined(separator: "\n")
+                    addAssistantMessage("Βρήκα περισσότερα από ένα projects:\n\n\(rows)\n\nΔώσε πιο συγκεκριμένη αναφορά.")
+                    return
+                }
+
+            case .listProjects:
+                addAssistantMessage(renderProjectList())
+                return
+
+            case .none:
+                break
             }
 
             let command = TravisCommand(
@@ -51,7 +97,7 @@ extension TRAVISAppState {
         }
     }
 
-    private func createAutonomousPlan(goal: String) {
+    func createAutonomousPlan(goal: String, projectId: UUID?) {
         isProcessing = true
         lastResponseSummary = "Δημιουργία autonomous task…"
 
@@ -70,6 +116,10 @@ extension TRAVISAppState {
                 )
                 taskRuntime.attachPlan(taskId: createdTask.id, plan: plan)
                 taskRuntime.start(taskId: createdTask.id)
+
+                if let projectId {
+                    ProjectWorkspaceStore.shared.attachTask(createdTask.id, to: projectId)
+                }
 
                 guard let runtimeTask = taskRuntime.task(id: createdTask.id) else {
                     throw CommandRoutingError.taskNotFound
@@ -103,9 +153,11 @@ extension TRAVISAppState {
                     nextStepText = "NEXT RUNNABLE STEP\nNone currently available."
                 }
 
+                let projectText = projectId.map { "\nPROJECT ID\n\($0.uuidString)\n" } ?? ""
+
                 addAssistantMessage("""
                 AUTONOMOUS TASK CREATED
-
+                \(projectText)
                 TASK ID
                 \(runtimeTask.id.uuidString)
 
@@ -127,6 +179,30 @@ extension TRAVISAppState {
                 lastResponseSummary = message
             }
         }
+    }
+
+    private func renderProjectList() -> String {
+        let projects = ProjectWorkspaceStore.shared.load()
+        guard !projects.isEmpty else { return "Δεν υπάρχουν αποθηκευμένα project workspaces." }
+        let rows = projects.prefix(20).map {
+            "\($0.id.uuidString.prefix(8)) [\($0.status.rawValue)] tasks:\($0.taskIds.count) — \($0.title)"
+        }.joined(separator: "\n")
+        return "PROJECT WORKSPACES\n\n\(rows)"
+    }
+
+    private func renderProjectContext(_ project: ProjectWorkspace) -> String {
+        """
+        PROJECT CONTEXT
+
+        \(project.title)
+        ID: \(project.id.uuidString)
+        Status: \(project.status.rawValue)
+        Goal: \(project.goal)
+        Tasks: \(project.taskIds.count)
+        Decisions: \(project.decisions.count)
+        Notes: \(project.notes.count)
+        Artifacts: \(project.artifactPaths.count)
+        """
     }
 }
 
