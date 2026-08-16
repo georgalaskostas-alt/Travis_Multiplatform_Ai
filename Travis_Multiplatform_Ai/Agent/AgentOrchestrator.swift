@@ -50,13 +50,32 @@ final class AgentOrchestrator {
         // Runtime diagnostics are deterministic local reads of the same
         // durable snapshot used for crash/relaunch recovery. They bypass AI
         // routing so status/log output cannot hallucinate runtime state.
+        if lowered == "/tasks" {
+            onAssistantMessage?(renderTaskHistory())
+            return
+        }
+
         if lowered == "/task-status" {
-            onAssistantMessage?(renderLatestTaskStatus())
+            onAssistantMessage?(renderTaskStatus(reference: nil))
+            return
+        }
+
+        if lowered.hasPrefix("/task-status ") {
+            let reference = String(trimmed.dropFirst("/task-status ".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            onAssistantMessage?(renderTaskStatus(reference: reference))
             return
         }
 
         if lowered == "/task-log" {
-            onAssistantMessage?(renderLatestTaskLog())
+            onAssistantMessage?(renderTaskLog(reference: nil))
+            return
+        }
+
+        if lowered.hasPrefix("/task-log ") {
+            let reference = String(trimmed.dropFirst("/task-log ".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            onAssistantMessage?(renderTaskLog(reference: reference))
             return
         }
 
@@ -97,126 +116,274 @@ final class AgentOrchestrator {
         }
     }
 
-    private func latestPersistedTask() throws -> AgentTask? {
-        try taskStore.load().max { lhs, rhs in
-            lhs.updatedAt < rhs.updatedAt
+    private enum TaskResolution {
+        case found(AgentTask)
+        case ambiguous([AgentTask])
+        case notFound
+    }
+
+    private func persistedTasksNewestFirst() throws -> [AgentTask] {
+        try taskStore.load().sorted { lhs, rhs in
+            lhs.updatedAt > rhs.updatedAt
         }
     }
 
-    private func renderLatestTaskStatus() -> String {
+    private func resolveTask(reference: String?) throws -> TaskResolution {
+        let tasks = try persistedTasksNewestFirst()
+        guard !tasks.isEmpty else { return .notFound }
+
+        guard let rawReference = reference?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawReference.isEmpty
+        else {
+            return .found(tasks[0])
+        }
+
+        let reference = rawReference
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "el_GR"))
+            .lowercased()
+
+        // 1. Exact UUID or unique UUID prefix is authoritative.
+        if let exact = tasks.first(where: { $0.id.uuidString.lowercased() == reference }) {
+            return .found(exact)
+        }
+
+        let uuidPrefixMatches = tasks.filter {
+            $0.id.uuidString.lowercased().hasPrefix(reference)
+        }
+        if uuidPrefixMatches.count == 1 { return .found(uuidPrefixMatches[0]) }
+        if uuidPrefixMatches.count > 1 { return .ambiguous(uuidPrefixMatches) }
+
+        // 2. Status references such as failed/completed/running/paused.
+        let normalizedStatus: AgentTaskStatus? = {
+            let aliases: [String: AgentTaskStatus] = [
+                "failed": .failed, "αποτυχημενο": .failed, "αποτυχια": .failed,
+                "completed": .completed, "ολοκληρωμενο": .completed,
+                "running": .running, "ενεργο": .running, "τρεχει": .running,
+                "paused": .paused, "παγωμενο": .paused, "σε παυση": .paused,
+                "cancelled": .cancelled, "ακυρωμενο": .cancelled,
+                "waitingforapproval": .waitingForApproval, "approval": .waitingForApproval
+            ]
+            if let direct = AgentTaskStatus(rawValue: reference) { return direct }
+            return aliases[reference]
+        }()
+
+        if let normalizedStatus {
+            let matches = tasks.filter { $0.status == normalizedStatus }
+            if let first = matches.first { return .found(first) }
+        }
+
+        // 3. Match meaningful words against title + goal. Most-recent wins only
+        // when it has strictly better token coverage than the next candidate.
+        let stopWords: Set<String> = [
+            "task", "το", "του", "τη", "την", "για", "με", "μου", "ένα", "ενα",
+            "status", "log", "δειξε", "δείξε", "show", "previous", "προηγουμενο",
+            "τελευταιο", "latest"
+        ]
+        let queryTokens = reference
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .map(String.init)
+            .filter { $0.count >= 3 && !stopWords.contains($0) }
+
+        guard !queryTokens.isEmpty else { return .notFound }
+
+        let scored = tasks.compactMap { task -> (AgentTask, Int)? in
+            let searchable = (task.title + " " + task.goal)
+                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "el_GR"))
+                .lowercased()
+            let score = queryTokens.reduce(0) { partial, token in
+                partial + (searchable.contains(token) ? 1 : 0)
+            }
+            return score > 0 ? (task, score) : nil
+        }
+        .sorted { lhs, rhs in
+            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+            return lhs.0.updatedAt > rhs.0.updatedAt
+        }
+
+        guard let best = scored.first else { return .notFound }
+        if scored.count > 1, scored[1].1 == best.1 {
+            return .ambiguous(scored.filter { $0.1 == best.1 }.map(\.0))
+        }
+        return .found(best.0)
+    }
+
+    private func renderTaskHistory() -> String {
         do {
-            guard let task = try latestPersistedTask() else {
+            let tasks = try persistedTasksNewestFirst()
+            guard !tasks.isEmpty else {
                 return "Δεν υπάρχει αποθηκευμένο autonomous task."
             }
 
-            let totalSteps = task.plan.steps.count
-            let completedSteps = task.plan.steps.filter {
-                $0.status == .completed || $0.status == .skipped
-            }.count
-            let progress = totalSteps > 0
-                ? Int((Double(completedSteps) / Double(totalSteps)) * 100)
-                : 0
-
-            let currentStep = task.executionState.currentStepId.flatMap { currentId in
-                task.plan.steps.first { $0.id == currentId }
-            }
-
-            let completedIds = Set(task.plan.steps.filter { $0.status == .completed }.map(\.id))
-            let nextStep = task.plan.steps
-                .sorted { $0.order < $1.order }
-                .first { step in
-                    guard step.status == .pending || step.status == .ready else { return false }
-                    return step.dependencyStepIds.allSatisfy { completedIds.contains($0) }
-                }
-
-            let activeStepText: String
-            if let currentStep {
-                activeStepText = "#\(currentStep.order) — \(currentStep.title) [\(currentStep.status.rawValue)]"
-            } else if let nextStep {
-                activeStepText = "#\(nextStep.order) — \(nextStep.title) [\(nextStep.status.rawValue)]"
-            } else {
-                activeStepText = "κανένα"
-            }
-
-            let checkpoint = task.executionState.lastCheckpoint?.summary ?? "κανένα"
-            let failure = task.failureReason ?? "κανένα"
-            let runtimeBudget = task.budget.maxRuntimeSeconds.map { "\(Int($0))s" } ?? "unlimited"
-            let stepBudget = task.budget.maxSteps.map(String.init) ?? "unlimited"
-            let attempts = task.plan.steps.reduce(0) { $0 + $1.attemptCount }
+            let rows = tasks.prefix(20).map { task in
+                let total = task.plan.steps.count
+                let completed = task.plan.steps.filter {
+                    $0.status == .completed || $0.status == .skipped
+                }.count
+                let progress = total > 0 ? Int((Double(completed) / Double(total)) * 100) : 0
+                let shortId = String(task.id.uuidString.prefix(8))
+                return "\(shortId)  [\(task.status.rawValue)]  \(progress)%  v\(task.plan.version)  — \(task.title)"
+            }.joined(separator: "\n")
 
             return """
-            AUTONOMOUS TASK STATUS
+            AUTONOMOUS TASK HISTORY
 
-            TASK
-            \(task.id.uuidString)
+            \(rows)
 
-            TITLE
-            \(task.title)
-
-            STATUS
-            \(task.status.rawValue)
-
-            PLAN VERSION
-            v\(task.plan.version)
-
-            PROGRESS
-            \(progress)% (\(completedSteps)/\(totalSteps) steps)
-
-            CURRENT / NEXT STEP
-            \(activeStepText)
-
-            TOTAL EXECUTION ATTEMPTS
-            \(attempts)
-
-            LAST CHECKPOINT
-            \(checkpoint)
-
-            FAILURE / PAUSE DETAIL
-            \(failure)
-
-            BUDGET
-            maxSteps: \(stepBudget)
-            maxRuntime: \(runtimeBudget)
-            maxRetriesPerStep: \(task.budget.maxRetriesPerStep)
+            Χρήση:
+            /task-status <ID ή λέξη από τίτλο>
+            /task-log <ID ή λέξη από τίτλο>
             """
+        } catch {
+            return "Αποτυχία ανάγνωσης autonomous task history: \(error.localizedDescription)"
+        }
+    }
+
+    private func renderTaskStatus(reference: String?) -> String {
+        do {
+            switch try resolveTask(reference: reference) {
+            case .notFound:
+                return "Δεν βρέθηκε autonomous task που να ταιριάζει με \(reference ?? "την επιλογή"). Χρησιμοποίησε /tasks για τη λίστα."
+            case .ambiguous(let tasks):
+                return renderAmbiguousTaskSelection(tasks, command: "/task-status")
+            case .found(let task):
+                return renderStatus(for: task)
+            }
         } catch {
             return "Αποτυχία ανάγνωσης autonomous task status: \(error.localizedDescription)"
         }
     }
 
-    private func renderLatestTaskLog() -> String {
+    private func renderStatus(for task: AgentTask) -> String {
+        let totalSteps = task.plan.steps.count
+        let completedSteps = task.plan.steps.filter {
+            $0.status == .completed || $0.status == .skipped
+        }.count
+        let progress = totalSteps > 0
+            ? Int((Double(completedSteps) / Double(totalSteps)) * 100)
+            : 0
+
+        let currentStep = task.executionState.currentStepId.flatMap { currentId in
+            task.plan.steps.first { $0.id == currentId }
+        }
+
+        let completedIds = Set(task.plan.steps.filter { $0.status == .completed }.map(\.id))
+        let nextStep = task.plan.steps
+            .sorted { $0.order < $1.order }
+            .first { step in
+                guard step.status == .pending || step.status == .ready else { return false }
+                return step.dependencyStepIds.allSatisfy { completedIds.contains($0) }
+            }
+
+        let activeStepText: String
+        if let currentStep {
+            activeStepText = "#\(currentStep.order) — \(currentStep.title) [\(currentStep.status.rawValue)]"
+        } else if let nextStep {
+            activeStepText = "#\(nextStep.order) — \(nextStep.title) [\(nextStep.status.rawValue)]"
+        } else {
+            activeStepText = "κανένα"
+        }
+
+        let checkpoint = task.executionState.lastCheckpoint?.summary ?? "κανένα"
+        let failure = task.failureReason ?? "κανένα"
+        let runtimeBudget = task.budget.maxRuntimeSeconds.map { "\(Int($0))s" } ?? "unlimited"
+        let stepBudget = task.budget.maxSteps.map(String.init) ?? "unlimited"
+        let attempts = task.plan.steps.reduce(0) { $0 + $1.attemptCount }
+
+        return """
+        AUTONOMOUS TASK STATUS
+
+        TASK
+        \(task.id.uuidString)
+
+        TITLE
+        \(task.title)
+
+        STATUS
+        \(task.status.rawValue)
+
+        PLAN VERSION
+        v\(task.plan.version)
+
+        PROGRESS
+        \(progress)% (\(completedSteps)/\(totalSteps) steps)
+
+        CURRENT / NEXT STEP
+        \(activeStepText)
+
+        TOTAL EXECUTION ATTEMPTS
+        \(attempts)
+
+        LAST CHECKPOINT
+        \(checkpoint)
+
+        FAILURE / PAUSE DETAIL
+        \(failure)
+
+        BUDGET
+        maxSteps: \(stepBudget)
+        maxRuntime: \(runtimeBudget)
+        maxRetriesPerStep: \(task.budget.maxRetriesPerStep)
+        """
+    }
+
+    private func renderTaskLog(reference: String?) -> String {
         do {
-            guard let task = try latestPersistedTask() else {
-                return "Δεν υπάρχει αποθηκευμένο autonomous task."
+            switch try resolveTask(reference: reference) {
+            case .notFound:
+                return "Δεν βρέθηκε autonomous task που να ταιριάζει με \(reference ?? "την επιλογή"). Χρησιμοποίησε /tasks για τη λίστα."
+            case .ambiguous(let tasks):
+                return renderAmbiguousTaskSelection(tasks, command: "/task-log")
+            case .found(let task):
+                return renderLog(for: task)
             }
-
-            let events = task.events
-                .sorted { $0.createdAt < $1.createdAt }
-                .suffix(40)
-
-            guard !events.isEmpty else {
-                return "Το autonomous task δεν έχει καταγεγραμμένα runtime events."
-            }
-
-            let formatter = ISO8601DateFormatter()
-            let timeline = events.map { event in
-                "[\(formatter.string(from: event.createdAt))] \(event.type.rawValue.uppercased()) — \(event.message)"
-            }.joined(separator: "\n")
-
-            return """
-            AUTONOMOUS TASK LOG
-
-            TASK
-            \(task.id.uuidString)
-
-            STATUS
-            \(task.status.rawValue)
-
-            EVENTS
-            \(timeline)
-            """
         } catch {
             return "Αποτυχία ανάγνωσης autonomous task log: \(error.localizedDescription)"
         }
+    }
+
+    private func renderLog(for task: AgentTask) -> String {
+        let events = task.events
+            .sorted { $0.createdAt < $1.createdAt }
+            .suffix(60)
+
+        guard !events.isEmpty else {
+            return "Το autonomous task δεν έχει καταγεγραμμένα runtime events."
+        }
+
+        let formatter = ISO8601DateFormatter()
+        let timeline = events.map { event in
+            "[\(formatter.string(from: event.createdAt))] \(event.type.rawValue.uppercased()) — \(event.message)"
+        }.joined(separator: "\n")
+
+        return """
+        AUTONOMOUS TASK LOG
+
+        TASK
+        \(task.id.uuidString)
+
+        TITLE
+        \(task.title)
+
+        STATUS
+        \(task.status.rawValue)
+
+        EVENTS
+        \(timeline)
+        """
+    }
+
+    private func renderAmbiguousTaskSelection(_ tasks: [AgentTask], command: String) -> String {
+        let candidates = tasks.prefix(8).map { task in
+            "\(String(task.id.uuidString.prefix(8))) [\(task.status.rawValue)] — \(task.title)"
+        }.joined(separator: "\n")
+
+        return """
+        Βρήκα περισσότερα από ένα autonomous tasks που ταιριάζουν:
+
+        \(candidates)
+
+        Δώσε πιο συγκεκριμένο ID, π.χ.:
+        \(command) \(String(tasks[0].id.uuidString.prefix(8)))
+        """
     }
 }
