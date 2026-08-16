@@ -6,6 +6,7 @@ import Observation
 final class AgentTaskRuntime {
     private(set) var tasks: [AgentTask] = []
     private let store: AgentTaskStore
+    private let policyEngine = AgentPolicyEngine()
     private(set) var persistenceError: String?
 
     init(store: AgentTaskStore = .shared) {
@@ -48,19 +49,20 @@ final class AgentTaskRuntime {
 
     func attachPlan(taskId: UUID, plan: TaskPlan) {
         mutate(taskId) { task in
-            task.plan = plan
+            task.plan = applyPolicy(to: plan)
             task.status = .pending
             task.failureReason = nil
             task.executionState.currentStepId = nil
             task.executionState.consecutiveFailures = 0
-            task.events.append(TaskEvent(type: .planned, message: "Plan attached: \(plan.summary)"))
+            task.events.append(TaskEvent(type: .planned, message: "Plan attached: \(task.plan.summary)"))
         }
     }
 
     func replacePlan(taskId: UUID, summary: String, steps: [PlanStep]) {
         mutate(taskId) { task in
             let nextVersion = task.plan.steps.isEmpty ? 1 : task.plan.version + 1
-            task.plan = TaskPlan(version: nextVersion, summary: summary, steps: steps)
+            let candidate = TaskPlan(version: nextVersion, summary: summary, steps: steps)
+            task.plan = applyPolicy(to: candidate)
             task.status = .pending
             task.failureReason = nil
             task.executionState.currentStepId = nil
@@ -122,9 +124,6 @@ final class AgentTaskRuntime {
         }
     }
 
-    /// Explicitly reopens the terminal failed step while preserving every
-    /// previously verified completed step. The attempt counter is reset only
-    /// for that failed step because retry here represents fresh user intent.
     @discardableResult
     func prepareRetry(taskId: UUID) -> Bool {
         var prepared = false
@@ -273,6 +272,25 @@ final class AgentTaskRuntime {
 
     func reloadFromDisk() { restorePersistedTasks() }
 
+    private func applyPolicy(to plan: TaskPlan) -> TaskPlan {
+        var plan = plan
+        for index in plan.steps.indices {
+            guard let capabilityId = plan.steps[index].capabilityId else { continue }
+            switch policyEngine.evaluate(step: plan.steps[index], capabilityId: capabilityId) {
+            case .allow:
+                break
+            case .requireApproval:
+                plan.steps[index].requiresApproval = true
+                plan.steps[index].canRunInBackground = false
+            case .deny(let reason):
+                plan.steps[index].requiresApproval = true
+                plan.steps[index].canRunInBackground = false
+                plan.steps[index].lastError = "Policy denied autonomous execution: \(reason)"
+            }
+        }
+        return plan
+    }
+
     private func schedulerPrecedes(_ lhs: AgentTask, _ rhs: AgentTask) -> Bool {
         let lp = priorityRank(lhs.priority), rp = priorityRank(rhs.priority)
         if lp != rp { return lp > rp }
@@ -307,6 +325,7 @@ final class AgentTaskRuntime {
         do {
             var restored = try store.load()
             for taskIndex in restored.indices {
+                restored[taskIndex].plan = applyPolicy(to: restored[taskIndex].plan)
                 guard restored[taskIndex].status == .running else { continue }
                 if let stepId = restored[taskIndex].executionState.currentStepId,
                    let stepIndex = restored[taskIndex].plan.steps.firstIndex(where: { $0.id == stepId }),
