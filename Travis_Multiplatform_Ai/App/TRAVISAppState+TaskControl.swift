@@ -10,7 +10,8 @@ extension TRAVISAppState {
     /// runtime control semantically. Returns true when normal capability
     /// routing must stop because this message was consumed as system control.
     func handleSystemIntent(_ text: String, recentHistory: [ChatMessage]) async -> Bool {
-        let intent = await systemIntentRouter.classify(text, recentHistory: recentHistory)
+        let router = SystemIntentRouter()
+        let intent = await router.classify(text, recentHistory: recentHistory)
         switch intent {
         case .none:
             return false
@@ -99,7 +100,8 @@ extension TRAVISAppState {
         isProcessing = true
         Task {
             defer { isProcessing = false }
-            let report = await taskScheduler.runCycle(recentHistory: recentHistory, backgroundOnly: backgroundOnly, maxTasksPerCycle: 4)
+            let scheduler = AgentTaskScheduler(runtime: taskRuntime, executor: taskExecutor)
+            let report = await scheduler.runCycle(recentHistory: recentHistory, backgroundOnly: backgroundOnly, maxTasksPerCycle: 4)
             addAssistantMessage("""
             SCHEDULER CYCLE COMPLETE
 
