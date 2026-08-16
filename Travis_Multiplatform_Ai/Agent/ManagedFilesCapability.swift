@@ -64,8 +64,8 @@ final class ManagedFilesCapability: AgentCapability {
         """
         let raw = try await aiService.generateText(prompt: selectionPrompt, maxTokens: 300)
         guard let start = raw.firstIndex(of: "{"), let end = raw.lastIndex(of: "}"),
-              let data = String(raw[start...end]).data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let selectionData = String(raw[start...end]).data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: selectionData) as? [String: Any],
               let selectedPath = object["path"] as? String,
               files.contains(where: { $0.path == selectedPath }) else {
             return .reply("Δεν μπόρεσα να ταυτοποιήσω με ασφάλεια ποιο καταγεγραμμένο αρχείο εννοείς.")
@@ -82,8 +82,8 @@ final class ManagedFilesCapability: AgentCapability {
             return .reply("Το αρχείο είναι \(size) bytes και είναι πολύ μεγάλο για άμεση ανάγνωση στο chat. Θα χρειαστεί document-processing pipeline.")
         }
 
-        let data = try Data(contentsOf: url)
-        guard let text = String(data: data, encoding: .utf8) else {
+        let fileData = try Data(contentsOf: url)
+        guard let text = String(data: fileData, encoding: .utf8) else {
             return .reply("Το αρχείο υπάρχει αλλά δεν είναι UTF-8 text. Θα το χειριστούμε από το document-processing capability.")
         }
 
