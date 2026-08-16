@@ -23,7 +23,7 @@ extension TRAVISAppState {
                 addAssistantMessage("Χρήση: /plan <στόχος>")
                 return
             }
-            createAutonomousPlan(goal: goal, projectId: nil)
+            createAutonomousPlan(goal: goal, projectId: boundProject()?.id)
             return
         }
 
@@ -31,17 +31,15 @@ extension TRAVISAppState {
         Task {
             defer { isProcessing = false }
 
-            // Runtime/task control has highest precedence.
             if await handleSystemIntent(trimmed, recentHistory: recentHistory) {
                 return
             }
 
-            // Durable project-memory operations are resolved before ordinary
-            // project creation and capability routing.
             let memoryRouter = ProjectMemoryIntentRouter()
             switch await memoryRouter.classify(trimmed, recentHistory: recentHistory) {
             case .addDecision(let reference, let text, let rationale):
                 guard let project = resolveProjectForMemory(reference) else { return }
+                bindCurrentSession(to: project)
                 ProjectWorkspaceStore.shared.addDecision(text, rationale: rationale, to: project.id)
                 addAssistantMessage("PROJECT DECISION SAVED\n\n\(project.title)\n\n\(text)")
                 lastResponseSummary = "Project decision saved"
@@ -49,6 +47,7 @@ extension TRAVISAppState {
 
             case .addNote(let reference, let text):
                 guard let project = resolveProjectForMemory(reference) else { return }
+                bindCurrentSession(to: project)
                 ProjectWorkspaceStore.shared.addNote(text, to: project.id)
                 addAssistantMessage("PROJECT NOTE SAVED\n\n\(project.title)\n\n\(text)")
                 lastResponseSummary = "Project note saved"
@@ -56,6 +55,7 @@ extension TRAVISAppState {
 
             case .showProject(let reference):
                 guard let project = resolveProjectForMemory(reference) else { return }
+                bindCurrentSession(to: project)
                 addAssistantMessage(renderProjectContext(project, includeMemory: true))
                 return
 
@@ -72,6 +72,7 @@ extension TRAVISAppState {
             switch await goalRouter.classify(trimmed, recentHistory: recentHistory) {
             case .createProject(let title, let goal):
                 let project = ProjectWorkspaceStore.shared.create(title: title, goal: goal)
+                bindCurrentSession(to: project)
                 addAssistantMessage("""
                 PROJECT WORKSPACE CREATED
 
@@ -118,8 +119,9 @@ extension TRAVISAppState {
             pendingCommands.append(command)
             lastResponseSummary = "Εντολή σε αναμονή: \(trimmed)"
 
+            let routedText = contextualizedConversationCommand(trimmed)
             await orchestrator.route(
-                trimmed,
+                routedText,
                 liveSessionId: currentSessionId,
                 recentHistory: recentHistory
             )
@@ -213,6 +215,7 @@ extension TRAVISAppState {
     }
 
     private func continueProject(_ project: ProjectWorkspace, userRequest: String) {
+        bindCurrentSession(to: project)
         let memory = ProjectWorkspaceStore.shared.contextBlock(for: project, taskRuntime: taskRuntime)
         addAssistantMessage("""
         PROJECT CONTEXT LOADED
@@ -254,7 +257,33 @@ extension TRAVISAppState {
         """
     }
 
+    private func contextualizedConversationCommand(_ command: String) -> String {
+        guard let project = boundProject() else { return command }
+        let memory = ProjectWorkspaceStore.shared.contextBlock(for: project, taskRuntime: taskRuntime)
+        return """
+        The user is currently working inside a persistent TRAVIS project workspace.
+        Use the project memory as context, but answer/act on the CURRENT USER MESSAGE rather than restarting the project.
+
+        \(memory)
+
+        CURRENT USER MESSAGE
+        \(command)
+        """
+    }
+
+    private func boundProject() -> ProjectWorkspace? {
+        ProjectSessionBindingStore.shared.project(for: currentSessionId)
+    }
+
+    private func bindCurrentSession(to project: ProjectWorkspace) {
+        ProjectSessionBindingStore.shared.bind(sessionId: currentSessionId, projectId: project.id)
+    }
+
     private func resolveProjectForMemory(_ reference: String?) -> ProjectWorkspace? {
+        if reference == nil, let bound = boundProject() {
+            return bound
+        }
+
         switch ProjectWorkspaceStore.shared.resolve(reference) {
         case .found(let project):
             return project
