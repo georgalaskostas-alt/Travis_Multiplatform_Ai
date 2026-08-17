@@ -32,6 +32,11 @@ extension TRAVISAppState {
             return
         }
 
+        if trimmed.lowercased() == "/distillation" {
+            addAssistantMessage(SkillDistillationService.shared.diagnosticReport())
+            return
+        }
+
         if trimmed.lowercased().hasPrefix("/plan ") {
             let goal = String(trimmed.dropFirst("/plan ".count))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -157,16 +162,30 @@ extension TRAVISAppState {
             do {
                 let planningGoal = enrichedGoal(goal, projectId: projectId)
                 let registry = CapabilityRegistry(capabilities: orchestrator.capabilities)
-                let skillContext = ReusableSkillStore.shared.planningContext(for: planningGoal)
-                let plannerContext = [registry.promptCatalog(), skillContext]
-                    .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-                    .joined(separator: "\n\n")
 
-                let plan = try await TaskPlanner.shared.makePlan(
-                    for: planningGoal,
-                    availableCapabilities: registry.ids,
-                    context: plannerContext
+                let deterministicMatch = SkillExecutionEngine.shared.deterministicPlan(
+                    for: goal,
+                    capabilities: orchestrator.capabilities
                 )
+
+                let plan: TaskPlan
+                let planningSource: String
+                if let deterministicMatch {
+                    plan = deterministicMatch.plan
+                    planningSource = "LOCAL VERIFIED SKILL — similarity \(String(format: "%.2f", deterministicMatch.similarity)), observations \(deterministicMatch.skill.observationCount), 0 planner tokens"
+                } else {
+                    let skillContext = ReusableSkillStore.shared.planningContext(for: planningGoal)
+                    let plannerContext = [registry.promptCatalog(), skillContext]
+                        .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                        .joined(separator: "\n\n")
+
+                    plan = try await TaskPlanner.shared.makePlan(
+                        for: planningGoal,
+                        availableCapabilities: registry.ids,
+                        context: plannerContext
+                    )
+                    planningSource = "CLOUD/AI PLANNER"
+                }
 
                 let createdTask = taskRuntime.createTask(
                     goal: planningGoal,
@@ -219,6 +238,9 @@ extension TRAVISAppState {
                 \(projectText)
                 TASK ID
                 \(runtimeTask.id.uuidString)
+
+                PLANNING SOURCE
+                \(planningSource)
 
                 STATUS
                 \(runtimeTask.status.rawValue)
