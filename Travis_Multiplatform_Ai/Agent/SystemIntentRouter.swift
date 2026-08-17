@@ -23,6 +23,11 @@ final class SystemIntentRouter {
         case trainingPolicy
         case localModelRegistry
         case trainingRuns
+        case trainingStart(kind: String, name: String, baseModel: String)
+        case trainingRefresh(reference: String)
+        case trainingCancel(reference: String)
+        case trainingPromote(candidateReference: String, inferenceModelId: String)
+        case trainingRollback(candidateReference: String, reason: String)
     }
 
     private struct Decision: Decodable {
@@ -155,6 +160,32 @@ final class SystemIntentRouter {
         if lower == "/training-policy" { return .trainingPolicy }
         if lower == "/local-model" { return .localModelRegistry }
         if lower == "/training-runs" { return .trainingRuns }
+
+        if lower.hasPrefix("/train-local ") {
+            let parts = splitCommandArguments(String(trimmed.dropFirst("/train-local ".count)), expected: 3)
+            guard parts.count == 3 else { return .none }
+            return .trainingStart(kind: parts[0], name: parts[1], baseModel: parts[2])
+        }
+        if lower.hasPrefix("/training-refresh ") {
+            let ref = String(trimmed.dropFirst("/training-refresh ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return ref.isEmpty ? .none : .trainingRefresh(reference: ref)
+        }
+        if lower.hasPrefix("/training-cancel ") {
+            let ref = String(trimmed.dropFirst("/training-cancel ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return ref.isEmpty ? .none : .trainingCancel(reference: ref)
+        }
+        if lower.hasPrefix("/training-promote ") {
+            let parts = splitCommandArguments(String(trimmed.dropFirst("/training-promote ".count)), expected: 2)
+            guard parts.count == 2 else { return .none }
+            return .trainingPromote(candidateReference: parts[0], inferenceModelId: parts[1])
+        }
+        if lower.hasPrefix("/training-rollback ") {
+            let remainder = String(trimmed.dropFirst("/training-rollback ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let pieces = remainder.split(separator: " ", maxSplits: 1).map(String.init)
+            guard !pieces.isEmpty else { return .none }
+            return .trainingRollback(candidateReference: pieces[0], reason: pieces.count > 1 ? pieces[1] : "Manual rollback")
+        }
+
         for (command, make) in commands {
             if lower == command { return make(nil) }
             if lower.hasPrefix(command + " ") {
@@ -163,6 +194,40 @@ final class SystemIntentRouter {
             }
         }
         return nil
+    }
+
+    private func splitCommandArguments(_ value: String, expected: Int) -> [String] {
+        // Quoted arguments allow model names/labels containing spaces while
+        // keeping the control path deterministic and AI-free.
+        var output: [String] = []
+        var current = ""
+        var quote: Character?
+
+        for char in value {
+            if let activeQuote = quote {
+                if char == activeQuote {
+                    quote = nil
+                } else {
+                    current.append(char)
+                }
+                continue
+            }
+            if char == "\"" || char == "'" {
+                quote = char
+            } else if char.isWhitespace {
+                if !current.isEmpty {
+                    output.append(current)
+                    current = ""
+                }
+            } else {
+                current.append(char)
+            }
+        }
+        if !current.isEmpty { output.append(current) }
+
+        if output.count <= expected { return output }
+        let head = Array(output.prefix(expected - 1))
+        return head + [output.dropFirst(expected - 1).joined(separator: " ")]
     }
 
     private func decode(_ raw: String) -> Decision? {
