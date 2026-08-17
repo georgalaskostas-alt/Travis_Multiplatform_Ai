@@ -37,6 +37,10 @@ extension TRAVISAppState {
         Task {
             defer { isProcessing = false }
 
+            if await handleSchedulingIntent(trimmed, recentHistory: recentHistory) {
+                return
+            }
+
             if await handleSystemIntent(trimmed, recentHistory: recentHistory) {
                 return
             }
