@@ -65,6 +65,7 @@ final class TRAVISAppState {
         let localProductivityCapability = LocalProductivityCapability()
         let localAutomationCapability = LocalAutomationCapability()
         let localDocumentCapability = LocalDocumentCapability()
+        let localFileSearchCapability = LocalFileSearchCapability()
 
         orchestrator.register(TextTaskCapability())
         orchestrator.register(cryptoTradingCapability)
@@ -74,6 +75,7 @@ final class TRAVISAppState {
         orchestrator.register(localProductivityCapability)
         orchestrator.register(localAutomationCapability)
         orchestrator.register(localDocumentCapability)
+        orchestrator.register(localFileSearchCapability)
 
         orchestrator.onAssistantMessage = { [weak self] text in self?.addAssistantMessage(text) }
         orchestrator.onSessionRecall = { [weak self] sessionId in self?.viewSession(sessionId) }
