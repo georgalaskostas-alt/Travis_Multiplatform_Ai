@@ -63,8 +63,6 @@ final class SkillExecutionEngine {
             if mode == .deterministic {
                 LocalIntelligenceMetrics.shared.record(.deterministicSkillPlan)
             } else {
-                // The cloud planner was bypassed, but later capability reasoning
-                // may still use local/cloud AI according to the central router.
                 LocalIntelligenceMetrics.shared.record(.learnedCapabilityRoute)
             }
 
@@ -80,15 +78,14 @@ final class SkillExecutionEngine {
         return nil
     }
 
-    /// Backward-compatible strict deterministic lookup for callers that require
-    /// a guaranteed deterministic candidate only.
+    /// Kept for source compatibility with the current task-creation path.
+    /// It now returns either a deterministic or local-AI eligible verified skill
+    /// plan; both avoid a fresh cloud-planner call.
     func deterministicPlan(
         for goal: String,
         capabilities: [AgentCapability]
     ) -> Match? {
-        guard let match = optimizedPlan(for: goal, capabilities: capabilities),
-              match.planningMode == .deterministic else { return nil }
-        return match
+        optimizedPlan(for: goal, capabilities: capabilities)
     }
 
     private func materialize(
