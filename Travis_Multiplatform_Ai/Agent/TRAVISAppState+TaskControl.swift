@@ -30,6 +30,10 @@ extension TRAVISAppState {
             cancelAutonomousTask(reference: reference)
         case .schedulerCycle:
             runSchedulerCycle()
+        case .aiUsage:
+            addAssistantMessage(AIUsageLedger.shared.diagnosticReport())
+        case .aiModels:
+            addAssistantMessage(AIModelPerformanceService().diagnosticReport())
         }
         return true
     }
@@ -48,20 +52,11 @@ extension TRAVISAppState {
             defer { isProcessing = false }
             do {
                 if continuous {
-                    let report = try await taskExecutor.executeUntilBlocked(
-                        taskId: task.id,
-                        recentHistory: recentHistory,
-                        maxStepsPerCycle: 8
-                    )
+                    let report = try await taskExecutor.executeUntilBlocked(taskId: task.id, recentHistory: recentHistory, maxStepsPerCycle: 8)
                     addAssistantMessage(renderRunReport(report))
                 } else {
-                    _ = try await taskExecutor.executeNextStep(
-                        taskId: task.id,
-                        recentHistory: recentHistory
-                    )
-                    guard let updated = taskRuntime.task(id: task.id) else {
-                        throw RuntimeIntegrationControlError.taskNotFound
-                    }
+                    _ = try await taskExecutor.executeNextStep(taskId: task.id, recentHistory: recentHistory)
+                    guard let updated = taskRuntime.task(id: task.id) else { throw RuntimeIntegrationControlError.taskNotFound }
                     addAssistantMessage(renderStepResult(updated))
                 }
 
@@ -115,11 +110,7 @@ extension TRAVISAppState {
         Task {
             defer { isProcessing = false }
             let scheduler = AgentTaskScheduler(runtime: taskRuntime, executor: taskExecutor)
-            let report = await scheduler.runCycle(
-                recentHistory: recentHistory,
-                backgroundOnly: backgroundOnly,
-                maxTasksPerCycle: 4
-            )
+            let report = await scheduler.runCycle(recentHistory: recentHistory, backgroundOnly: backgroundOnly, maxTasksPerCycle: 4)
 
             let coordinator = ProjectMemoryCoordinator()
             for taskId in report.executedTaskIds where taskRuntime.task(id: taskId)?.status == .completed {
@@ -163,30 +154,24 @@ extension TRAVISAppState {
             case "run", "auto": effectiveReference = "running"
             case "resume": effectiveReference = "paused"
             case "retry": effectiveReference = "failed"
-            case "cancel":
-                effectiveReference = taskRuntime.tasks.contains(where: { $0.status == .running }) ? "running" : "paused"
+            case "cancel": effectiveReference = taskRuntime.tasks.contains(where: { $0.status == .running }) ? "running" : "paused"
             default: effectiveReference = nil
             }
         }
 
         switch resolveRuntimeTask(reference: effectiveReference) {
-        case .found(let task):
-            return task
+        case .found(let task): return task
         case .notFound:
             addAssistantMessage("Δεν βρέθηκε autonomous task για \(action). Χρησιμοποίησε /tasks.")
             return nil
         case .ambiguous(let tasks):
-            let rows = tasks.prefix(8).map {
-                "\(shortTaskId($0)) [\($0.status.rawValue)] — \($0.title)"
-            }.joined(separator: "\n")
+            let rows = tasks.prefix(8).map { "\(shortTaskId($0)) [\($0.status.rawValue)] — \($0.title)" }.joined(separator: "\n")
             addAssistantMessage("Βρήκα περισσότερα από ένα tasks. Δεν θα επιλέξω αυθαίρετα:\n\n\(rows)\n\nΔώσε το short ID ή πιο συγκεκριμένη αναφορά.")
             return nil
         }
     }
 
-    private func shortTaskId(_ task: AgentTask) -> String {
-        String(task.id.uuidString.prefix(8))
-    }
+    private func shortTaskId(_ task: AgentTask) -> String { String(task.id.uuidString.prefix(8)) }
 
     private func renderStepResult(_ task: AgentTask) -> String {
         let progress = Int(taskRuntime.progress(taskId: task.id) * 100)
