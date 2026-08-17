@@ -39,12 +39,12 @@ final class SkillDistillationService {
     }
 
     func refresh(skills: [ReusableSkillStore.Skill], capabilities: [AgentCapability]) {
-        let descriptors = Dictionary(uniqueKeysWithValues: capabilities.map { ($0.id, $0.descriptor) })
+        let capabilityMap = Dictionary(uniqueKeysWithValues: capabilities.map { ($0.id, $0) })
         var rebuilt: [DistilledSkill] = []
         rebuilt.reserveCapacity(skills.count)
 
         for skill in skills {
-            let result = classify(skill, descriptors: descriptors)
+            let result = classify(skill, capabilities: capabilityMap)
             rebuilt.append(DistilledSkill(
                 id: existingId(for: skill.id) ?? UUID(),
                 sourceSkillId: skill.id,
@@ -79,24 +79,25 @@ final class SkillDistillationService {
         BY EXECUTION CLASS
         \(rows)
 
-        Deterministic/local candidates are classifications only. They do not bypass policy, approvals or verification.
+        A deterministicCandidate now also requires every capability in the workflow to implement the structured deterministic invocation contract. Classification never bypasses policy, approvals or verification.
         """
     }
 
     private func classify(
         _ skill: ReusableSkillStore.Skill,
-        descriptors: [String: CapabilityDescriptor]
+        capabilities: [String: AgentCapability]
     ) -> (classification: ExecutionClass, confidence: Double, rationale: String) {
         guard skill.observationCount >= 2 else {
             return (.cloudReasoningRequired, 0.55, "Skill is not mature enough for local distillation.")
         }
 
-        let skillDescriptors = skill.steps.compactMap { descriptors[$0.capabilityId] }
-        guard skillDescriptors.count == skill.steps.count else {
-            return (.cloudReasoningRequired, 0.60, "One or more capabilities lack a registered descriptor.")
+        let skillCapabilities = skill.steps.compactMap { capabilities[$0.capabilityId] }
+        guard skillCapabilities.count == skill.steps.count else {
+            return (.cloudReasoningRequired, 0.60, "One or more capabilities are no longer registered.")
         }
 
-        let effects = Set(skillDescriptors.flatMap { $0.policy.declaredEffects })
+        let descriptors = skillCapabilities.map(\.descriptor)
+        let effects = Set(descriptors.flatMap { $0.policy.declaredEffects })
         let consequentialEffects: Set<CapabilityEffect> = [.financial, .externalMutation, .codeMutation]
         let locallySafeEffects: Set<CapabilityEffect> = [.readOnly, .localMutation]
 
@@ -104,15 +105,23 @@ final class SkillDistillationService {
             return (.cloudReasoningRequired, 0.99, "Workflow contains consequential external, financial or source-code mutation effects.")
         }
 
-        let domains = Set(skillDescriptors.map(\.domain))
+        let domains = Set(descriptors.map(\.domain))
         let deterministicDomains: Set<CapabilityDomain> = [.files, .system, .automation, .productivity]
+        let allSupportStructuredExecution = skillCapabilities.allSatisfy {
+            $0 is any DeterministicInvocableCapability
+        }
+
         if effects.isSubset(of: locallySafeEffects),
-           domains.isSubset(of: deterministicDomains) {
-            return (.deterministicCandidate, 0.90, "Repeated workflow is bounded to local/read-only deterministic-capable domains.")
+           domains.isSubset(of: deterministicDomains),
+           allSupportStructuredExecution {
+            return (.deterministicCandidate, 0.94, "Repeated workflow is locally bounded and every capability supports structured deterministic execution.")
         }
 
         if effects.isSubset(of: locallySafeEffects) {
-            return (.localAICandidate, 0.82, "Repeated workflow is non-consequential but still requires semantic/reasoning capability.")
+            let reason = allSupportStructuredExecution
+                ? "Repeated workflow is non-consequential but still requires semantic/reasoning capability."
+                : "Workflow is locally safe, but at least one capability still requires natural-language/AI interpretation."
+            return (.localAICandidate, 0.84, reason)
         }
 
         return (.cloudReasoningRequired, 0.80, "Workflow still requires cloud-grade reasoning or unsupported execution semantics.")
