@@ -22,11 +22,14 @@ final class UniversalCapabilityRunner {
 
     enum RunnerError: LocalizedError {
         case timedOut(seconds: Int)
+        case unsupportedDeterministicInvocation(capabilityId: String)
 
         var errorDescription: String? {
             switch self {
             case .timedOut(let seconds):
                 return "Το capability ξεπέρασε το execution deadline των \(seconds) δευτερολέπτων."
+            case .unsupportedDeterministicInvocation(let capabilityId):
+                return "Το capability \(capabilityId) δεν υποστηρίζει structured deterministic execution."
             }
         }
     }
@@ -42,11 +45,54 @@ final class UniversalCapabilityRunner {
         command: String,
         context: Context
     ) async throws -> CapabilityOutcome {
+        try await runInternal(
+            capability: capability,
+            commandSummary: command,
+            context: context
+        ) {
+            try await capability.handle(command: command, recentHistory: context.recentHistory)
+        }
+    }
+
+    /// Zero-parser-token path for capabilities that explicitly opt into a
+    /// structured invocation contract. The same timeout, journal, task scope,
+    /// policy and downstream approval handling still apply.
+    func run(
+        capability: AgentCapability,
+        invocation: DeterministicCapabilityInvocation,
+        context: Context
+    ) async throws -> CapabilityOutcome {
+        guard invocation.capabilityId == capability.id,
+              let deterministic = capability as? any DeterministicInvocableCapability else {
+            throw RunnerError.unsupportedDeterministicInvocation(capabilityId: capability.id)
+        }
+
+        let argumentSummary = invocation.arguments
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: ", ")
+        let summary = "structured \(invocation.operation) \(argumentSummary)"
+
+        return try await runInternal(
+            capability: capability,
+            commandSummary: summary,
+            context: context
+        ) {
+            try await deterministic.handle(invocation: invocation)
+        }
+    }
+
+    private func runInternal(
+        capability: AgentCapability,
+        commandSummary: String,
+        context: Context,
+        operation: @escaping @MainActor () async throws -> CapabilityOutcome
+    ) async throws -> CapabilityOutcome {
         let descriptor = capability.descriptor
         let timeout = descriptor.policy.timeoutSeconds
         let recordId = journal.begin(
             capabilityId: descriptor.id,
-            command: command,
+            command: commandSummary,
             taskId: context.taskId,
             projectId: context.projectId
         )
@@ -64,10 +110,7 @@ final class UniversalCapabilityRunner {
                 group.addTask { @MainActor in
                     try Task.checkCancellation()
                     return try await AIExecutionScope.$context.withValue(aiContext) {
-                        try await capability.handle(
-                            command: command,
-                            recentHistory: context.recentHistory
-                        )
+                        try await operation()
                     }
                 }
                 group.addTask {
@@ -87,16 +130,13 @@ final class UniversalCapabilityRunner {
             case .reply(let text):
                 journal.finish(recordId: recordId, status: .replied, resultSummary: text)
                 VerifiedRoutingMemory.shared.recordSuccessfulRouting(
-                    command: command,
+                    command: commandSummary,
                     capabilityId: descriptor.id
                 )
             case .proposal(let action):
                 journal.finish(recordId: recordId, status: .proposedMutation, resultSummary: action.summary)
-                // We learn only the capability routing, never the mutation
-                // payload or approval decision. Reuse still requires repeated
-                // observations and only bypasses the classifier.
                 VerifiedRoutingMemory.shared.recordSuccessfulRouting(
-                    command: command,
+                    command: commandSummary,
                     capabilityId: descriptor.id
                 )
             case .none:
