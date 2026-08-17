@@ -42,7 +42,10 @@ struct AIInvocationContext: Codable, Hashable {
         self.operation = operation
     }
 
-    static let general = AIInvocationContext()
+    /// Source-compatible default used by all existing AIService call sites.
+    /// Inside UniversalCapabilityRunner it resolves to the current task-local
+    /// provenance; outside autonomous execution it resolves to neutral context.
+    static var general: AIInvocationContext { AIExecutionScope.context }
 }
 
 struct AIModelSelection: Codable, Hashable {
@@ -104,35 +107,15 @@ struct AIUsageRecord: Identifiable, Codable, Hashable {
     var errorType: String?
 
     init(
-        id: UUID = UUID(),
-        timestamp: Date = Date(),
-        provider: AIProvider,
-        model: String,
-        tier: AIModelTier,
-        context: AIInvocationContext,
-        usage: AITokenUsage,
-        estimatedCostUSD: Double?,
-        latencyMilliseconds: Int,
-        attempt: Int,
-        succeeded: Bool,
-        errorType: String? = nil
+        id: UUID = UUID(), timestamp: Date = Date(), provider: AIProvider,
+        model: String, tier: AIModelTier, context: AIInvocationContext,
+        usage: AITokenUsage, estimatedCostUSD: Double?, latencyMilliseconds: Int,
+        attempt: Int, succeeded: Bool, errorType: String? = nil
     ) {
-        self.id = id
-        self.timestamp = timestamp
-        self.provider = provider
-        self.model = model
-        self.tier = tier
-        self.workload = context.workload
-        self.capabilityId = context.capabilityId
-        self.taskId = context.taskId
-        self.stepId = context.stepId
-        self.projectId = context.projectId
-        self.operation = context.operation
-        self.usage = usage
-        self.estimatedCostUSD = estimatedCostUSD
-        self.latencyMilliseconds = latencyMilliseconds
-        self.attempt = attempt
-        self.succeeded = succeeded
-        self.errorType = errorType
+        self.id = id; self.timestamp = timestamp; self.provider = provider; self.model = model; self.tier = tier
+        self.workload = context.workload; self.capabilityId = context.capabilityId; self.taskId = context.taskId
+        self.stepId = context.stepId; self.projectId = context.projectId; self.operation = context.operation
+        self.usage = usage; self.estimatedCostUSD = estimatedCostUSD; self.latencyMilliseconds = latencyMilliseconds
+        self.attempt = attempt; self.succeeded = succeeded; self.errorType = errorType
     }
 }
