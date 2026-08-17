@@ -1,9 +1,9 @@
 import Foundation
 
 /// Semantic fallback router over the real capability registry.
-/// Exact/keyword routing remains deterministic and cheap; this service is used
-/// only when no specialist keyword matched, preventing the catch-all text tool
-/// from swallowing research/API/file requests expressed in natural language.
+/// Exact/keyword routing remains deterministic and cheap; learned routing
+/// memory is consulted next, and the LLM classifier is used only when local
+/// evidence is insufficient.
 @MainActor
 final class CapabilitySelectionService {
     private struct Decision: Decodable {
@@ -12,9 +12,14 @@ final class CapabilitySelectionService {
     }
 
     private let aiService: AIService
+    private let routingMemory: VerifiedRoutingMemory
 
-    init(aiService: AIService = .shared) {
+    init(
+        aiService: AIService = .shared,
+        routingMemory: VerifiedRoutingMemory = .shared
+    ) {
         self.aiService = aiService
+        self.routingMemory = routingMemory
     }
 
     func select(
@@ -25,6 +30,12 @@ final class CapabilitySelectionService {
         let registry = CapabilityRegistry(capabilities: capabilities)
         let specialist = registry.descriptors.filter { $0.id != "text_task" }
         guard !specialist.isEmpty else { return nil }
+
+        let allowedIds = Set(specialist.map(\.id))
+        if let learned = routingMemory.bestMatch(for: message, allowedCapabilityIds: allowedIds),
+           let capability = capabilities.first(where: { $0.id == learned.capabilityId }) {
+            return capability
+        }
 
         let catalog = specialist.map { descriptor in
             let effects = descriptor.policy.declaredEffects.map(\.rawValue).joined(separator: ",")
@@ -51,7 +62,18 @@ final class CapabilitySelectionService {
         \(message)
         """
 
-        guard let raw = try? await aiService.generateText(prompt: prompt, maxTokens: 300),
+        guard let raw = try? await aiService.generateText(
+            prompt: prompt,
+            maxTokens: 300,
+            context: AIInvocationContext(
+                workload: .classification,
+                capabilityId: "capability_router",
+                taskId: AIExecutionScope.context.taskId,
+                stepId: AIExecutionScope.context.stepId,
+                projectId: AIExecutionScope.context.projectId,
+                operation: "capability_selection"
+            )
+        ),
               let start = raw.firstIndex(of: "{"), let end = raw.lastIndex(of: "}"),
               let data = String(raw[start...end]).data(using: .utf8),
               let decision = try? JSONDecoder().decode(Decision.self, from: data),
