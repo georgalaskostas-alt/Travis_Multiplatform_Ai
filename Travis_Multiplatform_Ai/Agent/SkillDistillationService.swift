@@ -61,6 +61,10 @@ final class SkillDistillationService {
         persist()
     }
 
+    func item(for sourceSkillId: UUID) -> DistilledSkill? {
+        items.first { $0.sourceSkillId == sourceSkillId }
+    }
+
     func diagnosticReport() -> String {
         let grouped = Dictionary(grouping: items, by: \.executionClass)
         let rows = ExecutionClass.allCasesForDiagnostics.map { kind in
