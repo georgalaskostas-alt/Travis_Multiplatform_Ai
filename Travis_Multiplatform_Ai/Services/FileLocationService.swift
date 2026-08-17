@@ -3,22 +3,8 @@ import Foundation
 import AppKit
 #endif
 
-/// Resolves where a generated file should be written.
-///
-/// - `location == nil` → always the app's own sandbox container
-///   (Documents), on both platforms — the app already owns that
-///   directory, no permission needed.
-/// - `location` given, on macOS → somewhere under the user's home
-///   directory (Desktop, Documents, Downloads, ...), which the App
-///   Sandbox blocks by default. Access to that is gated by a single
-///   standing permission (`PersistenceService.isPermissionGranted`,
-///   keyed `"file_save"`) rather than a picker per folder: once granted,
-///   `TextTaskCapability` calls `requestHomeDirectoryAccess()` exactly
-///   once to acquire ONE security-scoped bookmark for the whole home
-///   directory, which covers everything beneath it. This type only ever
-///   resolves an existing bookmark — it never shows UI on its own.
-/// - `location` given, on iOS → ignored; iOS has no Desktop/system-folder
-///   concept, so we fall back to the sandboxed directory.
+/// Resolves where generated files or explicitly requested filesystem operations
+/// may access data. Security-scoped access is never expanded silently.
 @MainActor
 final class FileLocationService {
     static let shared = FileLocationService()
@@ -51,6 +37,59 @@ final class FileLocationService {
         #endif
     }
 
+    /// Resolves an existing user-selected path only when it is contained by the
+    /// persisted security-scoped home bookmark. Relative paths are interpreted
+    /// below that bookmark. Absolute paths must still remain inside it.
+    func resolveExistingPath(_ requestedPath: String) -> ResolvedLocation? {
+        let trimmed = requestedPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        #if os(macOS)
+        guard let bookmarkData = persistence.loadLocationBookmark(for: Self.homeBookmarkKey) else { return nil }
+        var isStale = false
+        guard let rootURL = try? URL(
+            resolvingBookmarkData: bookmarkData,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return nil }
+        guard rootURL.startAccessingSecurityScopedResource() else { return nil }
+
+        if isStale, let refreshed = try? rootURL.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) {
+            persistence.saveLocationBookmark(key: Self.homeBookmarkKey, data: refreshed)
+        }
+
+        let candidate: URL
+        if trimmed.hasPrefix("/") {
+            candidate = URL(fileURLWithPath: trimmed)
+        } else {
+            candidate = rootURL.appendingPathComponent(trimmed)
+        }
+
+        let rootPath = rootURL.standardizedFileURL.resolvingSymlinksInPath().path
+        let candidateURL = candidate.standardizedFileURL.resolvingSymlinksInPath()
+        let candidatePath = candidateURL.path
+        let contained = candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/")
+        guard contained else {
+            rootURL.stopAccessingSecurityScopedResource()
+            return nil
+        }
+
+        guard FileManager.default.fileExists(atPath: candidatePath) else {
+            rootURL.stopAccessingSecurityScopedResource()
+            return nil
+        }
+
+        return ResolvedLocation(url: candidateURL, stopAccessing: { rootURL.stopAccessingSecurityScopedResource() })
+        #else
+        return nil
+        #endif
+    }
+
     private func defaultDirectory() -> ResolvedLocation? {
         guard let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
             return nil
@@ -59,16 +98,11 @@ final class FileLocationService {
     }
 
     #if os(macOS)
-    /// Presents NSOpenPanel pointed at the user's home directory and, if
-    /// granted, persists ONE security-scoped bookmark covering it. Callers
-    /// (the conversational grant flow in `TextTaskCapability`) are
-    /// responsible for calling this exactly once, right after the user
-    /// agrees — never speculatively.
     @discardableResult
     func requestHomeDirectoryAccess() -> Bool {
         let panel = NSOpenPanel()
         panel.title = "Πρόσβαση στον προσωπικό φάκελο"
-        panel.message = "Ο TRAVIS χρειάζεται άδεια πρόσβασης στον προσωπικό σου φάκελο για να μπορεί να αποθηκεύει αρχεία σε θέσεις όπως το Desktop ή τα Documents."
+        panel.message = "Ο TRAVIS χρειάζεται άδεια πρόσβασης στον προσωπικό σου φάκελο για να μπορεί να αποθηκεύει και να διαχειρίζεται αρχεία μόνο μέσα στο scope που επιλέγεις."
         panel.prompt = "Επιλογή"
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
