@@ -24,10 +24,8 @@ enum AgentTaskExecutorError: LocalizedError {
         case .unassignedCapability: return "Το planner δεν ανέθεσε capability σε αυτό το step."
         case .verificationFailed(let reason): return "Η επαλήθευση του step απέτυχε: \(reason)"
         case .emptyCapabilityResult: return "Το capability δεν επέστρεψε αποτέλεσμα που μπορεί να επαληθευτεί."
-        case .capabilityTimedOut(let seconds):
-            return "Το capability ξεπέρασε το execution deadline των \(seconds) δευτερολέπτων και ακυρώθηκε από το watchdog."
-        case .taskBudgetExceeded(let reason):
-            return "Το autonomous task σταμάτησε επειδή εξαντλήθηκε το execution budget: \(reason)"
+        case .capabilityTimedOut(let seconds): return "Το capability ξεπέρασε το execution deadline των \(seconds) δευτερολέπτων."
+        case .taskBudgetExceeded(let reason): return "Το autonomous task σταμάτησε επειδή εξαντλήθηκε το execution budget: \(reason)"
         }
     }
 }
@@ -72,8 +70,7 @@ struct AutonomousRunReport: Codable, Hashable {
 @MainActor
 @Observable
 final class AgentTaskExecutor {
-    static let runtimeFingerprint = "runtime-v1.12-budget-enforced"
-    private static let capabilityTimeoutSeconds = 120
+    static let runtimeFingerprint = "runtime-v1.13-unified-runner"
 
     private let runtime: AgentTaskRuntime
     private let orchestrator: AgentOrchestrator
@@ -82,9 +79,7 @@ final class AgentTaskExecutor {
 
     private var leasedTaskIds: Set<UUID> = []
     private var activeCapabilityTasks: [UUID: Task<CapabilityOutcome, Error>] = [:]
-    private var activeWatchdogs: [UUID: Task<Void, Never>] = [:]
     private var cancellationRequestedTaskIds: Set<UUID> = []
-    private var timeoutTriggeredTaskIds: Set<UUID> = []
 
     private(set) var isExecuting = false
     private(set) var lastExecutionSummary: String?
@@ -110,7 +105,6 @@ final class AgentTaskExecutor {
     func requestCancellation(taskId: UUID, reason: String = "Cancelled by user") -> Bool {
         guard leasedTaskIds.contains(taskId) else { return false }
         cancellationRequestedTaskIds.insert(taskId)
-        activeWatchdogs[taskId]?.cancel()
         activeCapabilityTasks[taskId]?.cancel()
         runtime.pause(taskId: taskId, reason: reason)
         lastExecutionSummary = reason
@@ -145,7 +139,7 @@ final class AgentTaskExecutor {
             runtime.markStepFailed(taskId: taskId, stepId: step.id, error: AgentTaskExecutorError.unassignedCapability.localizedDescription)
             throw AgentTaskExecutorError.unassignedCapability
         }
-        guard let capability = orchestrator.capabilities.first(where: { $0.id == capabilityId }) else {
+        guard orchestrator.capabilities.contains(where: { $0.id == capabilityId }) else {
             let error = AgentTaskExecutorError.missingCapability(capabilityId)
             runtime.markStepFailed(taskId: taskId, stepId: step.id, error: error.localizedDescription)
             throw error
@@ -155,7 +149,7 @@ final class AgentTaskExecutor {
         runtime.checkpoint(
             taskId: taskId,
             summary: "Executing step #\(step.order): \(step.title)",
-            nextAction: "Run capability \(capabilityId)"
+            nextAction: "Run capability \(capabilityId) through UniversalCapabilityRunner"
         )
 
         let trace = "[TRAVIS \(Self.runtimeFingerprint) | capability=\(capabilityId) | step=\(step.order)]"
@@ -163,36 +157,25 @@ final class AgentTaskExecutor {
 
         do {
             try throwIfCancellationRequested(taskId)
+            let command = executionCommand(task: task, step: step)
+            let projectId = ProjectWorkspaceStore.shared.project(containingTask: taskId)?.id
 
-            let capabilityTask = Task<CapabilityOutcome, Error> {
+            let capabilityTask = Task<CapabilityOutcome, Error> { @MainActor [orchestrator] in
                 try Task.checkCancellation()
-                return try await capability.handle(
-                    command: executionCommand(task: task, step: step),
+                return try await orchestrator.executeCapability(
+                    id: capabilityId,
+                    command: command,
+                    taskId: taskId,
+                    stepId: step.id,
+                    projectId: projectId,
                     recentHistory: recentHistory
                 )
             }
             activeCapabilityTasks[taskId] = capabilityTask
-
-            let watchdog = Task { [weak self] in
-                do {
-                    try await Task.sleep(for: .seconds(Self.capabilityTimeoutSeconds))
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled else { return }
-                self?.triggerCapabilityTimeout(taskId: taskId, step: step)
-            }
-            activeWatchdogs[taskId] = watchdog
-
-            defer {
-                watchdog.cancel()
-                activeWatchdogs[taskId] = nil
-                activeCapabilityTasks[taskId] = nil
-            }
+            defer { activeCapabilityTasks[taskId] = nil }
 
             let outcome = try await capabilityTask.value
             try throwIfCancellationRequested(taskId)
-            try throwIfTimedOut(taskId)
 
             switch outcome {
             case .reply(let text):
@@ -200,13 +183,23 @@ final class AgentTaskExecutor {
                     throw AgentTaskExecutorError.emptyCapabilityResult
                 }
 
-                let verification = try await verifier.verify(
-                    taskGoal: task.goal,
-                    step: step,
-                    capabilityResult: text
-                )
+                let verification = try await AIExecutionScope.$context.withValue(
+                    AIInvocationContext(
+                        workload: .verification,
+                        capabilityId: capabilityId,
+                        taskId: taskId,
+                        stepId: step.id,
+                        projectId: projectId,
+                        operation: "autonomous.step.verify"
+                    )
+                ) {
+                    try await verifier.verify(
+                        taskGoal: task.goal,
+                        step: step,
+                        capabilityResult: text
+                    )
+                }
                 try throwIfCancellationRequested(taskId)
-                try throwIfTimedOut(taskId)
 
                 switch verification.verdict {
                 case .pass:
@@ -253,7 +246,6 @@ final class AgentTaskExecutor {
 
             case .proposal(let action):
                 try throwIfCancellationRequested(taskId)
-                try throwIfTimedOut(taskId)
                 approvalGate.submit(action)
                 runtime.markStepWaitingForApproval(taskId: taskId, stepId: step.id)
                 let message = "\(trace)\n🔐 Step #\(step.order) δημιούργησε ενέργεια που απαιτεί έγκριση."
@@ -265,23 +257,24 @@ final class AgentTaskExecutor {
                 throw AgentTaskExecutorError.emptyCapabilityResult
             }
         } catch is CancellationError {
-            if timeoutTriggeredTaskIds.remove(taskId) != nil {
-                let timeoutError = AgentTaskExecutorError.capabilityTimedOut(seconds: Self.capabilityTimeoutSeconds)
-                markTimeoutFailureIfNeeded(taskId: taskId, step: step, error: timeoutError)
-                throw timeoutError
-            }
-
             runtime.pause(taskId: taskId, reason: "Execution cancelled before verified completion")
             lastExecutionSummary = "Execution cancelled"
             onProgress?("\(trace)\n⏹️ Step #\(step.order) ακυρώθηκε με ασφάλεια πριν από verified completion.")
             throw CancellationError()
-        } catch {
-            if timeoutTriggeredTaskIds.remove(taskId) != nil {
-                let timeoutError = AgentTaskExecutorError.capabilityTimedOut(seconds: Self.capabilityTimeoutSeconds)
-                markTimeoutFailureIfNeeded(taskId: taskId, step: step, error: timeoutError)
-                throw timeoutError
+        } catch let error as UniversalCapabilityRunner.RunnerError {
+            if case .timedOut(let seconds) = error {
+                let mapped = AgentTaskExecutorError.capabilityTimedOut(seconds: seconds)
+                if let latestTask = runtime.task(id: taskId),
+                   let latestStep = latestTask.plan.steps.first(where: { $0.id == step.id }),
+                   latestStep.status == .running {
+                    runtime.markStepFailed(taskId: taskId, stepId: step.id, error: mapped.localizedDescription)
+                }
+                lastExecutionSummary = mapped.localizedDescription
+                onProgress?("\(trace)\n⏱️ Step #\(step.order) timed out: \(mapped.localizedDescription)")
+                throw mapped
             }
-
+            throw error
+        } catch {
             if let latestTask = runtime.task(id: taskId),
                let latestStep = latestTask.plan.steps.first(where: { $0.id == step.id }),
                latestStep.status == .running {
@@ -351,10 +344,7 @@ final class AgentTaskExecutor {
                 guard let latest = runtime.task(id: taskId) else { throw AgentTaskExecutorError.taskNotFound }
 
                 if latest.status == .running, let retryStep = runtime.nextRunnableStep(taskId: taskId) {
-                    let backoffSeconds = min(
-                        Int(pow(2.0, Double(max(0, retryStep.attemptCount - 1)))),
-                        8
-                    )
+                    let backoffSeconds = min(Int(pow(2.0, Double(max(0, retryStep.attemptCount - 1)))), 8)
                     let retryMessage = retryStep.lastError.map {
                         "Retrying step #\(retryStep.order) in \(backoffSeconds)s (attempt \(retryStep.attemptCount + 1)/\(retryStep.maxAttempts)): \($0)"
                     } ?? "Retrying step #\(retryStep.order) in \(backoffSeconds)s: \(retryStep.title)"
@@ -393,18 +383,7 @@ final class AgentTaskExecutor {
                 return "wall-clock runtime budget reached (\(Int(elapsed))s/\(Int(maxRuntimeSeconds))s)"
             }
         }
-
         return nil
-    }
-
-    private func triggerCapabilityTimeout(taskId: UUID, step: PlanStep) {
-        guard leasedTaskIds.contains(taskId),
-              runtime.task(id: taskId)?.plan.steps.first(where: { $0.id == step.id })?.status == .running
-        else { return }
-
-        timeoutTriggeredTaskIds.insert(taskId)
-        activeCapabilityTasks[taskId]?.cancel()
-        onProgress?("⏱️ Watchdog: step #\(step.order) ξεπέρασε τα \(Self.capabilityTimeoutSeconds)s. Ακυρώνεται για controlled retry.")
     }
 
     private func throwIfCancellationRequested(_ taskId: UUID) throws {
@@ -413,48 +392,24 @@ final class AgentTaskExecutor {
         }
     }
 
-    private func throwIfTimedOut(_ taskId: UUID) throws {
-        if timeoutTriggeredTaskIds.contains(taskId) {
-            throw AgentTaskExecutorError.capabilityTimedOut(seconds: Self.capabilityTimeoutSeconds)
-        }
-    }
-
-    private func markTimeoutFailureIfNeeded(taskId: UUID, step: PlanStep, error: Error) {
-        if let latestTask = runtime.task(id: taskId),
-           let latestStep = latestTask.plan.steps.first(where: { $0.id == step.id }),
-           latestStep.status == .running {
-            runtime.markStepFailed(taskId: taskId, stepId: step.id, error: error.localizedDescription)
-        }
-        lastExecutionSummary = error.localizedDescription
-        onProgress?("⏱️ Step #\(step.order) timed out: \(error.localizedDescription)")
-    }
-
     private func acquireExecutionLease(taskId: UUID) throws {
         guard !leasedTaskIds.contains(taskId) else {
             throw AgentTaskExecutorError.taskAlreadyExecuting(taskId)
         }
         cancellationRequestedTaskIds.remove(taskId)
-        timeoutTriggeredTaskIds.remove(taskId)
         leasedTaskIds.insert(taskId)
         isExecuting = true
     }
 
     private func releaseExecutionLease(taskId: UUID) {
-        activeWatchdogs[taskId]?.cancel()
-        activeWatchdogs[taskId] = nil
         activeCapabilityTasks[taskId]?.cancel()
         activeCapabilityTasks[taskId] = nil
         cancellationRequestedTaskIds.remove(taskId)
-        timeoutTriggeredTaskIds.remove(taskId)
         leasedTaskIds.remove(taskId)
         isExecuting = !leasedTaskIds.isEmpty
     }
 
-    private func makeRunReport(
-        task: AgentTask,
-        reason: AutonomousRunStopReason,
-        stepsAttempted: Int
-    ) -> AutonomousRunReport {
+    private func makeRunReport(task: AgentTask, reason: AutonomousRunStopReason, stepsAttempted: Int) -> AutonomousRunReport {
         let nextStep = runtime.nextRunnableStep(taskId: task.id)
         return AutonomousRunReport(
             taskId: task.id,
@@ -505,9 +460,7 @@ final class AgentTaskExecutor {
     private func dependencyEvidenceBlock(task: AgentTask, step: PlanStep) -> String {
         guard !step.dependencyStepIds.isEmpty else { return "None — this step has no dependencies." }
         let dependencyIds = Set(step.dependencyStepIds)
-        let dependencies = task.plan.steps
-            .filter { dependencyIds.contains($0.id) }
-            .sorted { $0.order < $1.order }
+        let dependencies = task.plan.steps.filter { dependencyIds.contains($0.id) }.sorted { $0.order < $1.order }
         var sections: [String] = []
         var totalCharacters = 0
         let maxTotalCharacters = 80_000
@@ -517,8 +470,7 @@ final class AgentTaskExecutor {
             guard totalCharacters < maxTotalCharacters else { break }
             guard dependency.status == .completed,
                   let result = dependency.resultSummary,
-                  !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            else {
+                  !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 sections.append("--- DEPENDENCY STEP #\(dependency.order): \(dependency.title) ---\nNo verified result is available.")
                 continue
             }
@@ -526,16 +478,12 @@ final class AgentTaskExecutor {
             let remaining = maxTotalCharacters - totalCharacters
             let allowed = min(maxCharactersPerDependency, remaining)
             let clipped = String(result.prefix(allowed))
-            let truncation = result.count > clipped.count
-                ? "\n[DEPENDENCY RESULT TRUNCATED BY EXECUTION CONTEXT BUDGET]"
-                : ""
+            let truncation = result.count > clipped.count ? "\n[DEPENDENCY RESULT TRUNCATED BY EXECUTION CONTEXT BUDGET]" : ""
             sections.append("--- DEPENDENCY STEP #\(dependency.order): \(dependency.title) ---\n\(clipped)\(truncation)")
             totalCharacters += clipped.count
         }
 
-        return sections.isEmpty
-            ? "No completed dependency evidence is available."
-            : sections.joined(separator: "\n\n")
+        return sections.isEmpty ? "No completed dependency evidence is available." : sections.joined(separator: "\n\n")
     }
 }
 
@@ -547,15 +495,8 @@ final class AgentStepVerifier {
         self.aiService = aiService
     }
 
-    func verify(
-        taskGoal: String,
-        step: PlanStep,
-        capabilityResult: String
-    ) async throws -> StepVerificationResult {
-        let criteria = step.successCriteria.enumerated()
-            .map { "\($0.offset + 1). \($0.element)" }
-            .joined(separator: "\n")
-
+    func verify(taskGoal: String, step: PlanStep, capabilityResult: String) async throws -> StepVerificationResult {
+        let criteria = step.successCriteria.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
         let basePrompt = """
         You are the scope-aware verification component of TRAVIS.
 
@@ -597,7 +538,6 @@ final class AgentStepVerifier {
 
         for attempt in 1...maxDecodeAttempts {
             try Task.checkCancellation()
-
             let prompt: String
             if attempt == 1 {
                 prompt = basePrompt
@@ -615,10 +555,7 @@ final class AgentStepVerifier {
                 """
             }
 
-            let raw = try await aiService.generateText(
-                prompt: prompt,
-                maxTokens: attempt == 1 ? 1200 : 500
-            )
+            let raw = try await aiService.generateText(prompt: prompt, maxTokens: attempt == 1 ? 1200 : 500)
             try Task.checkCancellation()
             lastRaw = raw
 
@@ -630,9 +567,7 @@ final class AgentStepVerifier {
         }
 
         let preview = String(lastRaw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(400))
-        throw AgentTaskExecutorError.verificationFailed(
-            "Verifier returned malformed JSON after \(maxDecodeAttempts) attempts. \(lastDiagnostic). Response preview: \(preview)"
-        )
+        throw AgentTaskExecutorError.verificationFailed("Verifier returned malformed JSON after \(maxDecodeAttempts) attempts. \(lastDiagnostic). Response preview: \(preview)")
     }
 
     private func decodeVerifierResult(_ raw: String) throws -> StepVerificationResult {
@@ -640,7 +575,6 @@ final class AgentStepVerifier {
         guard let data = json.data(using: .utf8) else {
             throw AgentTaskExecutorError.verificationFailed("Verifier response was not UTF-8 JSON.")
         }
-
         let result = try JSONDecoder().decode(StepVerificationResult.self, from: data)
         return StepVerificationResult(
             verdict: result.verdict,
@@ -651,10 +585,7 @@ final class AgentStepVerifier {
     }
 
     private func verifierDecodeDiagnostic(_ error: Error) -> String {
-        guard let decodingError = error as? DecodingError else {
-            return error.localizedDescription
-        }
-
+        guard let decodingError = error as? DecodingError else { return error.localizedDescription }
         switch decodingError {
         case .dataCorrupted(let context):
             return "dataCorrupted at \(context.codingPath.map(\.stringValue).joined(separator: ".")): \(context.debugDescription)"
@@ -679,9 +610,7 @@ private extension String {
             value.removeFirst(3)
         }
         value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if value.hasSuffix("```") {
-            value.removeLast(3)
-        }
+        if value.hasSuffix("```") { value.removeLast(3) }
         return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -694,34 +623,21 @@ private extension String {
 
         for index in chars.indices {
             let char = chars[index]
-
             if inString {
-                if escaped {
-                    escaped = false
-                } else if char == "\\" {
-                    escaped = true
-                } else if char == "\"" {
-                    inString = false
-                }
+                if escaped { escaped = false }
+                else if char == "\\" { escaped = true }
+                else if char == "\"" { inString = false }
                 continue
             }
-
-            if char == "\"" {
-                inString = true
-                continue
-            }
-
+            if char == "\"" { inString = true; continue }
             if char == "{" {
                 if depth == 0 { start = index }
                 depth += 1
             } else if char == "}", depth > 0 {
                 depth -= 1
-                if depth == 0, let start {
-                    return String(chars[start...index])
-                }
+                if depth == 0, let start { return String(chars[start...index]) }
             }
         }
-
         return nil
     }
 }
