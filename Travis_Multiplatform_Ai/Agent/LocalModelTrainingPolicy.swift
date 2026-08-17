@@ -151,6 +151,15 @@ final class LocalModelTrainingPolicy {
         persist()
     }
 
+    func reject(candidateId: UUID, reason: String) {
+        guard let index = candidates.firstIndex(where: { $0.id == candidateId }),
+              candidates[index].stage != .promoted else { return }
+        candidates[index].stage = .rejected
+        candidates[index].rejectionReason = reason
+        candidates[index].updatedAt = Date()
+        persist()
+    }
+
     /// Promotion is deliberately explicit and must provide the inference model
     /// identifier exposed by the local runtime. Evaluation alone never changes
     /// production routing.
@@ -170,8 +179,11 @@ final class LocalModelTrainingPolicy {
         return true
     }
 
+    /// Rollback applies only to a model that actually reached production. A
+    /// failed training candidate must use reject(_:reason:) instead.
     func rollback(candidateId: UUID, reason: String) {
-        guard let index = candidates.firstIndex(where: { $0.id == candidateId }) else { return }
+        guard let index = candidates.firstIndex(where: { $0.id == candidateId }),
+              candidates[index].stage == .promoted else { return }
         candidates[index].stage = .rolledBack
         candidates[index].rejectionReason = reason
         candidates[index].updatedAt = Date()
