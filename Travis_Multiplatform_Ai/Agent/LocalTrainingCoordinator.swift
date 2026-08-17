@@ -18,6 +18,7 @@ final class LocalTrainingCoordinator {
 
     private(set) var activeRuns: [ActiveRun] = []
     private(set) var lastError: String?
+    private(set) var lastBackendCapabilities: LocalTrainerBridge.Capabilities?
 
     private let policy: LocalModelTrainingPolicy
     private let manifestService: LocalTrainingManifestService
@@ -42,25 +43,46 @@ final class LocalTrainingCoordinator {
         let health = try await backend.health()
         guard health.ready else { throw LocalTrainerBridge.BridgeError.unavailable }
 
+        let capabilities = try await backend.capabilities()
+        lastBackendCapabilities = capabilities
+        guard capabilities.supports(kind: kind) else {
+            throw LocalTrainerBridge.BridgeError.unsupportedDatasetKind(kind.rawValue)
+        }
+
         guard let candidate = policy.registerTrainingCandidate(name: name, kind: kind) else {
             let eligibility = policy.eligibility(for: kind)
             throw LocalTrainingCoordinatorError.datasetNotEligible(eligibility.reason)
         }
 
         let manifest = try manifestService.prepareExport(kind: kind, baseModel: baseModel)
-        let job = try await backend.startTraining(manifest: manifest)
-        let run = ActiveRun(
-            id: UUID(),
-            candidateId: candidate.id,
-            manifestId: manifest.id,
-            backendJobId: job.id,
-            state: job.state,
-            progress: job.progress,
-            lastUpdatedAt: Date()
-        )
-        activeRuns.append(run)
-        lastError = nil
-        return run
+        if let maxExamples = capabilities.maxTrainingExamples,
+           manifest.trainingCount > maxExamples {
+            policy.reject(candidateId: candidate.id, reason: "Training export exceeds backend maxTrainingExamples=\(maxExamples).")
+            throw LocalTrainingCoordinatorError.backendCapacityExceeded(
+                requested: manifest.trainingCount,
+                maximum: maxExamples
+            )
+        }
+
+        do {
+            let job = try await backend.startTraining(manifest: manifest)
+            let run = ActiveRun(
+                id: UUID(),
+                candidateId: candidate.id,
+                manifestId: manifest.id,
+                backendJobId: job.id,
+                state: job.state,
+                progress: job.progress,
+                lastUpdatedAt: Date()
+            )
+            activeRuns.append(run)
+            lastError = nil
+            return run
+        } catch {
+            policy.reject(candidateId: candidate.id, reason: "Training worker failed to start: \(error.localizedDescription)")
+            lastError = error.localizedDescription
+            throw error
+        }
     }
 
     func refresh(runId: UUID) async throws -> ActiveRun? {
@@ -92,17 +114,41 @@ final class LocalTrainingCoordinator {
         return activeRuns[index]
     }
 
+    @discardableResult
+    func cancel(runId: UUID) async throws -> ActiveRun? {
+        guard let index = activeRuns.firstIndex(where: { $0.id == runId }) else { return nil }
+        let job = try await backend.cancelJob(id: activeRuns[index].backendJobId)
+        activeRuns[index].state = job.state
+        activeRuns[index].progress = job.progress
+        activeRuns[index].lastUpdatedAt = Date()
+
+        if job.state == .cancelled {
+            policy.reject(candidateId: activeRuns[index].candidateId, reason: "Training run cancelled before evaluation.")
+        }
+        return activeRuns[index]
+    }
+
     func diagnosticReport() -> String {
         let rows = activeRuns.suffix(10).map { run in
             let progress = run.progress.map { " \(Int(min(max($0, 0), 1) * 100))%" } ?? ""
             return "\(run.backendJobId) [\(run.state.rawValue)]\(progress) candidate=\(String(run.candidateId.uuidString.prefix(8)))"
         }.joined(separator: "\n")
 
+        let capabilitiesText: String
+        if let value = lastBackendCapabilities {
+            capabilitiesText = "datasets=\(value.supportedDatasetKinds.joined(separator: ",")) methods=\(value.supportedTrainingMethods.joined(separator: ",")) accelerator=\(value.accelerator ?? "unknown") maxExamples=\(value.maxTrainingExamples.map(String.init) ?? "unknown")"
+        } else {
+            capabilitiesText = "not queried yet"
+        }
+
         return """
         TRAVIS LOCAL TRAINING COORDINATOR
 
         BACKEND
         \(backend.backendId)
+
+        BACKEND CAPABILITIES
+        \(capabilitiesText)
 
         ACTIVE / RECENT RUNS
         \(rows.isEmpty ? "κανένα" : rows)
@@ -115,10 +161,14 @@ final class LocalTrainingCoordinator {
 
 private enum LocalTrainingCoordinatorError: LocalizedError {
     case datasetNotEligible(String)
+    case backendCapacityExceeded(requested: Int, maximum: Int)
 
     var errorDescription: String? {
         switch self {
-        case .datasetNotEligible(let reason): return "Local training cannot start yet: \(reason)"
+        case .datasetNotEligible(let reason):
+            return "Local training cannot start yet: \(reason)"
+        case .backendCapacityExceeded(let requested, let maximum):
+            return "Local training export contains \(requested) examples but the configured worker supports at most \(maximum)."
         }
     }
 }
