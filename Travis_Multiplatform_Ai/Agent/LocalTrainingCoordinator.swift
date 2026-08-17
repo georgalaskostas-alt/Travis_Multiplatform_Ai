@@ -82,7 +82,7 @@ final class LocalTrainingCoordinator {
                 artifactLocation: job.artifactLocation
             )
         } else if job.state == .failed {
-            policy.rollback(
+            policy.reject(
                 candidateId: activeRuns[index].candidateId,
                 reason: job.error ?? "Local trainer reported failure."
             )
