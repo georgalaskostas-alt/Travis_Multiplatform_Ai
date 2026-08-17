@@ -22,295 +22,81 @@ struct AgentTask: Identifiable, Codable, Hashable {
     var budget: TaskExecutionBudget
 
     init(
-        id: UUID = UUID(),
-        goal: String,
-        title: String? = nil,
-        status: AgentTaskStatus = .pending,
-        priority: AgentTaskPriority = .medium,
-        plan: TaskPlan = TaskPlan(),
-        executionState: TaskExecutionState = TaskExecutionState(),
-        createdAt: Date = Date(),
-        updatedAt: Date = Date(),
-        startedAt: Date? = nil,
-        completedAt: Date? = nil,
-        dueDate: Date? = nil,
-        failureReason: String? = nil,
-        artifacts: [TaskArtifact] = [],
-        events: [TaskEvent] = [],
+        id: UUID = UUID(), goal: String, title: String? = nil,
+        status: AgentTaskStatus = .pending, priority: AgentTaskPriority = .medium,
+        plan: TaskPlan = TaskPlan(), executionState: TaskExecutionState = TaskExecutionState(),
+        createdAt: Date = Date(), updatedAt: Date = Date(), startedAt: Date? = nil,
+        completedAt: Date? = nil, dueDate: Date? = nil, failureReason: String? = nil,
+        artifacts: [TaskArtifact] = [], events: [TaskEvent] = [],
         budget: TaskExecutionBudget = TaskExecutionBudget()
     ) {
-        self.id = id
-        self.goal = goal
-        self.title = title ?? String(goal.prefix(72))
-        self.status = status
-        self.priority = priority
-        self.plan = plan
-        self.executionState = executionState
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-        self.startedAt = startedAt
-        self.completedAt = completedAt
-        self.dueDate = dueDate
-        self.failureReason = failureReason
-        self.artifacts = artifacts
-        self.events = events
-        self.budget = budget
+        self.id = id; self.goal = goal; self.title = title ?? String(goal.prefix(72)); self.status = status
+        self.priority = priority; self.plan = plan; self.executionState = executionState; self.createdAt = createdAt
+        self.updatedAt = updatedAt; self.startedAt = startedAt; self.completedAt = completedAt; self.dueDate = dueDate
+        self.failureReason = failureReason; self.artifacts = artifacts; self.events = events; self.budget = budget
     }
 }
 
-enum AgentTaskStatus: String, Codable, CaseIterable {
-    case pending
-    case planning
-    case running
-    case waitingForApproval
-    case waitingForDependency
-    case paused
-    case completed
-    case failed
-    case cancelled
-}
-
-enum AgentTaskPriority: String, Codable, CaseIterable {
-    case low
-    case medium
-    case high
-    case critical
-}
+enum AgentTaskStatus: String, Codable, CaseIterable { case pending, planning, running, waitingForApproval, waitingForDependency, paused, completed, failed, cancelled }
+enum AgentTaskPriority: String, Codable, CaseIterable { case low, medium, high, critical }
 
 struct TaskPlan: Identifiable, Codable, Hashable {
-    let id: UUID
-    var version: Int
-    var summary: String
-    var steps: [PlanStep]
-    var createdAt: Date
-    var updatedAt: Date
-
-    init(
-        id: UUID = UUID(),
-        version: Int = 1,
-        summary: String = "",
-        steps: [PlanStep] = [],
-        createdAt: Date = Date(),
-        updatedAt: Date = Date()
-    ) {
-        self.id = id
-        self.version = version
-        self.summary = summary
-        self.steps = steps
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
+    let id: UUID; var version: Int; var summary: String; var steps: [PlanStep]; var createdAt: Date; var updatedAt: Date
+    init(id: UUID = UUID(), version: Int = 1, summary: String = "", steps: [PlanStep] = [], createdAt: Date = Date(), updatedAt: Date = Date()) {
+        self.id = id; self.version = version; self.summary = summary; self.steps = steps; self.createdAt = createdAt; self.updatedAt = updatedAt
     }
 }
 
 struct PlanStep: Identifiable, Codable, Hashable {
     let id: UUID
-    var order: Int
-    var title: String
-    var instructions: String
-    var status: PlanStepStatus
-    var capabilityId: String?
-    var dependencyStepIds: [UUID]
+    var order: Int; var title: String; var instructions: String; var status: PlanStepStatus; var capabilityId: String?; var dependencyStepIds: [UUID]
+    var successCriteria: [String]; var riskLevel: PlanStepRiskLevel; var requiresApproval: Bool; var canRunInBackground: Bool; var estimatedEffort: PlanStepEffort
+    var attemptCount: Int; var maxAttempts: Int; var startedAt: Date?; var completedAt: Date?; var lastError: String?; var resultSummary: String?
 
-    /// Observable conditions that must be true for the step
-    /// to be considered successfully completed.
-    var successCriteria: [String]
-
-    /// Planner-assigned risk classification.
-    /// This is informational input for the future Policy Engine.
-    /// It must never be treated as the final authority by itself.
-    var riskLevel: PlanStepRiskLevel
-
-    /// Whether execution must pause for explicit approval.
-    var requiresApproval: Bool
-
-    /// Whether this step is eligible for background execution.
-    var canRunInBackground: Bool
-
-    /// Coarse expected effort category from the planner.
-    var estimatedEffort: PlanStepEffort
-
-    var attemptCount: Int
-    var maxAttempts: Int
-    var startedAt: Date?
-    var completedAt: Date?
-    var lastError: String?
-    var resultSummary: String?
-
-    init(
-        id: UUID = UUID(),
-        order: Int,
-        title: String,
-        instructions: String = "",
-        status: PlanStepStatus = .pending,
-        capabilityId: String? = nil,
-        dependencyStepIds: [UUID] = [],
-        successCriteria: [String] = [],
-        riskLevel: PlanStepRiskLevel = .low,
-        requiresApproval: Bool = false,
-        canRunInBackground: Bool = true,
-        estimatedEffort: PlanStepEffort = .short,
-        attemptCount: Int = 0,
-        maxAttempts: Int = 3,
-        startedAt: Date? = nil,
-        completedAt: Date? = nil,
-        lastError: String? = nil,
-        resultSummary: String? = nil
-    ) {
-        self.id = id
-        self.order = order
-        self.title = title
-        self.instructions = instructions
-        self.status = status
-        self.capabilityId = capabilityId
-        self.dependencyStepIds = dependencyStepIds
-        self.successCriteria = successCriteria
-        self.riskLevel = riskLevel
-        self.requiresApproval = requiresApproval
-        self.canRunInBackground = canRunInBackground
-        self.estimatedEffort = estimatedEffort
-        self.attemptCount = attemptCount
-        self.maxAttempts = maxAttempts
-        self.startedAt = startedAt
-        self.completedAt = completedAt
-        self.lastError = lastError
-        self.resultSummary = resultSummary
+    init(id: UUID = UUID(), order: Int, title: String, instructions: String = "", status: PlanStepStatus = .pending,
+         capabilityId: String? = nil, dependencyStepIds: [UUID] = [], successCriteria: [String] = [], riskLevel: PlanStepRiskLevel = .low,
+         requiresApproval: Bool = false, canRunInBackground: Bool = true, estimatedEffort: PlanStepEffort = .short,
+         attemptCount: Int = 0, maxAttempts: Int = 3, startedAt: Date? = nil, completedAt: Date? = nil,
+         lastError: String? = nil, resultSummary: String? = nil) {
+        self.id = id; self.order = order; self.title = title; self.instructions = instructions; self.status = status
+        self.capabilityId = capabilityId; self.dependencyStepIds = dependencyStepIds; self.successCriteria = successCriteria
+        self.riskLevel = riskLevel; self.requiresApproval = requiresApproval; self.canRunInBackground = canRunInBackground
+        self.estimatedEffort = estimatedEffort; self.attemptCount = attemptCount; self.maxAttempts = maxAttempts
+        self.startedAt = startedAt; self.completedAt = completedAt; self.lastError = lastError; self.resultSummary = resultSummary
     }
 }
 
-enum PlanStepRiskLevel: String, Codable, CaseIterable {
-    case low
-    case medium
-    case high
-    case critical
-}
-
-enum PlanStepEffort: String, Codable, CaseIterable {
-    case short
-    case medium
-    case long
-}
-
-enum PlanStepStatus: String, Codable, CaseIterable {
-    case pending
-    case ready
-    case running
-    case waitingForApproval
-    case waitingForDependency
-    case completed
-    case failed
-    case skipped
-    case cancelled
-}
+enum PlanStepRiskLevel: String, Codable, CaseIterable { case low, medium, high, critical }
+enum PlanStepEffort: String, Codable, CaseIterable { case short, medium, long }
+enum PlanStepStatus: String, Codable, CaseIterable { case pending, ready, running, waitingForApproval, waitingForDependency, completed, failed, skipped, cancelled }
 
 struct TaskExecutionState: Codable, Hashable {
-    var currentStepId: UUID?
-    var lastCheckpoint: TaskCheckpoint?
-    var consecutiveFailures: Int
-    var replanCount: Int
-    var lastHeartbeatAt: Date?
-    var nextEligibleRunAt: Date?
-
-    init(
-        currentStepId: UUID? = nil,
-        lastCheckpoint: TaskCheckpoint? = nil,
-        consecutiveFailures: Int = 0,
-        replanCount: Int = 0,
-        lastHeartbeatAt: Date? = nil,
-        nextEligibleRunAt: Date? = nil
-    ) {
-        self.currentStepId = currentStepId
-        self.lastCheckpoint = lastCheckpoint
-        self.consecutiveFailures = consecutiveFailures
-        self.replanCount = replanCount
-        self.lastHeartbeatAt = lastHeartbeatAt
-        self.nextEligibleRunAt = nextEligibleRunAt
+    var currentStepId: UUID?; var lastCheckpoint: TaskCheckpoint?; var consecutiveFailures: Int; var replanCount: Int; var lastHeartbeatAt: Date?; var nextEligibleRunAt: Date?
+    init(currentStepId: UUID? = nil, lastCheckpoint: TaskCheckpoint? = nil, consecutiveFailures: Int = 0, replanCount: Int = 0,
+         lastHeartbeatAt: Date? = nil, nextEligibleRunAt: Date? = nil) {
+        self.currentStepId = currentStepId; self.lastCheckpoint = lastCheckpoint; self.consecutiveFailures = consecutiveFailures
+        self.replanCount = replanCount; self.lastHeartbeatAt = lastHeartbeatAt; self.nextEligibleRunAt = nextEligibleRunAt
     }
 }
 
 struct TaskCheckpoint: Identifiable, Codable, Hashable {
-    let id: UUID
-    var taskId: UUID
-    var stepId: UUID?
-    var summary: String
-    var nextAction: String?
-    var createdAt: Date
-
-    init(
-        id: UUID = UUID(),
-        taskId: UUID,
-        stepId: UUID? = nil,
-        summary: String,
-        nextAction: String? = nil,
-        createdAt: Date = Date()
-    ) {
-        self.id = id
-        self.taskId = taskId
-        self.stepId = stepId
-        self.summary = summary
-        self.nextAction = nextAction
-        self.createdAt = createdAt
+    let id: UUID; var taskId: UUID; var stepId: UUID?; var summary: String; var nextAction: String?; var createdAt: Date
+    init(id: UUID = UUID(), taskId: UUID, stepId: UUID? = nil, summary: String, nextAction: String? = nil, createdAt: Date = Date()) {
+        self.id = id; self.taskId = taskId; self.stepId = stepId; self.summary = summary; self.nextAction = nextAction; self.createdAt = createdAt
     }
 }
 
 struct TaskEvent: Identifiable, Codable, Hashable {
-    let id: UUID
-    var type: TaskEventType
-    var message: String
-    var createdAt: Date
-
-    init(
-        id: UUID = UUID(),
-        type: TaskEventType,
-        message: String,
-        createdAt: Date = Date()
-    ) {
-        self.id = id
-        self.type = type
-        self.message = message
-        self.createdAt = createdAt
-    }
+    let id: UUID; var type: TaskEventType; var message: String; var createdAt: Date
+    init(id: UUID = UUID(), type: TaskEventType, message: String, createdAt: Date = Date()) { self.id = id; self.type = type; self.message = message; self.createdAt = createdAt }
 }
 
-enum TaskEventType: String, Codable, CaseIterable {
-    case created
-    case planned
-    case started
-    case progress
-    case checkpoint
-    case approvalRequested
-    case approvalGranted
-    case approvalRejected
-    case retry
-    case replanned
-    case paused
-    case resumed
-    case completed
-    case failed
-    case cancelled
-}
+enum TaskEventType: String, Codable, CaseIterable { case created, planned, started, progress, checkpoint, approvalRequested, approvalGranted, approvalRejected, retry, replanned, paused, resumed, completed, failed, cancelled }
 
 struct TaskArtifact: Identifiable, Codable, Hashable {
-    let id: UUID
-    var name: String
-    var kind: String
-    var location: String?
-    var summary: String?
-    var createdAt: Date
-
-    init(
-        id: UUID = UUID(),
-        name: String,
-        kind: String,
-        location: String? = nil,
-        summary: String? = nil,
-        createdAt: Date = Date()
-    ) {
-        self.id = id
-        self.name = name
-        self.kind = kind
-        self.location = location
-        self.summary = summary
-        self.createdAt = createdAt
+    let id: UUID; var name: String; var kind: String; var location: String?; var summary: String?; var createdAt: Date
+    init(id: UUID = UUID(), name: String, kind: String, location: String? = nil, summary: String? = nil, createdAt: Date = Date()) {
+        self.id = id; self.name = name; self.kind = kind; self.location = location; self.summary = summary; self.createdAt = createdAt
     }
 }
 
@@ -320,15 +106,28 @@ struct TaskExecutionBudget: Codable, Hashable {
     var maxRetriesPerStep: Int
     var maxReplans: Int
 
+    /// Hard provider-usage ceiling. This remains enforceable even when a model
+    /// does not yet have verified price metadata.
+    var maxAITokens: Int?
+
+    /// Optional monetary ceiling. Enforcement is possible only for usage with
+    /// configured/verified model pricing; unknown-price usage remains visible
+    /// and must never be silently treated as zero-cost.
+    var maxAICostUSD: Double?
+
     init(
         maxRuntimeSeconds: TimeInterval? = nil,
         maxSteps: Int? = 100,
         maxRetriesPerStep: Int = 3,
-        maxReplans: Int = 10
+        maxReplans: Int = 10,
+        maxAITokens: Int? = 500_000,
+        maxAICostUSD: Double? = nil
     ) {
         self.maxRuntimeSeconds = maxRuntimeSeconds
         self.maxSteps = maxSteps
         self.maxRetriesPerStep = maxRetriesPerStep
         self.maxReplans = maxReplans
+        self.maxAITokens = maxAITokens
+        self.maxAICostUSD = maxAICostUSD
     }
 }
