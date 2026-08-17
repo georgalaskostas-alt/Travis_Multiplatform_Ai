@@ -27,7 +27,11 @@ struct AIProviderPreferences {
     }
     var localModel: String? {
         guard localEnabled else { return nil }
-        return normalized(defaults.string(forKey: Key.localModel))
+        // Explicitly promoted trained models take precedence. The manually
+        // configured model remains a safe bootstrap/fallback when no trained
+        // model has been promoted yet.
+        return LocalModelRegistry.shared.activeModelId
+            ?? normalized(defaults.string(forKey: Key.localModel))
     }
 
     func openRouterModel(for workload: AIWorkloadClass) -> String? {
