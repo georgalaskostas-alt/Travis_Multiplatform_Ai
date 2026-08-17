@@ -29,7 +29,7 @@ final class AIUsageLedger {
     }
 
     func record(selection: AIModelSelection, context: AIInvocationContext, usage: AITokenUsage, latencyMilliseconds: Int, attempt: Int, succeeded: Bool, errorType: String? = nil) {
-        let price = pricing[pricingKey(provider: selection.provider, model: selection.model)]
+        let price = pricingFor(provider: selection.provider, model: selection.model)
         let estimatedCost = price?.estimatedCost(for: usage)
         records.append(AIUsageRecord(provider: selection.provider, model: selection.model, tier: selection.tier, context: context, usage: usage, estimatedCostUSD: estimatedCost, latencyMilliseconds: latencyMilliseconds, attempt: attempt, succeeded: succeeded, errorType: errorType))
         if records.count > maxRecords { records.removeFirst(records.count - maxRecords) }
@@ -46,6 +46,23 @@ final class AIUsageLedger {
         pricing.removeValue(forKey: pricingKey(provider: provider, model: model))
         recomputeEstimatedCosts()
         persist()
+    }
+
+    func pricingFor(provider: AIProvider, model: String) -> AIModelPricing? {
+        pricing[pricingKey(provider: provider, model: model)]
+    }
+
+    func taskUsage(taskId: UUID) -> AITokenUsage {
+        records.lazy.filter { $0.taskId == taskId }.reduce(into: AITokenUsage()) { result, record in
+            result.inputTokens += record.usage.inputTokens
+            result.outputTokens += record.usage.outputTokens
+            result.cachedInputTokens += record.usage.cachedInputTokens
+            result.reasoningTokens += record.usage.reasoningTokens
+        }
+    }
+
+    func hasUnknownCostUsage(taskId: UUID) -> Bool {
+        records.contains { $0.taskId == taskId && $0.succeeded && $0.estimatedCostUSD == nil && $0.usage.totalTokens > 0 }
     }
 
     func estimatedSpendUSD(since date: Date? = nil, taskId: UUID? = nil) -> Double {
@@ -69,7 +86,16 @@ final class AIUsageLedger {
         let monthUsage = usageSummary(since: startOfMonth)
         let todayCost = estimatedSpendUSD(since: startOfDay)
         let monthCost = estimatedSpendUSD(since: startOfMonth)
-        let unknownCostRecords = records.filter { $0.estimatedCostUSD == nil && $0.succeeded }.count
+        let unknownCostRecords = records.filter { $0.estimatedCostUSD == nil && $0.succeeded && $0.usage.totalTokens > 0 }.count
+
+        let providerRows = Dictionary(grouping: records, by: { $0.provider.rawValue })
+            .map { provider, values in
+                let tokens = values.reduce(0) { $0 + $1.usage.totalTokens }
+                let cost = values.compactMap(\.estimatedCostUSD).reduce(0, +)
+                return "\(provider): \(tokens) tokens | $\(String(format: "%.4f", cost)) estimated"
+            }
+            .sorted()
+            .joined(separator: "\n")
 
         return """
         TRAVIS AI USAGE
@@ -87,6 +113,9 @@ final class AIUsageLedger {
         cached input: \(monthUsage.cachedInputTokens)
         output: \(monthUsage.outputTokens)
         reasoning: \(monthUsage.reasoningTokens)
+
+        BY PROVIDER
+        \(providerRows.isEmpty ? "No usage yet" : providerRows)
 
         RECORDS
         \(records.count)
@@ -115,7 +144,7 @@ final class AIUsageLedger {
     private func recomputeEstimatedCosts() {
         for index in records.indices {
             let record = records[index]
-            let price = pricing[pricingKey(provider: record.provider, model: record.model)]
+            let price = pricingFor(provider: record.provider, model: record.model)
             records[index].estimatedCostUSD = price?.estimatedCost(for: record.usage)
         }
     }
