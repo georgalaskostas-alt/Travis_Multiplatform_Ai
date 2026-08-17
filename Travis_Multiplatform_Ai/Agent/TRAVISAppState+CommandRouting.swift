@@ -22,6 +22,16 @@ extension TRAVISAppState {
             return
         }
 
+        if trimmed.lowercased() == "/learning" {
+            addAssistantMessage(VerifiedLearningStore.shared.diagnosticReport())
+            return
+        }
+
+        if trimmed.lowercased() == "/skills" {
+            addAssistantMessage(ReusableSkillStore.shared.diagnosticReport())
+            return
+        }
+
         if trimmed.lowercased().hasPrefix("/plan ") {
             let goal = String(trimmed.dropFirst("/plan ".count))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -147,10 +157,15 @@ extension TRAVISAppState {
             do {
                 let planningGoal = enrichedGoal(goal, projectId: projectId)
                 let registry = CapabilityRegistry(capabilities: orchestrator.capabilities)
+                let skillContext = ReusableSkillStore.shared.planningContext(for: planningGoal)
+                let plannerContext = [registry.promptCatalog(), skillContext]
+                    .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                    .joined(separator: "\n\n")
+
                 let plan = try await TaskPlanner.shared.makePlan(
                     for: planningGoal,
                     availableCapabilities: registry.ids,
-                    context: registry.promptCatalog()
+                    context: plannerContext
                 )
 
                 let createdTask = taskRuntime.createTask(
