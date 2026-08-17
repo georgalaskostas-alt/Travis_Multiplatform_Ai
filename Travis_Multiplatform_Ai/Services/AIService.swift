@@ -29,10 +29,8 @@ enum AIServiceError: LocalizedError {
 }
 
 /// Central AI transport/router for TRAVIS.
-///
-/// All callers use this transport instead of choosing providers directly.
-/// AIModelRouter chooses the workload tier/model, while AIUsageLedger records
-/// actual provider-reported token usage, retries and latency.
+/// AIModelRouter chooses the workload tier/model, AIBudgetGuard blocks requests
+/// before network execution, and AIUsageLedger records provider-reported usage.
 final class AIService {
     static let shared = AIService()
 
@@ -62,18 +60,14 @@ final class AIService {
         let hasOpenAI = !(openAIKey ?? "").isEmpty
         let hasAnthropic = !(anthropicKey ?? "").isEmpty
 
-        guard hasOpenAI || hasAnthropic else {
-            throw AIServiceError.missingAPIKey
-        }
+        guard hasOpenAI || hasAnthropic else { throw AIServiceError.missingAPIKey }
 
         guard let primary = modelRouter.selection(
             for: prompt,
             context: context,
             hasOpenAI: hasOpenAI,
             hasAnthropic: hasAnthropic
-        ) else {
-            throw AIServiceError.missingAPIKey
-        }
+        ) else { throw AIServiceError.missingAPIKey }
 
         do {
             return try await generate(
@@ -84,6 +78,10 @@ final class AIService {
                 openAIKey: openAIKey,
                 anthropicKey: anthropicKey
             )
+        } catch let budgetError as AIBudgetGuard.BudgetError {
+            // Budget rejection is policy, not provider failure. Never escalate
+            // to a fallback provider after a cost/token guard has stopped work.
+            throw budgetError
         } catch {
             guard let fallback = modelRouter.fallbackSelection(after: primary, hasAnthropic: hasAnthropic) else {
                 throw error
@@ -97,6 +95,8 @@ final class AIService {
                     openAIKey: openAIKey,
                     anthropicKey: anthropicKey
                 )
+            } catch let budgetError as AIBudgetGuard.BudgetError {
+                throw budgetError
             } catch let fallbackError {
                 throw AIServiceError.allProvidersFailed(
                     primary: error.localizedDescription,
@@ -114,25 +114,22 @@ final class AIService {
         openAIKey: String?,
         anthropicKey: String?
     ) async throws -> String {
+        try await MainActor.run {
+            try AIBudgetGuard().preflight(
+                prompt: prompt,
+                maxOutputTokens: maxTokens,
+                selection: selection,
+                context: context
+            )
+        }
+
         switch selection.provider {
         case .openAI:
             guard let key = openAIKey, !key.isEmpty else { throw AIServiceError.missingAPIKey }
-            return try await generateWithOpenAI(
-                selection: selection,
-                prompt: prompt,
-                maxTokens: maxTokens,
-                apiKey: key,
-                context: context
-            )
+            return try await generateWithOpenAI(selection: selection, prompt: prompt, maxTokens: maxTokens, apiKey: key, context: context)
         case .anthropic:
             guard let key = anthropicKey, !key.isEmpty else { throw AIServiceError.missingAPIKey }
-            return try await generateWithAnthropic(
-                selection: selection,
-                prompt: prompt,
-                maxTokens: maxTokens,
-                apiKey: key,
-                context: context
-            )
+            return try await generateWithAnthropic(selection: selection, prompt: prompt, maxTokens: maxTokens, apiKey: key, context: context)
         }
     }
 
@@ -156,9 +153,7 @@ final class AIService {
             "input": prompt,
             "max_output_tokens": maxTokens
         ]
-        if let effort = selection.reasoningEffort {
-            body["reasoning"] = ["effort": effort]
-        }
+        if let effort = selection.reasoningEffort { body["reasoning"] = ["effort": effort] }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         return try await perform(
@@ -177,17 +172,13 @@ final class AIService {
             throw AIServiceError.invalidResponse(provider: .openAI)
         }
         if let outputText = json["output_text"] as? String,
-           !outputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return outputText
-        }
+           !outputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return outputText }
         if let output = json["output"] as? [[String: Any]] {
             var parts: [String] = []
             for item in output {
                 guard let content = item["content"] as? [[String: Any]] else { continue }
                 for block in content {
-                    if (block["type"] as? String) == "output_text", let text = block["text"] as? String {
-                        parts.append(text)
-                    }
+                    if (block["type"] as? String) == "output_text", let text = block["text"] as? String { parts.append(text) }
                 }
             }
             let text = parts.joined(separator: "\n")
@@ -262,10 +253,7 @@ final class AIService {
               let content = json["content"] as? [[String: Any]] else {
             throw AIServiceError.invalidResponse(provider: .anthropic)
         }
-        let text = content
-            .filter { ($0["type"] as? String) == "text" }
-            .compactMap { $0["text"] as? String }
-            .joined(separator: "\n")
+        let text = content.filter { ($0["type"] as? String) == "text" }.compactMap { $0["text"] as? String }.joined(separator: "\n")
         guard !text.isEmpty else { throw AIServiceError.invalidResponse(provider: .anthropic) }
         return text
     }
@@ -273,10 +261,11 @@ final class AIService {
     private static func anthropicUsage(from data: Data) -> AITokenUsage {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let usage = json["usage"] as? [String: Any] else { return AITokenUsage() }
-        let input = usage["input_tokens"] as? Int ?? 0
-        let output = usage["output_tokens"] as? Int ?? 0
-        let cached = usage["cache_read_input_tokens"] as? Int ?? 0
-        return AITokenUsage(inputTokens: input, outputTokens: output, cachedInputTokens: cached)
+        return AITokenUsage(
+            inputTokens: usage["input_tokens"] as? Int ?? 0,
+            outputTokens: usage["output_tokens"] as? Int ?? 0,
+            cachedInputTokens: usage["cache_read_input_tokens"] as? Int ?? 0
+        )
     }
 
     private static func anthropicErrorType(from data: Data) -> String {
@@ -332,9 +321,7 @@ final class AIService {
                 )
                 await recordUsage(selection: selection, context: context, usage: usageParser(data), latency: latency, attempt: attempt, succeeded: false, errorType: errorType)
 
-                guard Self.isRetryableHTTPStatus(httpResponse.statusCode), attempt < maxAttempts else {
-                    throw apiError
-                }
+                guard Self.isRetryableHTTPStatus(httpResponse.statusCode), attempt < maxAttempts else { throw apiError }
                 lastError = apiError
                 try await Self.backoff(afterAttempt: attempt)
             } catch let urlError as URLError {
@@ -375,9 +362,7 @@ final class AIService {
 
     private static func milliseconds(_ duration: Duration) -> Int {
         let components = duration.components
-        let seconds = components.seconds * 1_000
-        let attoseconds = components.attoseconds / 1_000_000_000_000_000
-        return Int(seconds + attoseconds)
+        return Int(components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000)
     }
 
     private static func isRetryable(_ error: URLError) -> Bool {
