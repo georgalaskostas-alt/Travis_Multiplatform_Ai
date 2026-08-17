@@ -87,6 +87,7 @@ final class TRAVISAppState {
         let filesystemOperationsCapability = FilesystemOperationsCapability()
         let advancedFilesystemCapability = AdvancedFilesystemCapability()
         let localProductivityCapability = LocalProductivityCapability()
+        let localAutomationCapability = LocalAutomationCapability()
 
         orchestrator.register(TextTaskCapability())
         orchestrator.register(cryptoTradingCapability)
@@ -94,6 +95,7 @@ final class TRAVISAppState {
         orchestrator.register(filesystemOperationsCapability)
         orchestrator.register(advancedFilesystemCapability)
         orchestrator.register(localProductivityCapability)
+        orchestrator.register(localAutomationCapability)
 
         orchestrator.onAssistantMessage = { [weak self] text in
             self?.addAssistantMessage(text)
@@ -120,6 +122,10 @@ final class TRAVISAppState {
         }
 
         localProductivityCapability.onExecutionUpdate = { [weak self] text in
+            self?.addAssistantMessage(text)
+        }
+
+        localAutomationCapability.onExecutionUpdate = { [weak self] text in
             self?.addAssistantMessage(text)
         }
 
