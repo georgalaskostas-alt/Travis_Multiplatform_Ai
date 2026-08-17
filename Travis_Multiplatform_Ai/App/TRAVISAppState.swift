@@ -84,10 +84,12 @@ final class TRAVISAppState {
         self.taskExecutor = taskExecutor
 
         let cryptoTradingCapability = CryptoTradingCapability()
+        let filesystemOperationsCapability = FilesystemOperationsCapability()
 
         orchestrator.register(TextTaskCapability())
         orchestrator.register(cryptoTradingCapability)
         orchestrator.register(SelfImprovementCapability())
+        orchestrator.register(filesystemOperationsCapability)
 
         orchestrator.onAssistantMessage = { [weak self] text in
             self?.addAssistantMessage(text)
@@ -102,6 +104,10 @@ final class TRAVISAppState {
         }
 
         cryptoTradingCapability.onTestnetExecutionUpdate = { [weak self] text in
+            self?.addAssistantMessage(text)
+        }
+
+        filesystemOperationsCapability.onExecutionUpdate = { [weak self] text in
             self?.addAssistantMessage(text)
         }
 
@@ -188,8 +194,6 @@ final class TRAVISAppState {
 
     // MARK: - Messages
 
-    /// Internal by design: command-routing extensions use the same canonical
-    /// persistence path rather than duplicating chat/session bookkeeping.
     @discardableResult
     func appendMessage(role: ChatRole, text: String) -> ChatMessage {
         let message = ChatMessage(
