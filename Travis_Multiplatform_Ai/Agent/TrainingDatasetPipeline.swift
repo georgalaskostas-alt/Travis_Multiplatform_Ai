@@ -247,10 +247,11 @@ final class TrainingDatasetPipeline {
 
     private func deduplicateAndBound() {
         var seen = Set<String>()
-        examples = examples.reversed().filter { example in
+        let newestFirst = examples.reversed().filter { example in
             let fingerprint = "\(example.kind.rawValue)|\(example.capabilityId ?? "-")|\(example.input)|\(example.target)"
             return seen.insert(fingerprint).inserted
-        }.reversed()
+        }
+        examples = Array(newestFirst.reversed())
 
         if examples.count > maxExamples {
             examples.removeFirst(examples.count - maxExamples)
