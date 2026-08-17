@@ -8,11 +8,13 @@ final class UniversalCapabilityRunner {
 
     struct Context {
         var taskId: UUID?
+        var stepId: UUID?
         var projectId: UUID?
         var recentHistory: [ChatMessage]
 
-        init(taskId: UUID? = nil, projectId: UUID? = nil, recentHistory: [ChatMessage] = []) {
+        init(taskId: UUID? = nil, stepId: UUID? = nil, projectId: UUID? = nil, recentHistory: [ChatMessage] = []) {
             self.taskId = taskId
+            self.stepId = stepId
             self.projectId = projectId
             self.recentHistory = recentHistory
         }
@@ -48,15 +50,25 @@ final class UniversalCapabilityRunner {
             taskId: context.taskId,
             projectId: context.projectId
         )
+        let aiContext = AIInvocationContext(
+            workload: .routine,
+            capabilityId: descriptor.id,
+            taskId: context.taskId,
+            stepId: context.stepId,
+            projectId: context.projectId,
+            operation: "capability.handle"
+        )
 
         do {
             let outcome = try await withThrowingTaskGroup(of: CapabilityOutcome.self) { group in
                 group.addTask { @MainActor in
                     try Task.checkCancellation()
-                    return try await capability.handle(
-                        command: command,
-                        recentHistory: context.recentHistory
-                    )
+                    return try await AIExecutionScope.$context.withValue(aiContext) {
+                        try await capability.handle(
+                            command: command,
+                            recentHistory: context.recentHistory
+                        )
+                    }
                 }
                 group.addTask {
                     try await Task.sleep(for: .seconds(timeout))
