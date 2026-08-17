@@ -85,6 +85,7 @@ final class TRAVISAppState {
         advancedFilesystemCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
         localProductivityCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
         localAutomationCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
+        localDocumentCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
 
         SpeechRecognitionService.shared.onFinalTranscript = { [weak self] text in self?.sendCommand(text, source: .voice) }
 
