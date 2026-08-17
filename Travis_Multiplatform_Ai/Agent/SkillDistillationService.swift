@@ -93,18 +93,21 @@ final class SkillDistillationService {
         }
 
         let effects = Set(skillDescriptors.flatMap { $0.policy.declaredEffects })
-        if !effects.isDisjoint(with: [.financial, .externalMutation, .codeMutation]) {
+        let consequentialEffects: Set<CapabilityEffect> = [.financial, .externalMutation, .codeMutation]
+        let locallySafeEffects: Set<CapabilityEffect> = [.readOnly, .localMutation]
+
+        if !effects.isDisjoint(with: consequentialEffects) {
             return (.cloudReasoningRequired, 0.99, "Workflow contains consequential external, financial or source-code mutation effects.")
         }
 
         let domains = Set(skillDescriptors.map(\.domain))
         let deterministicDomains: Set<CapabilityDomain> = [.files, .system, .automation, .productivity]
-        if effects.isSubset(of: [.readOnly, .localMutation]),
+        if effects.isSubset(of: locallySafeEffects),
            domains.isSubset(of: deterministicDomains) {
             return (.deterministicCandidate, 0.90, "Repeated workflow is bounded to local/read-only deterministic-capable domains.")
         }
 
-        if effects.isSubset(of: [.readOnly, .localMutation]) {
+        if effects.isSubset(of: locallySafeEffects) {
             return (.localAICandidate, 0.82, "Repeated workflow is non-consequential but still requires semantic/reasoning capability.")
         }
 
