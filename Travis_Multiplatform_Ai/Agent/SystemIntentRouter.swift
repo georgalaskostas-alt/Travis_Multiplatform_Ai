@@ -16,6 +16,8 @@ final class SystemIntentRouter {
         case retry(String?)
         case cancel(String?)
         case schedulerCycle
+        case aiUsage
+        case aiModels
     }
 
     private struct Decision: Decodable {
@@ -38,7 +40,7 @@ final class SystemIntentRouter {
 
         Αναγνώρισε assistant/runtime control μόνο όταν ο χρήστης πραγματικά ζητά έλεγχο autonomous task.
         Κανονικές ερωτήσεις, project work, trading analysis, coding, research ή δημιουργία περιεχομένου => none.
-        Το reference πρέπει να κρατά όσο γίνεται αυτούσια την αναφορά του χρήστη στο task (ID, τίτλος, failed, προηγούμενο κλπ).
+        Το reference πρέπει να κρατά όσο γίνεται αυτούσια την αναφορά του χρήστη στο task.
 
         Πρόσφατο context:
         \(transcript)
@@ -56,11 +58,7 @@ final class SystemIntentRouter {
     }
 
     private func looksLikeRuntimeControl(_ message: String) -> Bool {
-        let text = message.folding(
-            options: [.diacriticInsensitive, .caseInsensitive],
-            locale: Locale(identifier: "el_GR")
-        ).lowercased()
-
+        let text = message.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "el_GR")).lowercased()
         let markers = [
             "task", "autonomous", "runtime", "scheduler", "checkpoint", "log",
             "resume", "retry", "cancel", "continue", "run it", "run the",
@@ -84,6 +82,8 @@ final class SystemIntentRouter {
         ]
         if lower == "/tasks" { return .listTasks }
         if lower == "/scheduler-run" { return .schedulerCycle }
+        if lower == "/ai-usage" { return .aiUsage }
+        if lower == "/ai-models" { return .aiModels }
         for (command, make) in commands {
             if lower == command { return make(nil) }
             if lower.hasPrefix(command + " ") {
