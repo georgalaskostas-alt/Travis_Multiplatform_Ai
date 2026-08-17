@@ -58,14 +58,8 @@ struct SettingsView: View {
                     }
 
                 TextField("Economy model ID", text: $openRouterEconomyModel)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
                 TextField("Standard model ID", text: $openRouterStandardModel)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
                 TextField("Strong model ID", text: $openRouterStrongModel)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
 
                 Text("Ο TRAVIS δεν hard-codeάρει OpenRouter model IDs. Συμπλήρωσε μόνο μοντέλα που θέλεις να χρησιμοποιούνται. Κενό πεδίο = αυτό το tier παραλείπεται.")
                     .font(.caption)
@@ -75,11 +69,7 @@ struct SettingsView: View {
             Section("Local AI — Optional") {
                 Toggle("Enable local AI", isOn: $localAIEnabled)
                 TextField("Base URL", text: $localAIBaseURL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
                 TextField("Local model ID", text: $localAIModel)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
 
                 Text("Χρησιμοποιείται μόνο για classification/routine workloads και μόνο μέσω OpenAI-compatible chat-completions endpoint. Αν αποτύχει, ο router κλιμακώνει στο επόμενο διαθέσιμο tier.")
                     .font(.caption)
