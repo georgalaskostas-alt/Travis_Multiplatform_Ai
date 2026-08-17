@@ -34,6 +34,16 @@ extension TRAVISAppState {
             addAssistantMessage(AIUsageLedger.shared.diagnosticReport())
         case .aiModels:
             addAssistantMessage(AIModelPerformanceService().diagnosticReport())
+        case .localIntelligence:
+            addAssistantMessage(LocalIntelligenceMetrics.shared.diagnosticReport())
+        case .trainingDataset:
+            addAssistantMessage(TrainingDatasetPipeline.shared.diagnosticReport())
+        case .trainingPolicy:
+            addAssistantMessage(LocalModelTrainingPolicy.shared.diagnosticReport())
+        case .localModelRegistry:
+            addAssistantMessage(LocalModelRegistry.shared.diagnosticReport())
+        case .trainingRuns:
+            addAssistantMessage(LocalTrainingCoordinator.shared.diagnosticReport())
         }
         return true
     }
