@@ -1,7 +1,7 @@
 import Foundation
 
 @MainActor
-final class FilesystemOperationsCapability: AgentCapability {
+final class FilesystemOperationsCapability: AgentCapability, DeterministicInvocableCapability {
     let id = "filesystem_operations"
     let name = "Filesystem Operations"
     let capabilityDescription = "Scoped filesystem operations inside a user-authorized folder, with deterministic preview/collision checks and approval before mutations."
@@ -46,43 +46,36 @@ final class FilesystemOperationsCapability: AgentCapability {
         #if !os(macOS)
         return .reply("Το scoped filesystem operations capability είναι διαθέσιμο προς το παρόν στο macOS build του TRAVIS.")
         #else
+        // First try the bounded local parser. Common explicit filesystem commands
+        // therefore cost zero AI tokens. Ambiguous natural language still falls
+        // back to the model parser below.
+        if let localIntent = parseDeterministically(command) {
+            return try execute(intent: localIntent)
+        }
+
         let intent = try await classify(command, recentHistory: recentHistory)
-        guard intent.operation != "none" else {
-            return .reply("Δεν εντόπισα συγκεκριμένη filesystem εργασία. Μπορώ να κάνω ασφαλές folder listing ή batch rename μέσα σε εγκεκριμένο φάκελο.")
+        return try execute(intent: intent)
+        #endif
+    }
+
+    func handle(invocation: DeterministicCapabilityInvocation) async throws -> CapabilityOutcome {
+        status = .running
+        defer { status = .idle }
+
+        guard invocation.capabilityId == id else {
+            return .reply("Το structured invocation δεν ανήκει στο filesystem_operations capability.")
         }
 
-        guard let path = intent.path?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else {
-            return .reply("Χρειάζομαι συγκεκριμένο folder path για deterministic filesystem operation.")
-        }
-
-        if !locations.hasHomeDirectoryAccess {
-            let granted = locations.requestHomeDirectoryAccess()
-            guard granted else {
-                return .reply("Δεν δόθηκε security-scoped folder access, επομένως δεν εκτελέστηκε filesystem operation.")
-            }
-        }
-
-        guard let resolved = locations.resolveExistingPath(path) else {
-            return .reply("Δεν μπόρεσα να επιβεβαιώσω ότι ο φάκελος υπάρχει μέσα στο εγκεκριμένο security scope: \(path)")
-        }
-        defer { resolved.stopAccessing() }
-
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: resolved.url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-            return .reply("Το path δεν είναι υπαρκτός φάκελος: \(resolved.url.path)")
-        }
-
-        switch intent.operation {
-        case "list":
-            return .reply(try renderListing(folder: resolved.url))
-        case "rename":
-            guard let find = intent.find, !find.isEmpty, let replace = intent.replace else {
-                return .reply("Για batch rename χρειάζομαι το ακριβές filename text που θα αφαιρεθεί/αντικατασταθεί.")
-            }
-            return try buildRenameProposal(folder: resolved.url, find: find, replace: replace)
-        default:
-            return .reply("Η συγκεκριμένη filesystem operation δεν υποστηρίζεται ακόμη από το ασφαλές batch layer.")
-        }
+        #if !os(macOS)
+        return .reply("Το scoped filesystem operations capability είναι διαθέσιμο προς το παρόν στο macOS build του TRAVIS.")
+        #else
+        let intent = IntentDecision(
+            operation: invocation.operation,
+            path: invocation.arguments["path"],
+            find: invocation.arguments["find"],
+            replace: invocation.arguments["replace"]
+        )
+        return try execute(intent: intent)
         #endif
     }
 
@@ -135,6 +128,100 @@ final class FilesystemOperationsCapability: AgentCapability {
             case .sourceChanged(let name): return "Το source file άλλαξε ή λείπει πριν την εκτέλεση: \(name)."
             }
         }
+    }
+
+    #if os(macOS)
+    private func execute(intent: IntentDecision) throws -> CapabilityOutcome {
+        guard intent.operation != "none" else {
+            return .reply("Δεν εντόπισα συγκεκριμένη filesystem εργασία. Μπορώ να κάνω ασφαλές folder listing ή batch rename μέσα σε εγκεκριμένο φάκελο.")
+        }
+
+        guard let path = intent.path?.trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty else {
+            return .reply("Χρειάζομαι συγκεκριμένο folder path για deterministic filesystem operation.")
+        }
+
+        if !locations.hasHomeDirectoryAccess {
+            let granted = locations.requestHomeDirectoryAccess()
+            guard granted else {
+                return .reply("Δεν δόθηκε security-scoped folder access, επομένως δεν εκτελέστηκε filesystem operation.")
+            }
+        }
+
+        guard let resolved = locations.resolveExistingPath(path) else {
+            return .reply("Δεν μπόρεσα να επιβεβαιώσω ότι ο φάκελος υπάρχει μέσα στο εγκεκριμένο security scope: \(path)")
+        }
+        defer { resolved.stopAccessing() }
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: resolved.url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return .reply("Το path δεν είναι υπαρκτός φάκελος: \(resolved.url.path)")
+        }
+
+        switch intent.operation {
+        case "list":
+            return .reply(try renderListing(folder: resolved.url))
+        case "rename":
+            guard let find = intent.find, !find.isEmpty, let replace = intent.replace else {
+                return .reply("Για batch rename χρειάζομαι το ακριβές filename text που θα αφαιρεθεί/αντικατασταθεί.")
+            }
+            return try buildRenameProposal(folder: resolved.url, find: find, replace: replace)
+        default:
+            return .reply("Η συγκεκριμένη filesystem operation δεν υποστηρίζεται ακόμη από το ασφαλές batch layer.")
+        }
+    }
+    #endif
+
+    /// Conservative zero-token parser for explicit, common commands. It only
+    /// succeeds when all required arguments are present in the user's text.
+    /// Anything ambiguous returns nil and uses the AI parser instead.
+    private func parseDeterministically(_ command: String) -> IntentDecision? {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let lower = trimmed.lowercased()
+
+        guard let path = extractAbsoluteUserPath(from: trimmed) else { return nil }
+
+        let listMarkers = ["list files", "list folder", "show files", "δειξε τα αρχεια", "δείξε τα αρχεία", "αρχεια στον φακελο", "αρχεία στον φάκελο"]
+        if listMarkers.contains(where: { lower.contains($0) }) {
+            return IntentDecision(operation: "list", path: path, find: nil, replace: nil)
+        }
+
+        let removalMarkers = ["remove ", "delete ", "αφαιρεσε ", "αφαίρεσε "]
+        if lower.contains("filename") || lower.contains("αρχει") || lower.contains("αρχεί") {
+            for marker in removalMarkers {
+                guard let range = lower.range(of: marker) else { continue }
+                let after = String(trimmed[range.upperBound...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let token = after.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? ""
+                if !token.isEmpty, !token.hasPrefix("/") {
+                    return IntentDecision(operation: "rename", path: path, find: stripQuotes(token), replace: "")
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func extractAbsoluteUserPath(from text: String) -> String? {
+        guard let start = text.range(of: "/Users/")?.lowerBound else { return nil }
+        let suffix = text[start...]
+        var path = ""
+        var quote: Character?
+
+        for character in suffix {
+            if path.isEmpty, character == "\"" || character == "'" {
+                quote = character
+                continue
+            }
+            if let quote, character == quote { break }
+            if quote == nil, character.isWhitespace { break }
+            path.append(character)
+        }
+        return path.isEmpty ? nil : path
+    }
+
+    private func stripQuotes(_ text: String) -> String {
+        text.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`.,;:"))
     }
 
     private func classify(_ command: String, recentHistory: [ChatMessage]) async throws -> IntentDecision {
@@ -233,8 +320,6 @@ final class FilesystemOperationsCapability: AgentCapability {
     private func executeRenameBatch(_ payload: BatchRenamePayload, folder: URL) throws -> (renamed: Int, skipped: Int) {
         let manager = FileManager.default
 
-        // Revalidate the entire plan before the first mutation. This prevents
-        // partial execution caused by obvious collisions or missing sources.
         for entry in payload.entries {
             let source = folder.appendingPathComponent(entry.from)
             let target = folder.appendingPathComponent(entry.to)
