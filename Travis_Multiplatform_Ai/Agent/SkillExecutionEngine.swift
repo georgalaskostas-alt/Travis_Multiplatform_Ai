@@ -44,6 +44,7 @@ final class SkillExecutionEngine {
             }
 
             let plan = materialize(skill: candidate.skill, descriptors: available)
+            LocalIntelligenceMetrics.shared.record(.deterministicSkillPlan)
             return Match(
                 skill: candidate.skill,
                 similarity: candidate.similarity,
