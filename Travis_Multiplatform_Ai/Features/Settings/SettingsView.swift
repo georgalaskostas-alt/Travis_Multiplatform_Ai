@@ -12,6 +12,11 @@ struct SettingsView: View {
     @AppStorage("ai.local.enabled") private var localAIEnabled = false
     @AppStorage("ai.local.baseURL") private var localAIBaseURL = "http://127.0.0.1:11434"
     @AppStorage("ai.local.model") private var localAIModel = ""
+    @AppStorage("ai.budget.dailyTokens") private var dailyTokenBudget = 0
+    @AppStorage("ai.budget.monthlyTokens") private var monthlyTokenBudget = 0
+    @AppStorage("ai.budget.dailyCostUSD") private var dailyCostBudgetUSD = 0.0
+    @AppStorage("ai.budget.monthlyCostUSD") private var monthlyCostBudgetUSD = 0.0
+    @AppStorage("training.local.baseURL") private var localTrainerBaseURL = "http://127.0.0.1:8765"
 
     private static let mandateDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -72,6 +77,24 @@ struct SettingsView: View {
                 TextField("Local model ID", text: $localAIModel)
 
                 Text("Χρησιμοποιείται μόνο για classification/routine workloads και μόνο μέσω OpenAI-compatible chat-completions endpoint. Αν αποτύχει, ο router κλιμακώνει στο επόμενο διαθέσιμο tier.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("AI Cost Guard") {
+                TextField("Daily token ceiling (0 = disabled)", value: $dailyTokenBudget, format: .number)
+                TextField("Monthly token ceiling (0 = disabled)", value: $monthlyTokenBudget, format: .number)
+                TextField("Daily cost ceiling USD (0 = disabled)", value: $dailyCostBudgetUSD, format: .number.precision(.fractionLength(2...4)))
+                TextField("Monthly cost ceiling USD (0 = disabled)", value: $monthlyCostBudgetUSD, format: .number.precision(.fractionLength(2...4)))
+
+                Text("Τα global ceilings ελέγχονται πριν από κάθε AI request. Dollar ceilings εφαρμόζονται fail-closed: αν κάποιο χρησιμοποιημένο model δεν έχει configured pricing, ο TRAVIS δεν προσποιείται ότι το άγνωστο κόστος είναι μηδέν.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Local Training Worker") {
+                TextField("Trainer localhost URL", text: $localTrainerBaseURL)
+                Text("Ο trainer bridge δέχεται μόνο localhost/127.0.0.1/::1. Training, evaluation και promotion είναι ξεχωριστά gated stages.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
