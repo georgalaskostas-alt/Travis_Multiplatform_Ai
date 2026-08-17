@@ -61,7 +61,7 @@ extension TRAVISAppState {
                 }
 
                 if taskRuntime.task(id: task.id)?.status == .completed {
-                    await ProjectMemoryCoordinator().synchronize(taskId: task.id, runtime: taskRuntime)
+                    await synchronizeCompletedTask(task.id)
                 }
             } catch {
                 addAssistantMessage("Autonomous runtime error: \(error.localizedDescription)")
@@ -112,9 +112,8 @@ extension TRAVISAppState {
             let scheduler = AgentTaskScheduler(runtime: taskRuntime, executor: taskExecutor)
             let report = await scheduler.runCycle(recentHistory: recentHistory, backgroundOnly: backgroundOnly, maxTasksPerCycle: 4)
 
-            let coordinator = ProjectMemoryCoordinator()
             for taskId in report.executedTaskIds where taskRuntime.task(id: taskId)?.status == .completed {
-                await coordinator.synchronize(taskId: taskId, runtime: taskRuntime)
+                await synchronizeCompletedTask(taskId)
             }
 
             addAssistantMessage("""
@@ -136,6 +135,16 @@ extension TRAVISAppState {
             \(report.pausedOrphanTaskIds.count)
             """)
         }
+    }
+
+    private func synchronizeCompletedTask(_ taskId: UUID) async {
+        guard let completedTask = taskRuntime.task(id: taskId), completedTask.status == .completed else { return }
+
+        await ProjectMemoryCoordinator().synchronize(taskId: taskId, runtime: taskRuntime)
+
+        let projectId = ProjectWorkspaceStore.shared.projects.first(where: { $0.taskIds.contains(taskId) })?.id
+        VerifiedLearningStore.shared.ingestCompletedTask(completedTask, projectId: projectId)
+        ReusableSkillStore.shared.ingestCompletedTask(completedTask)
     }
 
     private static var runtimeControlContextWindow: Int { 8 }
