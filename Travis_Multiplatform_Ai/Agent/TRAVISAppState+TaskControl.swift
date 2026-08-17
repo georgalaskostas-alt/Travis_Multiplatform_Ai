@@ -142,7 +142,7 @@ extension TRAVISAppState {
 
         await ProjectMemoryCoordinator().synchronize(taskId: taskId, runtime: taskRuntime)
 
-        let projectId = ProjectWorkspaceStore.shared.projects.first(where: { $0.taskIds.contains(taskId) })?.id
+        let projectId = ProjectWorkspaceStore.shared.project(containingTask: taskId)?.id
         VerifiedLearningStore.shared.ingestCompletedTask(completedTask, projectId: projectId)
         ReusableSkillStore.shared.ingestCompletedTask(completedTask)
     }
