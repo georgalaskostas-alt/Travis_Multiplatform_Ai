@@ -1,14 +1,16 @@
 import Foundation
 
-/// Narrow contract between TRAVIS and a future local training worker.
+/// Narrow contract between TRAVIS and a local training worker.
 /// The app never executes arbitrary shell commands. A backend must expose a
 /// bounded localhost API and consume a previously generated immutable manifest.
 @MainActor
 protocol LocalTrainerBackend: AnyObject {
     var backendId: String { get }
     func health() async throws -> LocalTrainerBridge.Health
+    func capabilities() async throws -> LocalTrainerBridge.Capabilities
     func startTraining(manifest: LocalTrainingManifestService.Manifest) async throws -> LocalTrainerBridge.Job
     func jobStatus(id: String) async throws -> LocalTrainerBridge.Job
+    func cancelJob(id: String) async throws -> LocalTrainerBridge.Job
 }
 
 @MainActor
@@ -18,6 +20,19 @@ final class LocalTrainerBridge {
         var backend: String
         var version: String?
         var accelerator: String?
+    }
+
+    struct Capabilities: Codable, Hashable {
+        var backend: String
+        var supportedDatasetKinds: [String]
+        var supportedBaseModelFamilies: [String]
+        var supportedTrainingMethods: [String]
+        var maxTrainingExamples: Int?
+        var accelerator: String?
+
+        func supports(kind: TrainingDatasetPipeline.DatasetKind) -> Bool {
+            supportedDatasetKinds.contains { $0.caseInsensitiveCompare(kind.rawValue) == .orderedSame }
+        }
     }
 
     struct Job: Codable, Hashable {
@@ -44,6 +59,7 @@ final class LocalTrainerBridge {
         case invalidEndpoint
         case nonLocalEndpoint
         case unavailable
+        case unsupportedDatasetKind(String)
         case invalidResponse(Int)
 
         var errorDescription: String? {
@@ -51,6 +67,7 @@ final class LocalTrainerBridge {
             case .invalidEndpoint: return "The local trainer endpoint is invalid."
             case .nonLocalEndpoint: return "For safety, the training worker endpoint must resolve to localhost/127.0.0.1."
             case .unavailable: return "The local training worker is not configured or reachable."
+            case .unsupportedDatasetKind(let kind): return "The local training worker does not support dataset kind \(kind)."
             case .invalidResponse(let status): return "The local training worker returned HTTP \(status)."
             }
         }
@@ -84,6 +101,11 @@ final class LocalHTTPTrainerBackend: LocalTrainerBackend {
         return try await send(request, as: LocalTrainerBridge.Health.self)
     }
 
+    func capabilities() async throws -> LocalTrainerBridge.Capabilities {
+        let request = try makeRequest(path: "/v1/capabilities", method: "GET")
+        return try await send(request, as: LocalTrainerBridge.Capabilities.self)
+    }
+
     func startTraining(manifest: LocalTrainingManifestService.Manifest) async throws -> LocalTrainerBridge.Job {
         var request = try makeRequest(path: "/v1/train", method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -92,9 +114,19 @@ final class LocalHTTPTrainerBackend: LocalTrainerBackend {
     }
 
     func jobStatus(id: String) async throws -> LocalTrainerBridge.Job {
-        let safeId = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        let safeId = safePathComponent(id)
         let request = try makeRequest(path: "/v1/jobs/\(safeId)", method: "GET")
         return try await send(request, as: LocalTrainerBridge.Job.self)
+    }
+
+    func cancelJob(id: String) async throws -> LocalTrainerBridge.Job {
+        let safeId = safePathComponent(id)
+        let request = try makeRequest(path: "/v1/jobs/\(safeId)/cancel", method: "POST")
+        return try await send(request, as: LocalTrainerBridge.Job.self)
+    }
+
+    private func safePathComponent(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
     }
 
     private func makeRequest(path: String, method: String) throws -> URLRequest {
