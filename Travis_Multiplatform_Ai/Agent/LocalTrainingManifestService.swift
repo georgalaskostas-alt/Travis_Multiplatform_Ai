@@ -42,8 +42,6 @@ final class LocalTrainingManifestService {
         }
     }
 
-    /// Creates an immutable train/validation export under Application Support.
-    /// No network upload or model training happens here.
     func prepareExport(
         kind: TrainingDatasetPipeline.DatasetKind,
         baseModel: String,
@@ -67,8 +65,6 @@ final class LocalTrainingManifestService {
             return $0.id.uuidString < $1.id.uuidString
         }
 
-        // Split by source task rather than by individual row to reduce leakage
-        // between training and validation examples from the same task.
         let grouped = Dictionary(grouping: stable, by: \.sourceTaskId)
         let taskIds = grouped.keys.sorted { $0.uuidString < $1.uuidString }
         let requestedValidation = max(1, Int((Double(taskIds.count) * min(max(validationFraction, 0.05), 0.30)).rounded()))
@@ -82,7 +78,10 @@ final class LocalTrainingManifestService {
 
         let trainData = try encodeJSONL(trainingExamples)
         let validationData = try encodeJSONL(validationExamples)
-        let combinedHash = SHA256.hash(data: trainData + validationData)
+        var fingerprintData = Data()
+        fingerprintData.append(trainData)
+        fingerprintData.append(validationData)
+        let combinedHash = SHA256.hash(data: fingerprintData)
             .map { String(format: "%02x", $0) }
             .joined()
 
@@ -119,6 +118,7 @@ final class LocalTrainingManifestService {
     private func encodeJSONL(_ examples: [TrainingDatasetPipeline.TrainingExample]) throws -> Data {
         var output = Data()
         let encoder = JSONEncoder()
+        guard let newline = "\n".data(using: .utf8) else { throw ExportError.encodingFailed }
         for example in examples {
             let record = JSONLRecord(
                 input: example.input,
@@ -127,7 +127,6 @@ final class LocalTrainingManifestService {
                 capabilityId: example.capabilityId,
                 qualityScore: example.qualityScore
             )
-            guard let newline = "\n".data(using: .utf8) else { throw ExportError.encodingFailed }
             output.append(try encoder.encode(record))
             output.append(newline)
         }
