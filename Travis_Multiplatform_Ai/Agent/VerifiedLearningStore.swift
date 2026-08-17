@@ -70,8 +70,6 @@ final class VerifiedLearningStore {
         reload()
     }
 
-    /// Ingests only a terminal completed task. Every accepted example must
-    /// correspond to a completed step with non-empty verified output.
     func ingestCompletedTask(_ task: AgentTask, projectId: UUID?) {
         guard task.status == .completed else { return }
 
@@ -82,7 +80,6 @@ final class VerifiedLearningStore {
                   let result = step.resultSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !result.isEmpty else { continue }
 
-            // Stable provenance guard makes synchronization idempotent.
             guard !examples.contains(where: {
                 $0.taskId == task.id && $0.stepId == step.id && $0.sourcePlanVersion == task.plan.version
             }) else { continue }
@@ -109,7 +106,7 @@ final class VerifiedLearningStore {
         if changed { persist() }
     }
 
-    func examples(
+    func recentExamples(
         capabilityId: String? = nil,
         projectId: UUID? = nil,
         limit: Int = 50
@@ -125,10 +122,10 @@ final class VerifiedLearningStore {
             .map { $0 }
     }
 
-    /// Provides bounded, provenance-backed few-shot context for future local
-    /// models or skill extraction. It never executes a learned result directly.
+    /// Bounded provenance-backed few-shot context for future local models or
+    /// skill extraction. Learned output is never executed directly here.
     func contextBlock(capabilityId: String, projectId: UUID? = nil, limit: Int = 5) -> String {
-        let selected = examples(capabilityId: capabilityId, projectId: projectId, limit: limit)
+        let selected = recentExamples(capabilityId: capabilityId, projectId: projectId, limit: limit)
         guard !selected.isEmpty else { return "" }
 
         let rows = selected.map { example in
