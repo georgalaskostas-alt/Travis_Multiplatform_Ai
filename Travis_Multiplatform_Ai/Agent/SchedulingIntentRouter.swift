@@ -26,6 +26,7 @@ final class SchedulingIntentRouter {
 
     func classify(_ message: String, recentHistory: [ChatMessage], now: Date = Date()) async -> Intent {
         if let explicit = explicitCommand(message) { return explicit }
+        if let local = deterministicNaturalIntent(message, now: now) { return local }
         guard looksLikeScheduling(message) else { return .none }
 
         let formatter = ISO8601DateFormatter()
@@ -80,8 +81,129 @@ final class SchedulingIntentRouter {
         }
     }
 
+    /// Conservative local parser for common schedules. It handles only explicit
+    /// relative intervals and simple daily/hourly recurrences; ambiguous calendar
+    /// language falls through to the AI parser.
+    private func deterministicNaturalIntent(_ message: String, now: Date) -> Intent? {
+        let original = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = normalize(original)
+        guard !text.isEmpty else { return nil }
+
+        if ["δειξε schedules", "δειξε τα schedules", "show schedules", "list schedules"].contains(text) {
+            return .list
+        }
+        if ["τρεξε τα due schedules", "run due schedules", "run scheduled work now"].contains(text) {
+            return .runDue
+        }
+
+        let cancelPrefixes = ["cancel schedule ", "ακυρωσε schedule ", "ακυρωσε το schedule "]
+        for prefix in cancelPrefixes where text.hasPrefix(prefix) {
+            let ref = originalReference(afterWordCount: prefix.split(separator: " ").count, from: original)
+            return ref.isEmpty ? nil : .cancel(reference: ref)
+        }
+
+        if let relative = parseRelativeSchedule(text, original: original, now: now) {
+            return relative
+        }
+        if let recurring = parseSimpleRecurrence(text, original: original, now: now) {
+            return recurring
+        }
+        return nil
+    }
+
+    private func parseRelativeSchedule(_ text: String, original: String, now: Date) -> Intent? {
+        // Supported examples: "run task X in 20 minutes", "τρεξε το task X σε 2 ωρες".
+        let units: [(markers: [String], seconds: Double)] = [
+            ([" minutes", " minute", " λεπτα", " λεπτο"], 60),
+            ([" hours", " hour", " ωρες", " ωρα"], 3_600),
+            ([" days", " day", " μερες", " μερα"], 86_400)
+        ]
+
+        for unit in units {
+            for marker in unit.markers {
+                guard let markerRange = text.range(of: marker) else { continue }
+                let before = String(text[..<markerRange.lowerBound])
+                let tokens = before.split(separator: " ")
+                guard let numberToken = tokens.last,
+                      let amount = Double(numberToken), amount > 0 else { continue }
+
+                let relativeMarkers = [" in ", " σε ", " μετα απο "]
+                guard relativeMarkers.contains(where: { before.contains($0) }) else { continue }
+
+                let seconds = max(60, amount * unit.seconds)
+                let runAt = now.addingTimeInterval(seconds)
+                let reference = extractTaskReferenceBeforeRelativePhrase(original)
+                return .schedule(taskReference: reference, runAt: runAt, recurrenceSeconds: nil)
+            }
+        }
+        return nil
+    }
+
+    private func parseSimpleRecurrence(_ text: String, original: String, now: Date) -> Intent? {
+        let dailyMarkers = ["every day", "καθε μερα"]
+        if dailyMarkers.contains(where: { text.contains($0) }) {
+            return .schedule(
+                taskReference: extractTaskReferenceBeforeRecurrence(original),
+                runAt: now.addingTimeInterval(86_400),
+                recurrenceSeconds: 86_400
+            )
+        }
+
+        let hourlyMarkers = ["every hour", "καθε ωρα"]
+        if hourlyMarkers.contains(where: { text.contains($0) }) {
+            return .schedule(
+                taskReference: extractTaskReferenceBeforeRecurrence(original),
+                runAt: now.addingTimeInterval(3_600),
+                recurrenceSeconds: 3_600
+            )
+        }
+        return nil
+    }
+
+    private func extractTaskReferenceBeforeRelativePhrase(_ original: String) -> String? {
+        let normalized = normalize(original)
+        let separators = [" in ", " σε ", " μετα απο "]
+        guard let separator = separators.compactMap({ normalized.range(of: $0) }).min(by: { $0.lowerBound < $1.lowerBound }) else {
+            return nil
+        }
+        let prefixLength = normalized.distance(from: normalized.startIndex, to: separator.lowerBound)
+        let originalIndex = original.index(original.startIndex, offsetBy: min(prefixLength, original.count))
+        let prefix = String(original[..<originalIndex])
+        return cleanTaskReference(prefix)
+    }
+
+    private func extractTaskReferenceBeforeRecurrence(_ original: String) -> String? {
+        let normalized = normalize(original)
+        let markers = [" every day", " καθε μερα", " every hour", " καθε ωρα"]
+        guard let marker = markers.compactMap({ normalized.range(of: $0) }).min(by: { $0.lowerBound < $1.lowerBound }) else { return nil }
+        let prefixLength = normalized.distance(from: normalized.startIndex, to: marker.lowerBound)
+        let originalIndex = original.index(original.startIndex, offsetBy: min(prefixLength, original.count))
+        return cleanTaskReference(String(original[..<originalIndex]))
+    }
+
+    private func cleanTaskReference(_ value: String) -> String? {
+        var result = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefixes = [
+            "run task ", "run the task ", "schedule task ",
+            "τρεξε task ", "τρεξε το task ", "προγραμματισε task ", "προγραμματισε το task "
+        ]
+        let normalized = normalize(result)
+        for prefix in prefixes where normalized.hasPrefix(prefix) {
+            let count = min(prefix.count, result.count)
+            result = String(result.dropFirst(count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            break
+        }
+        return result.isEmpty ? nil : result
+    }
+
+    private func originalReference(afterWordCount count: Int, from original: String) -> String {
+        let words = original.split(whereSeparator: { $0.isWhitespace })
+        guard words.count > count else { return "" }
+        return words.dropFirst(count).joined(separator: " ")
+    }
+
     private func looksLikeScheduling(_ message: String) -> Bool {
-        let text = message.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "el_GR")).lowercased()
+        let text = normalize(message)
         let markers = [
             "schedule", "scheduled", "later", "tomorrow", "tonight", "every day", "every hour", "weekly",
             "προγραμματ", "αργοτερα", "αυριο", "αποψε", "καθε μερα", "καθε ωρα", "εβδομαδ",
@@ -99,7 +221,6 @@ final class SchedulingIntentRouter {
             let reference = String(trimmed.dropFirst("/schedule-cancel ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
             return reference.isEmpty ? .none : .cancel(reference: reference)
         }
-        // Natural parser handles /schedule because it needs time interpretation.
         if lower.hasPrefix("/schedule ") { return nil }
         return nil
     }
@@ -117,5 +238,11 @@ final class SchedulingIntentRouter {
         let standard = ISO8601DateFormatter()
         standard.formatOptions = [.withInternetDateTime]
         return standard.date(from: value)
+    }
+
+    private func normalize(_ text: String) -> String {
+        text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "el_GR"))
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
