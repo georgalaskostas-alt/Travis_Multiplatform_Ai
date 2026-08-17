@@ -18,8 +18,7 @@ struct AIModelRouter {
     func candidates(
         for prompt: String,
         context: AIInvocationContext,
-        availability: AIProviderAvailability,
-        performanceScores: [AIModelPerformanceService.Score] = []
+        availability: AIProviderAvailability
     ) -> [AIModelSelection] {
         let workload = workload(for: prompt, context: context)
         guard workload != .deterministic else { return [] }
@@ -87,11 +86,7 @@ struct AIModelRouter {
             seen.insert("\(selection.provider.rawValue)::\(selection.model)").inserted
         }
 
-        return adaptiveOrder(
-            deduplicated,
-            workload: workload,
-            scores: performanceScores
-        )
+        return adaptiveOrder(deduplicated, workload: workload)
     }
 
     func workload(for prompt: String, context: AIInvocationContext) -> AIWorkloadClass {
@@ -114,23 +109,17 @@ struct AIModelRouter {
         return .routine
     }
 
-    /// Historical performance may optimize ordering only within a safe tier
-    /// envelope. It can never demote verification/frontier work to local or
-    /// economy models, and it needs enough samples before affecting routing.
+    /// Historical performance may optimize ordering only within the same safe
+    /// execution envelope. At least five observations are required before a
+    /// model can influence adaptive ordering.
     private func adaptiveOrder(
         _ candidates: [AIModelSelection],
-        workload: AIWorkloadClass,
-        scores: [AIModelPerformanceService.Score]
+        workload: AIWorkloadClass
     ) -> [AIModelSelection] {
         guard candidates.count > 1 else { return candidates }
 
         let minimumSamples = 5
-        let scoreMap = Dictionary(uniqueKeysWithValues: scores
-            .filter { $0.workload == workload && $0.requestCount >= minimumSamples }
-            .map { ("\($0.provider.rawValue)::\($0.model)", $0) })
-
-        guard !scoreMap.isEmpty else { return candidates }
-
+        let registry = AIAdaptiveRoutingRegistry.shared
         let originalIndex = Dictionary(uniqueKeysWithValues: candidates.enumerated().map {
             ("\($0.element.provider.rawValue)::\($0.element.model)", $0.offset)
         })
@@ -139,16 +128,15 @@ struct AIModelRouter {
             let lhsRank = safeTierRank(lhs.tier, workload: workload)
             let rhsRank = safeTierRank(rhs.tier, workload: workload)
 
-            // Never reorder across safety envelopes. Lower rank means cheaper
-            // tier and is attempted first only where that workload permits it.
+            // Safety envelope takes precedence over price/performance history.
             if lhsRank != rhsRank { return lhsRank < rhsRank }
 
-            let lhsKey = "\(lhs.provider.rawValue)::\(lhs.model)"
-            let rhsKey = "\(rhs.provider.rawValue)::\(rhs.model)"
-            let lhsScore = scoreMap[lhsKey]
-            let rhsScore = scoreMap[rhsKey]
+            let lhsMetric = registry.metric(provider: lhs.provider, model: lhs.model, workload: workload)
+            let rhsMetric = registry.metric(provider: rhs.provider, model: rhs.model, workload: workload)
+            let lhsEligible = lhsMetric.flatMap { $0.requestCount >= minimumSamples ? $0 : nil }
+            let rhsEligible = rhsMetric.flatMap { $0.requestCount >= minimumSamples ? $0 : nil }
 
-            switch (lhsScore, rhsScore) {
+            switch (lhsEligible, rhsEligible) {
             case let (left?, right?):
                 if abs(left.utilityScore - right.utilityScore) > 0.01 {
                     return left.utilityScore > right.utilityScore
@@ -161,6 +149,8 @@ struct AIModelRouter {
                 break
             }
 
+            let lhsKey = "\(lhs.provider.rawValue)::\(lhs.model)"
+            let rhsKey = "\(rhs.provider.rawValue)::\(rhs.model)"
             return (originalIndex[lhsKey] ?? 0) < (originalIndex[rhsKey] ?? 0)
         }
     }
