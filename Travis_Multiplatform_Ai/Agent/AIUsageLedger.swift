@@ -33,18 +33,21 @@ final class AIUsageLedger {
         let estimatedCost = price?.estimatedCost(for: usage)
         records.append(AIUsageRecord(provider: selection.provider, model: selection.model, tier: selection.tier, context: context, usage: usage, estimatedCostUSD: estimatedCost, latencyMilliseconds: latencyMilliseconds, attempt: attempt, succeeded: succeeded, errorType: errorType))
         if records.count > maxRecords { records.removeFirst(records.count - maxRecords) }
+        AIAdaptiveRoutingRegistry.shared.rebuild(from: records)
         persist()
     }
 
     func setPricing(provider: AIProvider, model: String, pricing value: AIModelPricing) {
         pricing[pricingKey(provider: provider, model: model)] = value
         recomputeEstimatedCosts()
+        AIAdaptiveRoutingRegistry.shared.rebuild(from: records)
         persist()
     }
 
     func removePricing(provider: AIProvider, model: String) {
         pricing.removeValue(forKey: pricingKey(provider: provider, model: model))
         recomputeEstimatedCosts()
+        AIAdaptiveRoutingRegistry.shared.rebuild(from: records)
         persist()
     }
 
@@ -128,13 +131,17 @@ final class AIUsageLedger {
     }
 
     func reload() {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            AIAdaptiveRoutingRegistry.shared.rebuild(from: [])
+            return
+        }
         do {
             let data = try Data(contentsOf: fileURL)
             let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
             guard snapshot.version == 1 else { return }
             records = snapshot.records
             pricing = snapshot.pricing
+            AIAdaptiveRoutingRegistry.shared.rebuild(from: records)
             persistenceError = nil
         } catch {
             persistenceError = error.localizedDescription
