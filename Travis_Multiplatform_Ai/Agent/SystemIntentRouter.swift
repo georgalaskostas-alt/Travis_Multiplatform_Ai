@@ -18,6 +18,11 @@ final class SystemIntentRouter {
         case schedulerCycle
         case aiUsage
         case aiModels
+        case localIntelligence
+        case trainingDataset
+        case trainingPolicy
+        case localModelRegistry
+        case trainingRuns
     }
 
     private struct Decision: Decodable {
@@ -63,8 +68,6 @@ final class SystemIntentRouter {
         guard !trimmed.isEmpty else { return nil }
         let text = normalize(trimmed)
 
-        // Zero-token path only for high-confidence runtime-control language.
-        // More ambiguous phrases still fall through to the AI classifier.
         if ["δειξε τα tasks", "δειξε tasks", "list tasks", "show tasks", "ποια tasks υπαρχουν"].contains(text) {
             return .listTasks
         }
@@ -76,6 +79,21 @@ final class SystemIntentRouter {
         }
         if ["δειξε ai models", "ai models", "show ai models"].contains(text) {
             return .aiModels
+        }
+        if ["local intelligence", "δειξε local intelligence", "local metrics", "δειξε local metrics"].contains(text) {
+            return .localIntelligence
+        }
+        if ["training dataset", "δειξε training dataset", "training data", "δειξε training data"].contains(text) {
+            return .trainingDataset
+        }
+        if ["training policy", "δειξε training policy", "local training policy"].contains(text) {
+            return .trainingPolicy
+        }
+        if ["local model registry", "δειξε local model", "active local model"].contains(text) {
+            return .localModelRegistry
+        }
+        if ["training runs", "δειξε training runs", "local training runs"].contains(text) {
+            return .trainingRuns
         }
 
         let patterns: [(prefixes: [String], make: (String?) -> Intent)] = [
@@ -96,8 +114,6 @@ final class SystemIntentRouter {
             }
         }
 
-        // High-confidence pronoun commands intentionally resolve through the
-        // existing deterministic task resolver in TRAVISAppState.
         if ["resume it", "συνεχισε το", "συνεχισε το task"].contains(text) { return .resume(nil) }
         if ["retry it", "ξανατρεξε το", "ξανατρεξε το task"].contains(text) { return .retry(nil) }
         if ["run it", "τρεξε το", "τρεξε το task"].contains(text) { return .run(nil) }
@@ -134,6 +150,11 @@ final class SystemIntentRouter {
         if lower == "/scheduler-run" { return .schedulerCycle }
         if lower == "/ai-usage" { return .aiUsage }
         if lower == "/ai-models" { return .aiModels }
+        if lower == "/local-intelligence" { return .localIntelligence }
+        if lower == "/training-data" { return .trainingDataset }
+        if lower == "/training-policy" { return .trainingPolicy }
+        if lower == "/local-model" { return .localModelRegistry }
+        if lower == "/training-runs" { return .trainingRuns }
         for (command, make) in commands {
             if lower == command { return make(nil) }
             if lower.hasPrefix(command + " ") {
@@ -173,8 +194,6 @@ final class SystemIntentRouter {
 
     private func bestEffortOriginalReference(_ normalizedReference: String, from original: String) -> String {
         guard !normalizedReference.isEmpty else { return "" }
-        // References are resolved fuzzily downstream, so preserving the user's
-        // trailing words is more useful than re-normalizing them again.
         let words = original.split(whereSeparator: { $0.isWhitespace })
         let referenceWordCount = normalizedReference.split(separator: " ").count
         guard referenceWordCount > 0, words.count >= referenceWordCount else { return normalizedReference }
