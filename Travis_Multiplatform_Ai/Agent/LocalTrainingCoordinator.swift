@@ -24,13 +24,13 @@ final class LocalTrainingCoordinator {
     private let backend: LocalTrainerBackend
 
     init(
-        policy: LocalModelTrainingPolicy = .shared,
-        manifestService: LocalTrainingManifestService = .shared,
-        backend: LocalTrainerBackend = LocalHTTPTrainerBackend()
+        policy: LocalModelTrainingPolicy? = nil,
+        manifestService: LocalTrainingManifestService? = nil,
+        backend: LocalTrainerBackend? = nil
     ) {
-        self.policy = policy
-        self.manifestService = manifestService
-        self.backend = backend
+        self.policy = policy ?? LocalModelTrainingPolicy.shared
+        self.manifestService = manifestService ?? LocalTrainingManifestService.shared
+        self.backend = backend ?? LocalHTTPTrainerBackend()
     }
 
     @discardableResult
