@@ -30,6 +30,7 @@ final class SystemIntentRouter {
 
     func classify(_ message: String, recentHistory: [ChatMessage]) async -> Intent {
         if let explicit = explicitCommand(message) { return explicit }
+        if let local = deterministicNaturalIntent(message) { return local }
         guard looksLikeRuntimeControl(message) else { return .none }
 
         let transcript = Array(recentHistory.suffix(6)).promptTranscript
@@ -57,8 +58,57 @@ final class SystemIntentRouter {
         return map(decision)
     }
 
+    private func deterministicNaturalIntent(_ message: String) -> Intent? {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let text = normalize(trimmed)
+
+        // Zero-token path only for high-confidence runtime-control language.
+        // More ambiguous phrases still fall through to the AI classifier.
+        if ["δειξε τα tasks", "δειξε tasks", "list tasks", "show tasks", "ποια tasks υπαρχουν"].contains(text) {
+            return .listTasks
+        }
+        if ["τρεξε τον scheduler", "τρεξε scheduler", "run scheduler", "run scheduler cycle"].contains(text) {
+            return .schedulerCycle
+        }
+        if ["δειξε ai usage", "ai usage", "δειξε κοστος ai", "show ai usage"].contains(text) {
+            return .aiUsage
+        }
+        if ["δειξε ai models", "ai models", "show ai models"].contains(text) {
+            return .aiModels
+        }
+
+        let patterns: [(prefixes: [String], make: (String?) -> Intent)] = [
+            (["resume ", "συνεχισε task ", "συνεχισε το task "], { .resume($0) }),
+            (["retry ", "ξανατρεξε task ", "ξανατρεξε το task "], { .retry($0) }),
+            (["cancel ", "ακυρωσε task ", "ακυρωσε το task "], { .cancel($0) }),
+            (["auto ", "τρεξε αυτοματα task ", "τρεξε αυτοματα το task "], { .auto($0) }),
+            (["run task ", "τρεξε task ", "τρεξε το task "], { .run($0) }),
+            (["status task ", "κατασταση task ", "δειξε status task "], { .taskStatus($0) }),
+            (["log task ", "δειξε log task ", "ιστορικο task "], { .taskLog($0) })
+        ]
+
+        for pattern in patterns {
+            for prefix in pattern.prefixes where text.hasPrefix(prefix) {
+                let normalizedReference = String(text.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                let originalReference = bestEffortOriginalReference(normalizedReference, from: trimmed)
+                return pattern.make(originalReference.isEmpty ? nil : originalReference)
+            }
+        }
+
+        // High-confidence pronoun commands intentionally resolve through the
+        // existing deterministic task resolver in TRAVISAppState.
+        if ["resume it", "συνεχισε το", "συνεχισε το task"].contains(text) { return .resume(nil) }
+        if ["retry it", "ξανατρεξε το", "ξανατρεξε το task"].contains(text) { return .retry(nil) }
+        if ["run it", "τρεξε το", "τρεξε το task"].contains(text) { return .run(nil) }
+        if ["auto run it", "τρεξε το αυτοματα"].contains(text) { return .auto(nil) }
+        if ["cancel it", "ακυρωσε το", "σταματα το task"].contains(text) { return .cancel(nil) }
+
+        return nil
+    }
+
     private func looksLikeRuntimeControl(_ message: String) -> Bool {
-        let text = message.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "el_GR")).lowercased()
+        let text = normalize(message)
         let markers = [
             "task", "autonomous", "runtime", "scheduler", "checkpoint", "log",
             "resume", "retry", "cancel", "continue", "run it", "run the",
@@ -113,5 +163,21 @@ final class SystemIntentRouter {
         case "scheduler_cycle": return .schedulerCycle
         default: return .none
         }
+    }
+
+    private func normalize(_ text: String) -> String {
+        text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "el_GR"))
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func bestEffortOriginalReference(_ normalizedReference: String, from original: String) -> String {
+        guard !normalizedReference.isEmpty else { return "" }
+        // References are resolved fuzzily downstream, so preserving the user's
+        // trailing words is more useful than re-normalizing them again.
+        let words = original.split(whereSeparator: { $0.isWhitespace })
+        let referenceWordCount = normalizedReference.split(separator: " ").count
+        guard referenceWordCount > 0, words.count >= referenceWordCount else { return normalizedReference }
+        return words.suffix(referenceWordCount).joined(separator: " ")
     }
 }
