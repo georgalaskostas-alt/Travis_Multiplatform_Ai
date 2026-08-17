@@ -119,9 +119,6 @@ final class LocalModelTrainingPolicy {
         return candidate
     }
 
-    /// Records evaluation only. Promotion is allowed when the candidate beats
-    /// or matches the baseline with minimum absolute quality and acceptable
-    /// latency. This prevents automatic promotion merely because training ran.
     func recordEvaluation(
         candidateId: UUID,
         holdoutAccuracy: Double,
@@ -154,12 +151,19 @@ final class LocalModelTrainingPolicy {
         persist()
     }
 
-    /// Promotion is deliberately explicit. Nothing in dataset ingestion or
-    /// evaluation silently changes the production routing configuration.
-    func promote(candidateId: UUID) -> Bool {
+    /// Promotion is deliberately explicit and must provide the inference model
+    /// identifier exposed by the local runtime. Evaluation alone never changes
+    /// production routing.
+    func promote(candidateId: UUID, inferenceModelId: String) -> Bool {
         guard let index = candidates.firstIndex(where: { $0.id == candidateId }),
               candidates[index].stage == .candidate,
               candidates[index].trainingArtifactLocation != nil else { return false }
+
+        let candidate = candidates[index]
+        guard LocalModelRegistry.shared.promote(candidate: candidate, inferenceModelId: inferenceModelId) else {
+            return false
+        }
+
         candidates[index].stage = .promoted
         candidates[index].updatedAt = Date()
         persist()
@@ -171,6 +175,7 @@ final class LocalModelTrainingPolicy {
         candidates[index].stage = .rolledBack
         candidates[index].rejectionReason = reason
         candidates[index].updatedAt = Date()
+        _ = LocalModelRegistry.shared.rollback()
         persist()
     }
 
@@ -193,7 +198,7 @@ final class LocalModelTrainingPolicy {
         RECENT MODEL CANDIDATES
         \(candidateRows.isEmpty ? "κανένα" : candidateRows)
 
-        Training/promotion is gated. No model becomes active merely because examples were collected.
+        Training/promotion is gated. Evaluation never activates a model; explicit promotion with an inference model ID is required.
         """
     }
 
