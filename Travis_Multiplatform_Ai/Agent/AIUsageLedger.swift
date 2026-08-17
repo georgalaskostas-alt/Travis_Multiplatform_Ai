@@ -33,21 +33,21 @@ final class AIUsageLedger {
         let estimatedCost = price?.estimatedCost(for: usage)
         records.append(AIUsageRecord(provider: selection.provider, model: selection.model, tier: selection.tier, context: context, usage: usage, estimatedCostUSD: estimatedCost, latencyMilliseconds: latencyMilliseconds, attempt: attempt, succeeded: succeeded, errorType: errorType))
         if records.count > maxRecords { records.removeFirst(records.count - maxRecords) }
-        AIAdaptiveRoutingRegistry.shared.rebuild(from: records)
+        rebuildRoutingProjections()
         persist()
     }
 
     func setPricing(provider: AIProvider, model: String, pricing value: AIModelPricing) {
         pricing[pricingKey(provider: provider, model: model)] = value
         recomputeEstimatedCosts()
-        AIAdaptiveRoutingRegistry.shared.rebuild(from: records)
+        rebuildRoutingProjections()
         persist()
     }
 
     func removePricing(provider: AIProvider, model: String) {
         pricing.removeValue(forKey: pricingKey(provider: provider, model: model))
         recomputeEstimatedCosts()
-        AIAdaptiveRoutingRegistry.shared.rebuild(from: records)
+        rebuildRoutingProjections()
         persist()
     }
 
@@ -127,12 +127,13 @@ final class AIUsageLedger {
         \(unknownCostRecords)
 
         Pricing is estimated only for models with an explicitly configured rate.
+        Recent repeated provider/model failures are projected into the routing circuit breaker.
         """
     }
 
     func reload() {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            AIAdaptiveRoutingRegistry.shared.rebuild(from: [])
+            rebuildRoutingProjections()
             return
         }
         do {
@@ -141,7 +142,7 @@ final class AIUsageLedger {
             guard snapshot.version == 1 else { return }
             records = snapshot.records
             pricing = snapshot.pricing
-            AIAdaptiveRoutingRegistry.shared.rebuild(from: records)
+            rebuildRoutingProjections()
             persistenceError = nil
         } catch {
             persistenceError = error.localizedDescription
@@ -154,6 +155,11 @@ final class AIUsageLedger {
             let price = pricingFor(provider: record.provider, model: record.model)
             records[index].estimatedCostUSD = price?.estimatedCost(for: record.usage)
         }
+    }
+
+    private func rebuildRoutingProjections() {
+        AIAdaptiveRoutingRegistry.shared.rebuild(from: records)
+        AIModelCircuitBreaker.shared.rebuild(from: records)
     }
 
     private func persist() {
