@@ -111,7 +111,9 @@ struct AIModelRouter {
 
     /// Historical performance may optimize ordering only within the same safe
     /// execution envelope. At least five observations are required before a
-    /// model can influence adaptive ordering.
+    /// model can influence adaptive ordering. A recent-failure circuit breaker
+    /// may temporarily push an unhealthy route behind healthy peers in the same
+    /// or safer envelope; it never promotes a weaker tier above a stronger one.
     private func adaptiveOrder(
         _ candidates: [AIModelSelection],
         workload: AIWorkloadClass
@@ -120,6 +122,7 @@ struct AIModelRouter {
 
         let minimumSamples = 5
         let registry = AIAdaptiveRoutingRegistry.shared
+        let breaker = AIModelCircuitBreaker.shared
         let originalIndex = Dictionary(uniqueKeysWithValues: candidates.enumerated().map {
             ("\($0.element.provider.rawValue)::\($0.element.model)", $0.offset)
         })
@@ -130,6 +133,10 @@ struct AIModelRouter {
 
             // Safety envelope takes precedence over price/performance history.
             if lhsRank != rhsRank { return lhsRank < rhsRank }
+
+            let lhsUnhealthy = breaker.shouldDeprioritize(provider: lhs.provider, model: lhs.model, workload: workload)
+            let rhsUnhealthy = breaker.shouldDeprioritize(provider: rhs.provider, model: rhs.model, workload: workload)
+            if lhsUnhealthy != rhsUnhealthy { return !lhsUnhealthy }
 
             let lhsMetric = registry.metric(provider: lhs.provider, model: lhs.model, workload: workload)
             let rhsMetric = registry.metric(provider: rhs.provider, model: rhs.model, workload: workload)
