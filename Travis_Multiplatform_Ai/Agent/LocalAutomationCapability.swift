@@ -64,10 +64,10 @@ final class LocalAutomationCapability: AgentCapability, DeterministicInvocableCa
             guard let taskIdText = invocation.arguments["taskId"],
                   let taskId = UUID(uuidString: taskIdText),
                   let runAtText = invocation.arguments["runAt"],
-                  let runAt = Self.iso8601.date(from: runAtText) else {
+                  let runAt = parseISO8601(runAtText) else {
                 return .reply("Structured schedule requires valid taskId and ISO-8601 runAt.")
             }
-            let interval = invocation.arguments["intervalSeconds"].flatMap(TimeInterval.init)
+            let interval = invocation.arguments["intervalSeconds"].flatMap { Double($0) }
             let payload = MutationPayload(
                 operation: "schedule",
                 taskId: taskId,
@@ -95,7 +95,7 @@ final class LocalAutomationCapability: AgentCapability, DeterministicInvocableCa
         guard action.status == .approved,
               let raw = action.payload,
               let data = raw.data(using: .utf8),
-              let payload = try? JSONDecoder.iso8601.decode(MutationPayload.self, from: data) else { return }
+              let payload = try? automationDecoder().decode(MutationPayload.self, from: data) else { return }
 
         do {
             var items = try store.load()
@@ -116,7 +116,7 @@ final class LocalAutomationCapability: AgentCapability, DeterministicInvocableCa
                 )
                 items.append(item)
                 try store.save(items)
-                onExecutionUpdate?("✅ Scheduled work created: \(String(item.id.uuidString.prefix(8))) at \(Self.iso8601.string(from: runAt)).")
+                onExecutionUpdate?("✅ Scheduled work created: \(String(item.id.uuidString.prefix(8))) at \(Self.displayISO8601.string(from: runAt)).")
 
             case "cancel":
                 guard let workId = payload.workId,
@@ -147,7 +147,7 @@ final class LocalAutomationCapability: AgentCapability, DeterministicInvocableCa
     }
 
     private func proposal(for payload: MutationPayload, summary: String) throws -> CapabilityOutcome {
-        let data = try JSONEncoder.iso8601.encode(payload)
+        let data = try automationEncoder().encode(payload)
         guard let text = String(data: data, encoding: .utf8) else {
             return .reply("Απέτυχε η κωδικοποίηση automation proposal.")
         }
@@ -174,30 +174,36 @@ final class LocalAutomationCapability: AgentCapability, DeterministicInvocableCa
             case .none: recurrence = "once"
             case .interval(let seconds): recurrence = "every \(Int(seconds))s"
             }
-            return "\(String(item.id.uuidString.prefix(8))) [\(item.status.rawValue)] task=\(String(item.taskId.uuidString.prefix(8))) at=\(Self.iso8601.string(from: item.effectiveRunAt)) \(recurrence) — \(item.title)"
+            return "\(String(item.id.uuidString.prefix(8))) [\(item.status.rawValue)] task=\(String(item.taskId.uuidString.prefix(8))) at=\(Self.displayISO8601.string(from: item.effectiveRunAt)) \(recurrence) — \(item.title)"
         }.joined(separator: "\n")
         return "DURABLE AUTOMATION JOBS\n\n\(rows)"
     }
 
-    private static let iso8601: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-}
+    private func parseISO8601(_ value: String) -> Date? {
+        Self.fractionalISO8601.date(from: value) ?? Self.displayISO8601.date(from: value)
+    }
 
-private extension JSONEncoder {
-    static var iso8601: JSONEncoder {
+    private func automationEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return encoder
     }
-}
 
-private extension JSONDecoder {
-    static var iso8601: JSONDecoder {
+    private func automationDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder
     }
+
+    private static let displayISO8601: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    private static let fractionalISO8601: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 }
