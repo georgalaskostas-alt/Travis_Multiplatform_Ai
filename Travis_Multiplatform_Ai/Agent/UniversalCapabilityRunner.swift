@@ -86,8 +86,19 @@ final class UniversalCapabilityRunner {
             switch outcome {
             case .reply(let text):
                 journal.finish(recordId: recordId, status: .replied, resultSummary: text)
+                VerifiedRoutingMemory.shared.recordSuccessfulRouting(
+                    command: command,
+                    capabilityId: descriptor.id
+                )
             case .proposal(let action):
                 journal.finish(recordId: recordId, status: .proposedMutation, resultSummary: action.summary)
+                // We learn only the capability routing, never the mutation
+                // payload or approval decision. Reuse still requires repeated
+                // observations and only bypasses the classifier.
+                VerifiedRoutingMemory.shared.recordSuccessfulRouting(
+                    command: command,
+                    capabilityId: descriptor.id
+                )
             case .none:
                 journal.finish(recordId: recordId, status: .noResult)
             }
