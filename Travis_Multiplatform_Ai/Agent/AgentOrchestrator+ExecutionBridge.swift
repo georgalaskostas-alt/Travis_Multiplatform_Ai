@@ -9,6 +9,7 @@ extension AgentOrchestrator {
         id capabilityId: String,
         command: String,
         taskId: UUID? = nil,
+        stepId: UUID? = nil,
         projectId: UUID? = nil,
         recentHistory: [ChatMessage] = []
     ) async throws -> CapabilityOutcome {
@@ -21,6 +22,30 @@ extension AgentOrchestrator {
             command: command,
             context: .init(
                 taskId: taskId,
+                stepId: stepId,
+                projectId: projectId,
+                recentHistory: recentHistory
+            )
+        )
+    }
+
+    func executeCapability(
+        invocation: DeterministicCapabilityInvocation,
+        taskId: UUID? = nil,
+        stepId: UUID? = nil,
+        projectId: UUID? = nil,
+        recentHistory: [ChatMessage] = []
+    ) async throws -> CapabilityOutcome {
+        guard let capability = capabilities.first(where: { $0.id == invocation.capabilityId }) else {
+            throw AgentTaskExecutorError.missingCapability(invocation.capabilityId)
+        }
+
+        return try await UniversalCapabilityRunner.shared.run(
+            capability: capability,
+            invocation: invocation,
+            context: .init(
+                taskId: taskId,
+                stepId: stepId,
                 projectId: projectId,
                 recentHistory: recentHistory
             )
