@@ -18,16 +18,14 @@ struct AIModelRouter {
     func candidates(
         for prompt: String,
         context: AIInvocationContext,
-        availability: AIProviderAvailability
+        availability: AIProviderAvailability,
+        performanceScores: [AIModelPerformanceService.Score] = []
     ) -> [AIModelSelection] {
-        let workload = resolvedWorkload(prompt: prompt, context: context)
+        let workload = workload(for: prompt, context: context)
         guard workload != .deterministic else { return [] }
 
         var result: [AIModelSelection] = []
 
-        // Cheap local inference gets first chance only for low-risk cognitive
-        // workloads. Complex verification/frontier work is never silently
-        // downgraded to a local model merely because it is cheaper.
         if availability.hasLocal,
            [.classification, .routine].contains(workload),
            let model = availability.localModel {
@@ -40,9 +38,6 @@ struct AIModelRouter {
             ))
         }
 
-        // OpenRouter is optional and model IDs are user/config supplied. We do
-        // not invent a provider/model mapping in code because availability and
-        // pricing change independently of the app release cycle.
         if availability.hasOpenRouter,
            let model = availability.preferences.openRouterModel(for: workload) {
             let tier: AIModelTier
@@ -87,15 +82,19 @@ struct AIModelRouter {
             ))
         }
 
-        // De-duplicate identical provider/model pairs while preserving the
-        // intended escalation order.
         var seen = Set<String>()
-        return result.filter { selection in
+        let deduplicated = result.filter { selection in
             seen.insert("\(selection.provider.rawValue)::\(selection.model)").inserted
         }
+
+        return adaptiveOrder(
+            deduplicated,
+            workload: workload,
+            scores: performanceScores
+        )
     }
 
-    private func resolvedWorkload(prompt: String, context: AIInvocationContext) -> AIWorkloadClass {
+    func workload(for prompt: String, context: AIInvocationContext) -> AIWorkloadClass {
         if context.workload != .routine { return context.workload }
 
         let value = prompt.lowercased()
@@ -113,5 +112,71 @@ struct AIModelRouter {
         if complexMarkers.contains(where: value.contains) { return .complex }
 
         return .routine
+    }
+
+    /// Historical performance may optimize ordering only within a safe tier
+    /// envelope. It can never demote verification/frontier work to local or
+    /// economy models, and it needs enough samples before affecting routing.
+    private func adaptiveOrder(
+        _ candidates: [AIModelSelection],
+        workload: AIWorkloadClass,
+        scores: [AIModelPerformanceService.Score]
+    ) -> [AIModelSelection] {
+        guard candidates.count > 1 else { return candidates }
+
+        let minimumSamples = 5
+        let scoreMap = Dictionary(uniqueKeysWithValues: scores
+            .filter { $0.workload == workload && $0.requestCount >= minimumSamples }
+            .map { ("\($0.provider.rawValue)::\($0.model)", $0) })
+
+        guard !scoreMap.isEmpty else { return candidates }
+
+        let originalIndex = Dictionary(uniqueKeysWithValues: candidates.enumerated().map {
+            ("\($0.element.provider.rawValue)::\($0.element.model)", $0.offset)
+        })
+
+        return candidates.sorted { lhs, rhs in
+            let lhsRank = safeTierRank(lhs.tier, workload: workload)
+            let rhsRank = safeTierRank(rhs.tier, workload: workload)
+
+            // Never reorder across safety envelopes. Lower rank means cheaper
+            // tier and is attempted first only where that workload permits it.
+            if lhsRank != rhsRank { return lhsRank < rhsRank }
+
+            let lhsKey = "\(lhs.provider.rawValue)::\(lhs.model)"
+            let rhsKey = "\(rhs.provider.rawValue)::\(rhs.model)"
+            let lhsScore = scoreMap[lhsKey]
+            let rhsScore = scoreMap[rhsKey]
+
+            switch (lhsScore, rhsScore) {
+            case let (left?, right?):
+                if abs(left.utilityScore - right.utilityScore) > 0.01 {
+                    return left.utilityScore > right.utilityScore
+                }
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            case (nil, nil):
+                break
+            }
+
+            return (originalIndex[lhsKey] ?? 0) < (originalIndex[rhsKey] ?? 0)
+        }
+    }
+
+    private func safeTierRank(_ tier: AIModelTier, workload: AIWorkloadClass) -> Int {
+        switch workload {
+        case .classification:
+            switch tier { case .local: return 0; case .economy: return 1; case .standard: return 2; case .strong: return 3; case .frontier: return 4 }
+        case .routine:
+            switch tier { case .local: return 0; case .economy: return 1; case .standard: return 1; case .strong: return 2; case .frontier: return 3 }
+        case .complex:
+            switch tier { case .strong: return 0; case .frontier: return 1; case .standard: return 2; case .economy: return 3; case .local: return 4 }
+        case .verification, .frontier, .webResearch:
+            switch tier { case .frontier: return 0; case .strong: return 0; case .standard: return 2; case .economy: return 3; case .local: return 4 }
+        case .deterministic:
+            return 0
+        }
     }
 }
