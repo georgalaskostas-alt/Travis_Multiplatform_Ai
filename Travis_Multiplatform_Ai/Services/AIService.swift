@@ -1,6 +1,6 @@
 import Foundation
 
-enum AIProvider: String {
+enum AIProvider: String, Codable, CaseIterable, Hashable {
     case openAI = "OpenAI"
     case anthropic = "Anthropic"
 }
@@ -30,21 +30,17 @@ enum AIServiceError: LocalizedError {
 
 /// Central AI transport/router for TRAVIS.
 ///
-/// Provider order:
-///   1. OpenAI Responses API (primary, when key exists)
-///   2. Anthropic Messages API (fallback, when key exists)
-///
-/// The public API intentionally remains `generateText(prompt:maxTokens:)` so
-/// planner, verifier, repository grounding and capabilities do not need to
-/// know which provider/model is serving a request.
+/// All callers use this transport instead of choosing providers directly.
+/// AIModelRouter chooses the workload tier/model, while AIUsageLedger records
+/// actual provider-reported token usage, retries and latency.
 final class AIService {
     static let shared = AIService()
 
     private let openAIEndpoint = URL(string: "https://api.openai.com/v1/responses")!
     private let anthropicEndpoint = URL(string: "https://api.anthropic.com/v1/messages")!
     private let anthropicAPIVersion = "2023-06-01"
-    private let anthropicModel = "claude-sonnet-4-6"
     private let maxAttempts = 3
+    private let modelRouter = AIModelRouter()
 
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.default
@@ -56,10 +52,13 @@ final class AIService {
 
     private init() {}
 
-    func generateText(prompt: String, maxTokens: Int = 1024) async throws -> String {
+    func generateText(
+        prompt: String,
+        maxTokens: Int = 1024,
+        context: AIInvocationContext = .general
+    ) async throws -> String {
         let openAIKey = KeychainService.shared.openAIAPIKey?.trimmingCharacters(in: .whitespacesAndNewlines)
         let anthropicKey = KeychainService.shared.anthropicAPIKey?.trimmingCharacters(in: .whitespacesAndNewlines)
-
         let hasOpenAI = !(openAIKey ?? "").isEmpty
         let hasAnthropic = !(anthropicKey ?? "").isEmpty
 
@@ -67,170 +66,171 @@ final class AIService {
             throw AIServiceError.missingAPIKey
         }
 
-        var primaryFailure: Error?
-
-        if let openAIKey, !openAIKey.isEmpty {
-            do {
-                return try await generateWithOpenAI(
-                    prompt: prompt,
-                    maxTokens: maxTokens,
-                    apiKey: openAIKey
-                )
-            } catch {
-                primaryFailure = error
-
-                // Do not fail the autonomous runtime immediately when a
-                // second configured provider can continue the task.
-                guard let anthropicKey, !anthropicKey.isEmpty else {
-                    throw error
-                }
-            }
+        guard let primary = modelRouter.selection(
+            for: prompt,
+            context: context,
+            hasOpenAI: hasOpenAI,
+            hasAnthropic: hasAnthropic
+        ) else {
+            throw AIServiceError.missingAPIKey
         }
 
-        if let anthropicKey, !anthropicKey.isEmpty {
+        do {
+            return try await generate(
+                selection: primary,
+                prompt: prompt,
+                maxTokens: maxTokens,
+                context: context,
+                openAIKey: openAIKey,
+                anthropicKey: anthropicKey
+            )
+        } catch {
+            guard let fallback = modelRouter.fallbackSelection(after: primary, hasAnthropic: hasAnthropic) else {
+                throw error
+            }
             do {
-                return try await generateWithAnthropic(
+                return try await generate(
+                    selection: fallback,
                     prompt: prompt,
                     maxTokens: maxTokens,
-                    apiKey: anthropicKey
+                    context: context,
+                    openAIKey: openAIKey,
+                    anthropicKey: anthropicKey
                 )
-            } catch {
+            } catch let fallbackError {
                 throw AIServiceError.allProvidersFailed(
-                    primary: primaryFailure?.localizedDescription ?? "OpenAI unavailable/not configured",
-                    fallback: error.localizedDescription
+                    primary: error.localizedDescription,
+                    fallback: fallbackError.localizedDescription
                 )
             }
         }
-
-        throw primaryFailure ?? AIServiceError.missingAPIKey
     }
 
-    // MARK: - OpenAI Primary
-
-    private func generateWithOpenAI(
+    private func generate(
+        selection: AIModelSelection,
         prompt: String,
         maxTokens: Int,
-        apiKey: String
+        context: AIInvocationContext,
+        openAIKey: String?,
+        anthropicKey: String?
     ) async throws -> String {
-        let model = Self.openAIModel(for: prompt)
+        switch selection.provider {
+        case .openAI:
+            guard let key = openAIKey, !key.isEmpty else { throw AIServiceError.missingAPIKey }
+            return try await generateWithOpenAI(
+                selection: selection,
+                prompt: prompt,
+                maxTokens: maxTokens,
+                apiKey: key,
+                context: context
+            )
+        case .anthropic:
+            guard let key = anthropicKey, !key.isEmpty else { throw AIServiceError.missingAPIKey }
+            return try await generateWithAnthropic(
+                selection: selection,
+                prompt: prompt,
+                maxTokens: maxTokens,
+                apiKey: key,
+                context: context
+            )
+        }
+    }
 
+    // MARK: - OpenAI
+
+    private func generateWithOpenAI(
+        selection: AIModelSelection,
+        prompt: String,
+        maxTokens: Int,
+        apiKey: String,
+        context: AIInvocationContext
+    ) async throws -> String {
         var request = URLRequest(url: openAIEndpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = 180
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
-        let body: [String: Any] = [
-            "model": model,
+        var body: [String: Any] = [
+            "model": selection.model,
             "input": prompt,
-            "max_output_tokens": maxTokens,
-            "reasoning": [
-                "effort": Self.openAIReasoningEffort(for: prompt)
-            ]
+            "max_output_tokens": maxTokens
         ]
-
+        if let effort = selection.reasoningEffort {
+            body["reasoning"] = ["effort": effort]
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         return try await perform(
             request: request,
-            provider: .openAI,
+            selection: selection,
+            context: context,
             textParser: Self.openAITextContent,
+            usageParser: Self.openAIUsage,
             errorTypeParser: Self.openAIErrorType,
             errorMessageParser: Self.openAIErrorMessage
         )
-    }
-
-    /// Cost-aware model routing.
-    /// - Planner/repository/source-code work gets Terra.
-    /// - Verification/routine conversational work gets Luna.
-    private static func openAIModel(for prompt: String) -> String {
-        let value = prompt.lowercased()
-        let complexMarkers = [
-            "planning component",
-            "repository-analysis component",
-            "repository tree",
-            "selected source files",
-            "source code",
-            "architecture",
-            "autonomous runtime",
-            "taskplanner"
-        ]
-
-        return complexMarkers.contains(where: value.contains)
-            ? "gpt-5.6-terra"
-            : "gpt-5.6-luna"
-    }
-
-    private static func openAIReasoningEffort(for prompt: String) -> String {
-        let value = prompt.lowercased()
-        if value.contains("repository-analysis component")
-            || value.contains("planning component")
-            || value.contains("architecture") {
-            return "medium"
-        }
-        return "low"
     }
 
     private static func openAITextContent(from data: Data) throws -> String {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw AIServiceError.invalidResponse(provider: .openAI)
         }
-
-        // Some Responses API representations expose a convenience output_text.
         if let outputText = json["output_text"] as? String,
            !outputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return outputText
         }
-
-        // Canonical Responses API shape: output[] -> message -> content[] -> output_text.text
         if let output = json["output"] as? [[String: Any]] {
             var parts: [String] = []
-
             for item in output {
                 guard let content = item["content"] as? [[String: Any]] else { continue }
                 for block in content {
-                    let type = block["type"] as? String
-                    if type == "output_text", let text = block["text"] as? String {
+                    if (block["type"] as? String) == "output_text", let text = block["text"] as? String {
                         parts.append(text)
                     }
                 }
             }
-
             let text = parts.joined(separator: "\n")
-            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return text
-            }
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return text }
         }
-
         throw AIServiceError.invalidResponse(provider: .openAI)
     }
 
-    private static func openAIErrorType(from data: Data) -> String {
-        guard
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let error = json["error"] as? [String: Any]
-        else { return "unknown_error" }
+    private static func openAIUsage(from data: Data) -> AITokenUsage {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let usage = json["usage"] as? [String: Any] else { return AITokenUsage() }
+        let input = usage["input_tokens"] as? Int ?? 0
+        let output = usage["output_tokens"] as? Int ?? 0
+        let inputDetails = usage["input_tokens_details"] as? [String: Any]
+        let outputDetails = usage["output_tokens_details"] as? [String: Any]
+        return AITokenUsage(
+            inputTokens: input,
+            outputTokens: output,
+            cachedInputTokens: inputDetails?["cached_tokens"] as? Int ?? 0,
+            reasoningTokens: outputDetails?["reasoning_tokens"] as? Int ?? 0
+        )
+    }
 
-        return error["type"] as? String
-            ?? error["code"] as? String
-            ?? "unknown_error"
+    private static func openAIErrorType(from data: Data) -> String {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let error = json["error"] as? [String: Any] else { return "unknown_error" }
+        return error["type"] as? String ?? error["code"] as? String ?? "unknown_error"
     }
 
     private static func openAIErrorMessage(from data: Data) -> String {
-        guard
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let error = json["error"] as? [String: Any]
-        else { return "" }
-
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let error = json["error"] as? [String: Any] else { return "" }
         return error["message"] as? String ?? ""
     }
 
-    // MARK: - Anthropic Fallback
+    // MARK: - Anthropic
 
     private func generateWithAnthropic(
+        selection: AIModelSelection,
         prompt: String,
         maxTokens: Int,
-        apiKey: String
+        apiKey: String,
+        context: AIInvocationContext
     ) async throws -> String {
         var request = URLRequest(url: anthropicEndpoint)
         request.httpMethod = "POST"
@@ -240,68 +240,107 @@ final class AIService {
         request.setValue(anthropicAPIVersion, forHTTPHeaderField: "anthropic-version")
 
         let body: [String: Any] = [
-            "model": anthropicModel,
+            "model": selection.model,
             "max_tokens": maxTokens,
-            "messages": [
-                ["role": "user", "content": prompt]
-            ]
+            "messages": [["role": "user", "content": prompt]]
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         return try await perform(
             request: request,
-            provider: .anthropic,
+            selection: selection,
+            context: context,
             textParser: Self.anthropicTextContent,
+            usageParser: Self.anthropicUsage,
             errorTypeParser: Self.anthropicErrorType,
             errorMessageParser: Self.anthropicErrorMessage
         )
+    }
+
+    private static func anthropicTextContent(from data: Data) throws -> String {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = json["content"] as? [[String: Any]] else {
+            throw AIServiceError.invalidResponse(provider: .anthropic)
+        }
+        let text = content
+            .filter { ($0["type"] as? String) == "text" }
+            .compactMap { $0["text"] as? String }
+            .joined(separator: "\n")
+        guard !text.isEmpty else { throw AIServiceError.invalidResponse(provider: .anthropic) }
+        return text
+    }
+
+    private static func anthropicUsage(from data: Data) -> AITokenUsage {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let usage = json["usage"] as? [String: Any] else { return AITokenUsage() }
+        let input = usage["input_tokens"] as? Int ?? 0
+        let output = usage["output_tokens"] as? Int ?? 0
+        let cached = usage["cache_read_input_tokens"] as? Int ?? 0
+        return AITokenUsage(inputTokens: input, outputTokens: output, cachedInputTokens: cached)
+    }
+
+    private static func anthropicErrorType(from data: Data) -> String {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let error = json["error"] as? [String: Any] else { return "unknown_error" }
+        return error["type"] as? String ?? "unknown_error"
+    }
+
+    private static func anthropicErrorMessage(from data: Data) -> String {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let error = json["error"] as? [String: Any] else { return "" }
+        return error["message"] as? String ?? ""
     }
 
     // MARK: - Shared Transport
 
     private func perform(
         request: URLRequest,
-        provider: AIProvider,
+        selection: AIModelSelection,
+        context: AIInvocationContext,
         textParser: (Data) throws -> String,
+        usageParser: (Data) -> AITokenUsage,
         errorTypeParser: (Data) -> String,
         errorMessageParser: (Data) -> String
     ) async throws -> String {
         var lastError: Error?
 
         for attempt in 1...maxAttempts {
+            let started = ContinuousClock.now
             do {
                 let (data, response) = try await session.data(for: request)
+                let elapsed = started.duration(to: .now)
+                let latency = Self.milliseconds(elapsed)
 
                 guard let httpResponse = response as? HTTPURLResponse else {
-                    throw AIServiceError.invalidResponse(provider: provider)
+                    await recordUsage(selection: selection, context: context, usage: AITokenUsage(), latency: latency, attempt: attempt, succeeded: false, errorType: "invalid_response")
+                    throw AIServiceError.invalidResponse(provider: selection.provider)
                 }
 
                 if (200..<300).contains(httpResponse.statusCode) {
-                    return try textParser(data)
+                    let usage = usageParser(data)
+                    let text = try textParser(data)
+                    await recordUsage(selection: selection, context: context, usage: usage, latency: latency, attempt: attempt, succeeded: true, errorType: nil)
+                    return text
                 }
 
+                let errorType = errorTypeParser(data)
                 let apiError = AIServiceError.apiError(
-                    provider: provider,
+                    provider: selection.provider,
                     status: httpResponse.statusCode,
-                    type: errorTypeParser(data),
+                    type: errorType,
                     message: errorMessageParser(data)
                 )
+                await recordUsage(selection: selection, context: context, usage: usageParser(data), latency: latency, attempt: attempt, succeeded: false, errorType: errorType)
 
-                guard Self.isRetryableHTTPStatus(httpResponse.statusCode),
-                      attempt < maxAttempts
-                else {
+                guard Self.isRetryableHTTPStatus(httpResponse.statusCode), attempt < maxAttempts else {
                     throw apiError
                 }
-
                 lastError = apiError
                 try await Self.backoff(afterAttempt: attempt)
             } catch let urlError as URLError {
-                guard Self.isRetryable(urlError),
-                      attempt < maxAttempts
-                else {
-                    throw urlError
-                }
-
+                let elapsed = started.duration(to: .now)
+                await recordUsage(selection: selection, context: context, usage: AITokenUsage(), latency: Self.milliseconds(elapsed), attempt: attempt, succeeded: false, errorType: "url_\(urlError.code.rawValue)")
+                guard Self.isRetryable(urlError), attempt < maxAttempts else { throw urlError }
                 lastError = urlError
                 try await Self.backoff(afterAttempt: attempt)
             } catch {
@@ -309,17 +348,41 @@ final class AIService {
             }
         }
 
-        throw lastError ?? AIServiceError.invalidResponse(provider: provider)
+        throw lastError ?? AIServiceError.invalidResponse(provider: selection.provider)
+    }
+
+    private func recordUsage(
+        selection: AIModelSelection,
+        context: AIInvocationContext,
+        usage: AITokenUsage,
+        latency: Int,
+        attempt: Int,
+        succeeded: Bool,
+        errorType: String?
+    ) async {
+        await MainActor.run {
+            AIUsageLedger.shared.record(
+                selection: selection,
+                context: context,
+                usage: usage,
+                latencyMilliseconds: latency,
+                attempt: attempt,
+                succeeded: succeeded,
+                errorType: errorType
+            )
+        }
+    }
+
+    private static func milliseconds(_ duration: Duration) -> Int {
+        let components = duration.components
+        let seconds = components.seconds * 1_000
+        let attoseconds = components.attoseconds / 1_000_000_000_000_000
+        return Int(seconds + attoseconds)
     }
 
     private static func isRetryable(_ error: URLError) -> Bool {
         switch error.code {
-        case .timedOut,
-             .networkConnectionLost,
-             .cannotConnectToHost,
-             .cannotFindHost,
-             .dnsLookupFailed,
-             .resourceUnavailable:
+        case .timedOut, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .resourceUnavailable:
             return true
         default:
             return false
@@ -328,50 +391,13 @@ final class AIService {
 
     private static func isRetryableHTTPStatus(_ status: Int) -> Bool {
         switch status {
-        case 408, 429, 500, 502, 503, 504:
-            return true
-        default:
-            return false
+        case 408, 429, 500, 502, 503, 504: return true
+        default: return false
         }
     }
 
     private static func backoff(afterAttempt attempt: Int) async throws {
         let seconds = min(pow(2.0, Double(attempt - 1)), 8.0)
         try await Task.sleep(for: .seconds(seconds))
-    }
-
-    private static func anthropicTextContent(from data: Data) throws -> String {
-        guard
-            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let content = json["content"] as? [[String: Any]]
-        else {
-            throw AIServiceError.invalidResponse(provider: .anthropic)
-        }
-
-        let text = content
-            .filter { ($0["type"] as? String) == "text" }
-            .compactMap { $0["text"] as? String }
-            .joined(separator: "\n")
-
-        guard !text.isEmpty else {
-            throw AIServiceError.invalidResponse(provider: .anthropic)
-        }
-        return text
-    }
-
-    private static func anthropicErrorType(from data: Data) -> String {
-        guard
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let error = json["error"] as? [String: Any]
-        else { return "unknown_error" }
-        return error["type"] as? String ?? "unknown_error"
-    }
-
-    private static func anthropicErrorMessage(from data: Data) -> String {
-        guard
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let error = json["error"] as? [String: Any]
-        else { return "" }
-        return error["message"] as? String ?? ""
     }
 }
