@@ -44,6 +44,16 @@ extension TRAVISAppState {
             addAssistantMessage(LocalModelRegistry.shared.diagnosticReport())
         case .trainingRuns:
             addAssistantMessage(LocalTrainingCoordinator.shared.diagnosticReport())
+        case .trainingStart(let kindRaw, let name, let baseModel):
+            await startLocalTraining(kindRaw: kindRaw, name: name, baseModel: baseModel)
+        case .trainingRefresh(let reference):
+            await refreshLocalTraining(reference: reference)
+        case .trainingCancel(let reference):
+            await cancelLocalTraining(reference: reference)
+        case .trainingPromote(let candidateReference, let inferenceModelId):
+            promoteLocalTrainingCandidate(reference: candidateReference, inferenceModelId: inferenceModelId)
+        case .trainingRollback(let candidateReference, let reason):
+            rollbackLocalTrainingCandidate(reference: candidateReference, reason: reason)
         }
         return true
     }
@@ -145,6 +155,85 @@ extension TRAVISAppState {
             \(report.pausedOrphanTaskIds.count)
             """)
         }
+    }
+
+    private func startLocalTraining(kindRaw: String, name: String, baseModel: String) async {
+        guard let kind = TrainingDatasetPipeline.DatasetKind(rawValue: kindRaw) else {
+            addAssistantMessage("Άγνωστο dataset kind '\(kindRaw)'. Επιτρεπτά: \(TrainingDatasetPipeline.DatasetKind.allCases.map(\.rawValue).joined(separator: ", ")).")
+            return
+        }
+        do {
+            let run = try await LocalTrainingCoordinator.shared.start(name: name, kind: kind, baseModel: baseModel)
+            addAssistantMessage("LOCAL TRAINING STARTED\n\nRUN ID\n\(String(run.id.uuidString.prefix(8)))\n\nBACKEND JOB\n\(run.backendJobId)\n\nSTATE\n\(run.state.rawValue)")
+        } catch {
+            addAssistantMessage("Local training did not start: \(error.localizedDescription)")
+        }
+    }
+
+    private func refreshLocalTraining(reference: String) async {
+        guard let run = resolveTrainingRun(reference) else {
+            addAssistantMessage("Δεν βρέθηκε local training run που να ταιριάζει με '\(reference)'.")
+            return
+        }
+        do {
+            guard let updated = try await LocalTrainingCoordinator.shared.refresh(runId: run.id) else { return }
+            let progress = updated.progress.map { "\(Int(min(max($0, 0), 1) * 100))%" } ?? "unknown"
+            addAssistantMessage("LOCAL TRAINING STATUS\n\nRUN\n\(String(updated.id.uuidString.prefix(8)))\n\nSTATE\n\(updated.state.rawValue)\n\nPROGRESS\n\(progress)\n\n\(LocalModelTrainingPolicy.shared.diagnosticReport())")
+        } catch {
+            addAssistantMessage("Local training refresh failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func cancelLocalTraining(reference: String) async {
+        guard let run = resolveTrainingRun(reference) else {
+            addAssistantMessage("Δεν βρέθηκε local training run που να ταιριάζει με '\(reference)'.")
+            return
+        }
+        do {
+            guard let updated = try await LocalTrainingCoordinator.shared.cancel(runId: run.id) else { return }
+            addAssistantMessage("LOCAL TRAINING CANCELLED\n\nRUN\n\(String(updated.id.uuidString.prefix(8)))\n\nSTATE\n\(updated.state.rawValue)")
+        } catch {
+            addAssistantMessage("Local training cancellation failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func promoteLocalTrainingCandidate(reference: String, inferenceModelId: String) {
+        guard let candidate = resolveTrainingCandidate(reference) else {
+            addAssistantMessage("Δεν βρέθηκε training candidate που να ταιριάζει με '\(reference)'.")
+            return
+        }
+        guard LocalModelTrainingPolicy.shared.promote(candidateId: candidate.id, inferenceModelId: inferenceModelId) else {
+            addAssistantMessage("Ο candidate δεν είναι eligible για promotion. Πρέπει πρώτα να έχει stage=candidate και verified training artifact.")
+            return
+        }
+        addAssistantMessage("LOCAL MODEL PROMOTED\n\nCANDIDATE\n\(String(candidate.id.uuidString.prefix(8))) — \(candidate.name)\n\nINFERENCE MODEL\n\(inferenceModelId)\n\n\(LocalModelRegistry.shared.diagnosticReport())")
+    }
+
+    private func rollbackLocalTrainingCandidate(reference: String, reason: String) {
+        guard let candidate = resolveTrainingCandidate(reference) else {
+            addAssistantMessage("Δεν βρέθηκε training candidate που να ταιριάζει με '\(reference)'.")
+            return
+        }
+        LocalModelTrainingPolicy.shared.rollback(candidateId: candidate.id, reason: reason)
+        addAssistantMessage("LOCAL MODEL ROLLBACK\n\nCANDIDATE\n\(String(candidate.id.uuidString.prefix(8))) — \(candidate.name)\n\nREASON\n\(reason)\n\n\(LocalModelRegistry.shared.diagnosticReport())")
+    }
+
+    private func resolveTrainingRun(_ reference: String) -> LocalTrainingCoordinator.ActiveRun? {
+        let normalized = reference.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let matches = LocalTrainingCoordinator.shared.activeRuns.filter {
+            $0.id.uuidString.lowercased().hasPrefix(normalized) ||
+            $0.backendJobId.lowercased().contains(normalized)
+        }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    private func resolveTrainingCandidate(_ reference: String) -> LocalModelTrainingPolicy.ModelCandidate? {
+        let normalized = reference.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let matches = LocalModelTrainingPolicy.shared.candidates.filter {
+            $0.id.uuidString.lowercased().hasPrefix(normalized) ||
+            $0.name.lowercased().contains(normalized)
+        }
+        return matches.count == 1 ? matches[0] : nil
     }
 
     private func synchronizeCompletedTask(_ taskId: UUID) async {
