@@ -145,6 +145,10 @@ extension TRAVISAppState {
         let projectId = ProjectWorkspaceStore.shared.project(containingTask: taskId)?.id
         VerifiedLearningStore.shared.ingestCompletedTask(completedTask, projectId: projectId)
         ReusableSkillStore.shared.ingestCompletedTask(completedTask)
+        SkillDistillationService.shared.refresh(
+            skills: ReusableSkillStore.shared.skills,
+            capabilities: orchestrator.capabilities
+        )
     }
 
     private static var runtimeControlContextWindow: Int { 8 }
