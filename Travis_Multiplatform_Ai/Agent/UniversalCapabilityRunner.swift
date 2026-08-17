@@ -73,13 +73,15 @@ final class UniversalCapabilityRunner {
             .joined(separator: ", ")
         let summary = "structured \(invocation.operation) \(argumentSummary)"
 
-        return try await runInternal(
+        let outcome = try await runInternal(
             capability: capability,
             commandSummary: summary,
             context: context
         ) {
             try await deterministic.handle(invocation: invocation)
         }
+        LocalIntelligenceMetrics.shared.record(.structuredCapabilityExecution)
+        return outcome
     }
 
     private func runInternal(
