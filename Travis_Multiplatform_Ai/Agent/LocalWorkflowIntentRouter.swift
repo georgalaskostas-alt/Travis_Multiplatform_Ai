@@ -5,6 +5,7 @@ final class LocalWorkflowIntentRouter {
     static let shared = LocalWorkflowIntentRouter()
 
     func plan(for goal: String, capabilities: [AgentCapability]) -> TaskPlan? {
+        if let plan = LocalDeliveryWorkflowIntentRouter.shared.plan(for: goal, capabilities: capabilities) { return plan }
         if let plan = LocalDataArtifactWorkflowIntentRouter.shared.plan(for: goal, capabilities: capabilities) { return plan }
 
         let normalized = goal
