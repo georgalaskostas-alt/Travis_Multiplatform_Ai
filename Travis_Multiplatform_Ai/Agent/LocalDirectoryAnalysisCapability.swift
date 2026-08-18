@@ -57,20 +57,23 @@ final class LocalDirectoryAnalysisCapability: AgentCapability, DeterministicInvo
 
         let recursive = Self.bool(invocation.arguments["recursive"], fallback: true)
         let entries = try collectFiles(root: scoped.url, recursive: recursive)
+        let output: String
 
         switch invocation.operation {
         case "inventory":
-            return .reply(inventory(entries: entries, root: scoped.url))
+            output = inventory(entries: entries, root: scoped.url)
         case "extension_summary":
-            return .reply(extensionSummary(entries: entries, root: scoped.url))
+            output = extensionSummary(entries: entries, root: scoped.url)
         case "largest_files":
             let limit = min(max(Int(invocation.arguments["limit"] ?? "25") ?? 25, 1), 200)
-            return .reply(largestFiles(entries: entries, root: scoped.url, limit: limit))
+            output = largestFiles(entries: entries, root: scoped.url, limit: limit)
         case "duplicates":
-            return .reply(try duplicateFiles(entries: entries, root: scoped.url))
+            output = try duplicateFiles(entries: entries, root: scoped.url)
         default:
             return .reply("Unsupported directory analysis operation: \(invocation.operation)")
         }
+
+        return .reply(StructuredStepOutputCodec.append(values: ["text": output], to: output))
     }
 
     func resolve(_ action: ProposedAction) { }
@@ -102,8 +105,8 @@ final class LocalDirectoryAnalysisCapability: AgentCapability, DeterministicInvo
 
     private func inventory(entries: [Entry], root: URL) -> String {
         let total = entries.reduce(Int64(0)) { $0 + $1.size }
-        let newest = entries.compactMap(\.modified).max().map(Self.iso8601.string) ?? "unknown"
-        let human = """
+        let newest = entries.compactMap(\.modified).max().map { Self.iso8601.string(from: $0) } ?? "unknown"
+        return """
         LOCAL DIRECTORY INVENTORY
 
         root: \(root.path)
@@ -111,7 +114,6 @@ final class LocalDirectoryAnalysisCapability: AgentCapability, DeterministicInvo
         total_bytes: \(total)
         newest_modified: \(newest)
         """
-        return StructuredStepOutputCodec.append(values: ["root": root.path, "file_count": String(entries.count), "total_bytes": String(total)], to: human)
     }
 
     private func extensionSummary(entries: [Entry], root: URL) -> String {
