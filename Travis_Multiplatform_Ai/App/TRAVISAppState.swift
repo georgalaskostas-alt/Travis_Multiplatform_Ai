@@ -97,7 +97,13 @@ final class TRAVISAppState {
 
         orchestrator.onAssistantMessage = { [weak self] text in self?.addAssistantMessage(text) }
         orchestrator.onSessionRecall = { [weak self] sessionId in self?.viewSession(sessionId) }
-        taskExecutor.onProgress = { [weak self] text in self?.addAssistantMessage(text) }
+        taskExecutor.onProgress = { [weak self] text in
+            self?.addAssistantMessage(text)
+            guard let self else { return }
+            Task { @MainActor [weak self] in
+                await self?.synchronizeCompletedKnowledge()
+            }
+        }
         cryptoTradingCapability.onTestnetExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
         filesystemOperationsCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
         advancedFilesystemCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
@@ -132,6 +138,17 @@ final class TRAVISAppState {
         let restoredActions = PersistenceService.shared.loadProposedActions()
         approvalGate.restore(pending: restoredActions.pending, history: restoredActions.history)
         refreshTradingMandates()
+        Task { @MainActor [weak self] in
+            await self?.synchronizeCompletedKnowledge()
+        }
+    }
+
+    private func synchronizeCompletedKnowledge() async {
+        let coordinator = ProjectMemoryCoordinator()
+        for task in taskRuntime.tasks where task.status == .completed {
+            await coordinator.synchronize(taskId: task.id, runtime: taskRuntime)
+        }
+        TravisLearningService.shared.refresh()
     }
 
     // MARK: - Sessions
