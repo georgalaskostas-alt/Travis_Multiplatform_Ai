@@ -74,8 +74,7 @@ final class LocalDocumentCapability: AgentCapability, DeterministicInvocableCapa
             return .reply(text.split(separator: "\n", omittingEmptySubsequences: false).prefix(count).joined(separator: "\n"))
 
         case "normalize_whitespace":
-            let normalized = normalizeWhitespace(text)
-            return .reply(String(normalized.prefix(20_000)))
+            return .reply(String(normalizeWhitespace(text).prefix(20_000)))
 
         case "replace_preview":
             guard let find = invocation.arguments["find"], !find.isEmpty,
@@ -91,6 +90,19 @@ final class LocalDocumentCapability: AgentCapability, DeterministicInvocableCapa
             guard let find = invocation.arguments["find"], !find.isEmpty,
                   let replacement = invocation.arguments["replace"] else { return .reply("Missing find/replace arguments.") }
             return try proposal(sourceURL: url, original: text, transformed: text.replacingOccurrences(of: find, with: replacement), operation: "replace '\(find)'", outputPath: invocation.arguments["output_path"])
+
+        case "write_sort_lines":
+            let transformed = sortedLines(text, descending: Self.bool(invocation.arguments["descending"]))
+            return try proposal(sourceURL: url, original: text, transformed: transformed, operation: "sort lines", outputPath: invocation.arguments["output_path"])
+
+        case "write_unique_lines":
+            let transformed = uniqueLines(text, caseInsensitive: Self.bool(invocation.arguments["case_insensitive"], default: true))
+            return try proposal(sourceURL: url, original: text, transformed: transformed, operation: "remove duplicate lines", outputPath: invocation.arguments["output_path"])
+
+        case "write_pretty_json":
+            guard url.pathExtension.lowercased() == "json" else { return .reply("Pretty JSON εφαρμόζεται μόνο σε .json αρχεία.") }
+            let transformed = try prettyJSON(data)
+            return try proposal(sourceURL: url, original: text, transformed: transformed, operation: "pretty-print JSON", outputPath: invocation.arguments["output_path"])
 
         default:
             return .reply("Unsupported local document operation: \(invocation.operation)")
@@ -132,10 +144,42 @@ final class LocalDocumentCapability: AgentCapability, DeterministicInvocableCapa
         let transformedBase64: String
     }
 
+    private enum DocumentTransformError: LocalizedError {
+        case invalidJSON
+        var errorDescription: String? { "Το JSON δεν είναι έγκυρο και δεν έγινε καμία αλλαγή." }
+    }
+
     private func normalizeWhitespace(_ text: String) -> String {
         text.split(separator: "\n", omittingEmptySubsequences: false)
             .map { $0.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces) }
             .joined(separator: "\n")
+    }
+
+    private func sortedLines(_ text: String, descending: Bool) -> String {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let sorted = lines.sorted { lhs, rhs in
+            let order = lhs.localizedStandardCompare(rhs)
+            return descending ? order == .orderedDescending : order == .orderedAscending
+        }
+        return sorted.joined(separator: "\n")
+    }
+
+    private func uniqueLines(_ text: String, caseInsensitive: Bool) -> String {
+        var seen = Set<String>()
+        var result: [String] = []
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            let key = caseInsensitive ? line.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current) : line
+            if seen.insert(key).inserted { result.append(line) }
+        }
+        return result.joined(separator: "\n")
+    }
+
+    private func prettyJSON(_ data: Data) throws -> String {
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              JSONSerialization.isValidJSONObject(object),
+              let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: pretty, encoding: .utf8) else { throw DocumentTransformError.invalidJSON }
+        return text + "\n"
     }
 
     private func proposal(sourceURL: URL, original: String, transformed: String, operation: String, outputPath: String?) throws -> CapabilityOutcome {
@@ -167,6 +211,11 @@ final class LocalDocumentCapability: AgentCapability, DeterministicInvocableCapa
             filename: (finalPath as NSString).lastPathComponent,
             location: (finalPath as NSString).deletingLastPathComponent
         ))
+    }
+
+    private static func bool(_ value: String?, default fallback: Bool = false) -> Bool {
+        guard let value else { return fallback }
+        return ["1", "true", "yes", "on"].contains(value.lowercased())
     }
 
     private static let allowedExtensions: Set<String> = ["txt", "md", "csv", "json", "log", "yaml", "yml", "xml", "swift"]
