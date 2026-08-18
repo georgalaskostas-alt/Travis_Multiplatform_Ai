@@ -20,7 +20,6 @@ extension AgentOrchestrator {
         if let invocation = StructuredInvocationCodec.decode(from: command),
            invocation.capabilityId == capabilityId,
            capability is any DeterministicInvocableCapability {
-            LocalIntelligenceMetrics.shared.record(.structuredCapabilityExecution)
             return try await UniversalCapabilityRunner.shared.run(
                 capability: capability,
                 invocation: invocation,
