@@ -7,7 +7,7 @@ extension LocalFileSearchCapability: DeterministicInvocationPolicyProviding {
 
 extension LocalDocumentCapability: DeterministicInvocationPolicyProviding {
     func requiresApproval(for invocation: DeterministicCapabilityInvocation) -> Bool {
-        invocation.operation == "write_normalized" || invocation.operation == "write_replace"
+        invocation.operation.hasPrefix("write_")
     }
 
     func riskLevel(for invocation: DeterministicCapabilityInvocation) -> PlanStepRiskLevel {
