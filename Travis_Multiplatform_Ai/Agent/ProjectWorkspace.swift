@@ -15,9 +15,11 @@ struct ProjectWorkspace: Identifiable, Codable, Hashable {
     var notes: [ProjectNote]
     var artifactPaths: [String]
 
-    /// Optional for backwards-compatible decoding of v1 snapshots created
-    /// before session binding existed. New projects initialize it to [].
+    /// Optional for backwards-compatible decoding of older project snapshots.
     var sessionIds: [UUID]?
+    var goals: [ProjectGoal]?
+    var pendingItems: [ProjectPendingItem]?
+    var deliverables: [ProjectDeliverable]?
 
     init(id: UUID = UUID(), title: String, goal: String, summary: String = "") {
         self.id = id
@@ -32,6 +34,9 @@ struct ProjectWorkspace: Identifiable, Codable, Hashable {
         self.notes = []
         self.artifactPaths = []
         self.sessionIds = []
+        self.goals = [ProjectGoal(text: goal, status: .active)]
+        self.pendingItems = []
+        self.deliverables = []
     }
 }
 
@@ -58,5 +63,58 @@ struct ProjectNote: Identifiable, Codable, Hashable {
         self.id = id
         self.text = text
         self.createdAt = createdAt
+    }
+}
+
+struct ProjectGoal: Identifiable, Codable, Hashable {
+    enum Status: String, Codable, Hashable { case active, completed, cancelled }
+    let id: UUID
+    var text: String
+    var status: Status
+    var createdAt: Date
+    var completedAt: Date?
+
+    init(id: UUID = UUID(), text: String, status: Status = .active, createdAt: Date = Date(), completedAt: Date? = nil) {
+        self.id = id
+        self.text = text
+        self.status = status
+        self.createdAt = createdAt
+        self.completedAt = completedAt
+    }
+}
+
+struct ProjectPendingItem: Identifiable, Codable, Hashable {
+    enum Status: String, Codable, Hashable { case pending, completed, cancelled }
+    let id: UUID
+    var text: String
+    var status: Status
+    var createdAt: Date
+    var completedAt: Date?
+
+    init(id: UUID = UUID(), text: String, status: Status = .pending, createdAt: Date = Date(), completedAt: Date? = nil) {
+        self.id = id
+        self.text = text
+        self.status = status
+        self.createdAt = createdAt
+        self.completedAt = completedAt
+    }
+}
+
+struct ProjectDeliverable: Identifiable, Codable, Hashable {
+    enum Status: String, Codable, Hashable { case planned, ready, delivered, cancelled }
+    let id: UUID
+    var name: String
+    var path: String?
+    var status: Status
+    var createdAt: Date
+    var completedAt: Date?
+
+    init(id: UUID = UUID(), name: String, path: String? = nil, status: Status = .planned, createdAt: Date = Date(), completedAt: Date? = nil) {
+        self.id = id
+        self.name = name
+        self.path = path
+        self.status = status
+        self.createdAt = createdAt
+        self.completedAt = completedAt
     }
 }
