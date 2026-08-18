@@ -62,7 +62,10 @@ final class LocalFileSearchCapability: AgentCapability, DeterministicInvocableCa
         var urls: [URL] = []
         if recursive {
             if let enumerator = FileManager.default.enumerator(at: resolved.url, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles, .skipsPackageDescendants]) {
-                for case let url as URL in enumerator { urls.append(url); if urls.count >= 50_000 { break } }
+                for case let url as URL in enumerator {
+                    urls.append(url)
+                    if urls.count >= 50_000 { break }
+                }
             }
         } else {
             urls = try FileManager.default.contentsOfDirectory(at: resolved.url, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles])
@@ -85,7 +88,10 @@ final class LocalFileSearchCapability: AgentCapability, DeterministicInvocableCa
             if matches.count >= limit { break }
         }
 
-        guard !matches.isEmpty else { return .reply("Δεν βρέθηκαν αρχεία που να ταιριάζουν στα filters.") }
+        guard !matches.isEmpty else {
+            return .reply("Δεν βρέθηκαν αρχεία που να ταιριάζουν στα filters.")
+        }
+
         let root = resolved.url.standardizedFileURL.path
         let rows = matches.map { item -> String in
             let relative = item.0.standardizedFileURL.path.replacingOccurrences(of: root + "/", with: "")
@@ -93,8 +99,12 @@ final class LocalFileSearchCapability: AgentCapability, DeterministicInvocableCa
             let modified = item.2.map { Self.iso8601.string(from: $0) } ?? "unknown"
             return "\(kind) | \(item.1) B | \(modified) | \(relative)"
         }.joined(separator: "\n")
+
         return .reply("LOCAL FILE SEARCH\n\nroot: \(root)\nmatches: \(matches.count)\n\n\(rows)")
     }
+
+    /// This capability is read-only, so it never has an approved mutation to resolve.
+    func resolve(_ action: ProposedAction) { }
 
     private static func bool(_ value: String?, default fallback: Bool) -> Bool {
         guard let value else { return fallback }
