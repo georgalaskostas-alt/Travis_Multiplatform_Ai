@@ -60,6 +60,15 @@ extension TRAVISAppState {
                 return
             }
 
+            // Natural-language local work should not require the user to know
+            // /plan. Only exact workflows accepted by the conservative local
+            // router are promoted to autonomous tasks here. Ambiguous requests
+            // continue through the normal project/AI routing path.
+            if LocalWorkflowIntentRouter.shared.plan(for: trimmed, capabilities: orchestrator.capabilities) != nil {
+                createAutonomousPlan(goal: trimmed, projectId: boundProject()?.id)
+                return
+            }
+
             let memoryRouter = ProjectMemoryIntentRouter()
             switch await memoryRouter.classify(trimmed, recentHistory: recentHistory) {
             case .addDecision(let reference, let text, let rationale):
@@ -163,10 +172,6 @@ extension TRAVISAppState {
                 let planningGoal = enrichedGoal(goal, projectId: projectId)
                 let registry = CapabilityRegistry(capabilities: orchestrator.capabilities)
 
-                // Cheapest and safest planning order:
-                // 1. Exact local workflow that can be represented with structured arguments.
-                // 2. Previously verified reusable skill.
-                // 3. Cloud/AI planner only when the first two cannot safely understand the goal.
                 let localWorkflowPlan = LocalWorkflowIntentRouter.shared.plan(
                     for: goal,
                     capabilities: orchestrator.capabilities
