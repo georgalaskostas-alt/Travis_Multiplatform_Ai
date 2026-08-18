@@ -4,8 +4,8 @@ import Foundation
 final class LocalDataCapability: AgentCapability, DeterministicInvocableCapability {
     let id = "local_data"
     let name = "Local Data"
-    let capabilityDescription = "Zero-token local CSV/JSON inspection, filtering, projection and format conversion inside approved filesystem scope."
-    let keywords = ["csv", "json", "δεδομένα", "data", "στήλες", "columns", "filter rows"]
+    let capabilityDescription = "Zero-token local CSV/JSON inspection, filtering, projection, statistics, grouping and format conversion inside approved filesystem scope."
+    let keywords = ["csv", "json", "δεδομένα", "data", "στήλες", "columns", "filter rows", "group by", "statistics"]
     private(set) var status: AgentCapabilityStatus = .idle
 
     private let locations: FileLocationService
@@ -55,53 +55,54 @@ final class LocalDataCapability: AgentCapability, DeterministicInvocableCapabili
         guard data.count <= maxBytes else { return .reply("Το αρχείο υπερβαίνει το local safety limit των 15 MB.") }
         guard let text = String(data: data, encoding: .utf8) else { return .reply("Το αρχείο δεν είναι έγκυρο UTF-8.") }
 
+        let output: String
         switch invocation.operation {
         case "csv_summary":
-            return .reply(try csvSummary(text: text, file: resolved.url.lastPathComponent))
+            output = try csvSummary(text: text, file: resolved.url.lastPathComponent)
         case "csv_select":
             let columns = splitList(invocation.arguments["columns"])
             guard !columns.isEmpty else { return .reply("Missing columns.") }
-            let limit = clampedLimit(invocation.arguments["limit"], fallback: 200)
-            return .reply(try csvSelect(text: text, columns: columns, limit: limit))
+            output = try csvSelect(text: text, columns: columns, limit: clampedLimit(invocation.arguments["limit"], fallback: 200))
         case "csv_filter":
-            guard let column = invocation.arguments["column"],
-                  let value = invocation.arguments["value"] else { return .reply("Missing column/value.") }
-            let mode = invocation.arguments["mode"]?.lowercased() ?? "equals"
-            let limit = clampedLimit(invocation.arguments["limit"], fallback: 500)
-            return .reply(try csvFilter(text: text, column: column, value: value, mode: mode, limit: limit))
+            guard let column = invocation.arguments["column"], let value = invocation.arguments["value"] else { return .reply("Missing column/value.") }
+            output = try csvFilter(text: text, column: column, value: value, mode: invocation.arguments["mode"]?.lowercased() ?? "equals", limit: clampedLimit(invocation.arguments["limit"], fallback: 500))
+        case "csv_numeric_stats":
+            guard let column = invocation.arguments["column"] else { return .reply("Missing column.") }
+            output = try csvNumericStats(text: text, column: column)
+        case "csv_group_count":
+            guard let column = invocation.arguments["column"] else { return .reply("Missing column.") }
+            output = try csvGroupCount(text: text, column: column, limit: clampedLimit(invocation.arguments["limit"], fallback: 200))
         case "csv_to_json":
-            let limit = clampedLimit(invocation.arguments["limit"], fallback: 500)
-            return .reply(try csvToJSON(text: text, limit: limit))
+            output = try csvToJSON(text: text, limit: clampedLimit(invocation.arguments["limit"], fallback: 500))
         case "json_pretty":
-            return .reply(try jsonPretty(data: data))
+            output = try jsonPretty(data: data)
         case "json_keys":
-            return .reply(try jsonKeys(data: data))
+            output = try jsonKeys(data: data)
         case "json_get":
             guard let keyPath = invocation.arguments["key_path"], !keyPath.isEmpty else { return .reply("Missing key_path.") }
-            return .reply(try jsonGet(data: data, keyPath: keyPath))
+            output = try jsonGet(data: data, keyPath: keyPath)
         case "json_to_csv":
-            let limit = clampedLimit(invocation.arguments["limit"], fallback: 500)
-            return .reply(try jsonToCSV(data: data, limit: limit))
+            output = try jsonToCSV(data: data, limit: clampedLimit(invocation.arguments["limit"], fallback: 500))
         default:
             return .reply("Unsupported local data operation: \(invocation.operation)")
         }
+        return .reply(StructuredStepOutputCodec.append(values: ["text": output], to: output))
     }
 
     func resolve(_ action: ProposedAction) { }
 
     private func csvSummary(text: String, file: String) throws -> String {
         let table = try parseCSV(text)
-        let headers = table.headers
         let sample = table.rows.prefix(5).map { row in
-            headers.enumerated().map { index, header in "\(header)=\(index < row.count ? row[index] : "")" }.joined(separator: " | ")
+            table.headers.enumerated().map { index, header in "\(header)=\(index < row.count ? row[index] : "")" }.joined(separator: " | ")
         }.joined(separator: "\n")
         return """
         LOCAL DATA CSV SUMMARY
 
         file: \(file)
         rows: \(table.rows.count)
-        columns: \(headers.count)
-        headers: \(headers.joined(separator: " | "))
+        columns: \(table.headers.count)
+        headers: \(table.headers.joined(separator: " | "))
 
         SAMPLE
         \(sample.isEmpty ? "(empty)" : sample)
@@ -111,9 +112,7 @@ final class LocalDataCapability: AgentCapability, DeterministicInvocableCapabili
     private func csvSelect(text: String, columns: [String], limit: Int) throws -> String {
         let table = try parseCSV(text)
         let indices = try columns.map { name -> Int in
-            guard let index = table.headers.firstIndex(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) else {
-                throw DataError.unknownColumn(name)
-            }
+            guard let index = columnIndex(name, headers: table.headers) else { throw DataError.unknownColumn(name) }
             return index
         }
         let rows = table.rows.prefix(limit).map { row in indices.map { $0 < row.count ? row[$0] : "" } }
@@ -122,9 +121,7 @@ final class LocalDataCapability: AgentCapability, DeterministicInvocableCapabili
 
     private func csvFilter(text: String, column: String, value: String, mode: String, limit: Int) throws -> String {
         let table = try parseCSV(text)
-        guard let index = table.headers.firstIndex(where: { $0.caseInsensitiveCompare(column) == .orderedSame }) else {
-            throw DataError.unknownColumn(column)
-        }
+        guard let index = columnIndex(column, headers: table.headers) else { throw DataError.unknownColumn(column) }
         let filtered = table.rows.filter { row in
             let cell = index < row.count ? row[index] : ""
             switch mode {
@@ -138,12 +135,51 @@ final class LocalDataCapability: AgentCapability, DeterministicInvocableCapabili
         return structuredTable(title: "LOCAL DATA CSV FILTER", headers: table.headers, rows: Array(filtered.prefix(limit)), extra: "matched: \(filtered.count)")
     }
 
+    private func csvNumericStats(text: String, column: String) throws -> String {
+        let table = try parseCSV(text)
+        guard let index = columnIndex(column, headers: table.headers) else { throw DataError.unknownColumn(column) }
+        let values = table.rows.compactMap { row -> Double? in
+            guard index < row.count else { return nil }
+            let normalized = row[index].trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".")
+            return Double(normalized)
+        }
+        guard !values.isEmpty else { throw DataError.noNumericValues(column) }
+        let sum = values.reduce(0, +)
+        let mean = sum / Double(values.count)
+        let sorted = values.sorted()
+        let median: Double = sorted.count.isMultiple(of: 2)
+            ? (sorted[sorted.count / 2 - 1] + sorted[sorted.count / 2]) / 2
+            : sorted[sorted.count / 2]
+        return """
+        LOCAL DATA CSV NUMERIC STATS
+
+        column: \(column)
+        numeric_values: \(values.count)
+        min: \(format(values.min() ?? 0))
+        max: \(format(values.max() ?? 0))
+        sum: \(format(sum))
+        mean: \(format(mean))
+        median: \(format(median))
+        """
+    }
+
+    private func csvGroupCount(text: String, column: String, limit: Int) throws -> String {
+        let table = try parseCSV(text)
+        guard let index = columnIndex(column, headers: table.headers) else { throw DataError.unknownColumn(column) }
+        var counts: [String: Int] = [:]
+        for row in table.rows {
+            let key = index < row.count ? row[index] : ""
+            counts[key, default: 0] += 1
+        }
+        let ordered = counts.sorted { lhs, rhs in lhs.value != rhs.value ? lhs.value > rhs.value : lhs.key < rhs.key }.prefix(limit)
+        let rows = ordered.map { [$0.key, String($0.value)] }
+        return structuredTable(title: "LOCAL DATA CSV GROUP COUNT", headers: [column, "count"], rows: rows, extra: "groups: \(counts.count)")
+    }
+
     private func csvToJSON(text: String, limit: Int) throws -> String {
         let table = try parseCSV(text)
         let objects: [[String: String]] = table.rows.prefix(limit).map { row in
-            Dictionary(uniqueKeysWithValues: table.headers.enumerated().map { index, header in
-                (header, index < row.count ? row[index] : "")
-            })
+            Dictionary(uniqueKeysWithValues: table.headers.enumerated().map { index, header in (header, index < row.count ? row[index] : "") })
         }
         let data = try JSONSerialization.data(withJSONObject: objects, options: [.prettyPrinted, .sortedKeys])
         return "LOCAL DATA JSON\n\n" + (String(data: data, encoding: .utf8) ?? "[]")
@@ -158,41 +194,29 @@ final class LocalDataCapability: AgentCapability, DeterministicInvocableCapabili
     private func jsonKeys(data: Data) throws -> String {
         let object = try JSONSerialization.jsonObject(with: data)
         let keys: [String]
-        if let dictionary = object as? [String: Any] {
-            keys = dictionary.keys.sorted()
-        } else if let array = object as? [[String: Any]], let first = array.first {
-            keys = first.keys.sorted()
-        } else {
-            keys = []
-        }
+        if let dictionary = object as? [String: Any] { keys = dictionary.keys.sorted() }
+        else if let array = object as? [[String: Any]], let first = array.first { keys = first.keys.sorted() }
+        else { keys = [] }
         return "LOCAL DATA JSON KEYS\n\ncount: \(keys.count)\n" + keys.joined(separator: "\n")
     }
 
     private func jsonGet(data: Data, keyPath: String) throws -> String {
         var current: Any = try JSONSerialization.jsonObject(with: data)
         for token in keyPath.split(separator: ".").map(String.init) {
-            if let dictionary = current as? [String: Any], let next = dictionary[token] {
-                current = next
-            } else if let array = current as? [Any], let index = Int(token), array.indices.contains(index) {
-                current = array[index]
-            } else {
-                throw DataError.unknownKeyPath(keyPath)
-            }
+            if let dictionary = current as? [String: Any], let next = dictionary[token] { current = next }
+            else if let array = current as? [Any], let index = Int(token), array.indices.contains(index) { current = array[index] }
+            else { throw DataError.unknownKeyPath(keyPath) }
         }
         let output: String
         if JSONSerialization.isValidJSONObject(current) {
             let encoded = try JSONSerialization.data(withJSONObject: current, options: [.prettyPrinted, .sortedKeys])
             output = String(data: encoded, encoding: .utf8) ?? ""
-        } else {
-            output = String(describing: current)
-        }
+        } else { output = String(describing: current) }
         return "LOCAL DATA JSON VALUE\n\nkey_path: \(keyPath)\n\n\(output)"
     }
 
     private func jsonToCSV(data: Data, limit: Int) throws -> String {
-        guard let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            throw DataError.jsonArrayRequired
-        }
+        guard let array = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { throw DataError.jsonArrayRequired }
         let keys = Array(Set(array.flatMap { $0.keys })).sorted()
         let rows = array.prefix(limit).map { object in keys.map { csvScalar(object[$0]) } }
         return structuredTable(title: "LOCAL DATA CSV", headers: keys, rows: rows)
@@ -228,9 +252,7 @@ final class LocalDataCapability: AgentCapability, DeterministicInvocableCapabili
                 if !(row.count == 1 && row[0].isEmpty) { rows.append(row) }
                 row = []
                 if rows.count > maxRows + 1 { throw DataError.tooManyRows }
-            } else {
-                field.append(char)
-            }
+            } else { field.append(char) }
             index += 1
         }
         if !field.isEmpty || !row.isEmpty { row.append(field); rows.append(row) }
@@ -238,18 +260,20 @@ final class LocalDataCapability: AgentCapability, DeterministicInvocableCapabili
         return (header.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }, Array(rows.dropFirst()))
     }
 
+    private func columnIndex(_ name: String, headers: [String]) -> Int? {
+        headers.firstIndex { $0.caseInsensitiveCompare(name) == .orderedSame }
+    }
+
     private func splitList(_ value: String?) -> [String] {
         value?.split(separator: "|").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } ?? []
     }
 
-    private func clampedLimit(_ value: String?, fallback: Int) -> Int {
-        min(max(Int(value ?? "") ?? fallback, 1), 5_000)
-    }
+    private func clampedLimit(_ value: String?, fallback: Int) -> Int { min(max(Int(value ?? "") ?? fallback, 1), 5_000) }
+
+    private func format(_ value: Double) -> String { String(format: "%.6g", value) }
 
     private func escapeCell(_ value: String) -> String {
-        if value.contains(",") || value.contains("\"") || value.contains("\n") {
-            return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
-        }
+        if value.contains(",") || value.contains("\"") || value.contains("\n") { return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
         return value
     }
 
@@ -266,6 +290,7 @@ final class LocalDataCapability: AgentCapability, DeterministicInvocableCapabili
         case emptyCSV
         case tooManyRows
         case unknownColumn(String)
+        case noNumericValues(String)
         case unknownKeyPath(String)
         case jsonArrayRequired
 
@@ -274,6 +299,7 @@ final class LocalDataCapability: AgentCapability, DeterministicInvocableCapabili
             case .emptyCSV: return "Το CSV δεν περιέχει header row."
             case .tooManyRows: return "Το CSV υπερβαίνει το local safety limit των 100.000 rows."
             case .unknownColumn(let name): return "Δεν βρέθηκε η στήλη '\(name)'."
+            case .noNumericValues(let name): return "Η στήλη '\(name)' δεν περιέχει αριθμητικές τιμές."
             case .unknownKeyPath(let path): return "Δεν βρέθηκε το JSON key path '\(path)'."
             case .jsonArrayRequired: return "Για JSON → CSV απαιτείται top-level array από objects."
             }
