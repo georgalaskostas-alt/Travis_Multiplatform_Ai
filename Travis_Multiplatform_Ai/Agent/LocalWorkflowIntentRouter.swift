@@ -10,12 +10,74 @@ final class LocalWorkflowIntentRouter {
             .lowercased()
         let paths = absolutePaths(in: goal)
 
+        if let plan = textFileToClipboardPlan(normalized: normalized, paths: paths, capabilities: capabilities) { return plan }
         if let plan = fileTransferPlan(goal: goal, normalized: normalized, paths: paths, capabilities: capabilities) { return plan }
         if let plan = fileDeletePlan(goal: goal, normalized: normalized, paths: paths, capabilities: capabilities) { return plan }
         if let plan = createFolderPlan(goal: goal, normalized: normalized, paths: paths, capabilities: capabilities) { return plan }
         if let plan = documentNormalizePlan(normalized: normalized, paths: paths, capabilities: capabilities) { return plan }
         if let plan = documentReplacePlan(goal: goal, normalized: normalized, paths: paths, capabilities: capabilities) { return plan }
         return nil
+    }
+
+    private func textFileToClipboardPlan(normalized: String, paths: [String], capabilities: [AgentCapability]) -> TaskPlan? {
+        guard let source = paths.first else { return nil }
+        let wantsClipboard = normalized.contains("clipboard") || normalized.contains("προχειρο") || normalized.contains("πρόχειρο")
+        guard wantsClipboard else { return nil }
+
+        let operation: String
+        let title: String
+        if normalized.contains("sort lines") || normalized.contains("ταξινομ") && normalized.contains("γραμμ") {
+            operation = "sort_lines"
+            title = "Sort the file lines locally"
+        } else if normalized.contains("unique lines") || normalized.contains("remove duplicate lines") || normalized.contains("μοναδικ") && normalized.contains("γραμμ") || normalized.contains("διπλο") && normalized.contains("γραμμ") {
+            operation = "unique_lines"
+            title = "Remove duplicate lines locally"
+        } else if normalized.contains("uppercase") || normalized.contains("κεφαλαι") {
+            operation = "uppercase"
+            title = "Convert the file text to uppercase locally"
+        } else if normalized.contains("lowercase") || normalized.contains("πεζα") || normalized.contains("πεζά") {
+            operation = "lowercase"
+            title = "Convert the file text to lowercase locally"
+        } else {
+            return nil
+        }
+
+        let specs = [
+            LocalWorkflowComposer.StepSpec(
+                title: "Read the requested text file locally",
+                invocation: DeterministicCapabilityInvocation(
+                    capabilityId: "local_text_file_read",
+                    operation: "read",
+                    arguments: ["path": source]
+                ),
+                successCriteria: ["Read the exact scoped file and expose its text as structured output."]
+            ),
+            LocalWorkflowComposer.StepSpec(
+                title: title,
+                invocation: DeterministicCapabilityInvocation(
+                    capabilityId: "local_text_transform",
+                    operation: operation,
+                    arguments: ["text": "{{dep:1:text}}"]
+                ),
+                successCriteria: ["Transform exactly the text produced by step 1 and expose the transformed text as structured output."]
+            ),
+            LocalWorkflowComposer.StepSpec(
+                title: "Copy the transformed result to clipboard",
+                invocation: DeterministicCapabilityInvocation(
+                    capabilityId: "local_productivity",
+                    operation: "clipboard_write",
+                    arguments: ["text": "{{dep:2:text}}"]
+                ),
+                successCriteria: ["Prepare an approval-gated clipboard write containing exactly the transformed text from step 2."],
+                riskLevel: .low
+            )
+        ]
+
+        return try? LocalWorkflowComposer.shared.compose(
+            summary: "Read → transform → clipboard local workflow with verified output chaining (0 planner tokens)",
+            steps: specs,
+            capabilities: capabilities
+        )
     }
 
     private func fileTransferPlan(goal: String, normalized: String, paths: [String], capabilities: [AgentCapability]) -> TaskPlan? {
