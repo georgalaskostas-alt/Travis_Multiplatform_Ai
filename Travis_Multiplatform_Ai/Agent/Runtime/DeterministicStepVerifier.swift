@@ -16,8 +16,7 @@ enum DeterministicStepVerifier {
             return valid ? pass("Deterministic local file-search result validated without AI.") : nil
 
         case ("local_documents", "stats"):
-            return result.hasPrefix("DOCUMENT STATS")
-                ? pass("Deterministic document statistics validated without AI.") : nil
+            return result.hasPrefix("DOCUMENT STATS") ? pass("Deterministic document statistics validated without AI.") : nil
 
         case ("local_documents", "find"):
             let valid = result.hasPrefix("MATCHES (") || result.contains("Δεν βρέθηκαν matches")
@@ -38,6 +37,10 @@ enum DeterministicStepVerifier {
             return result.hasPrefix("LOCAL DATA CSV SELECT") ? pass("Local CSV projection validated without AI.") : nil
         case ("local_data", "csv_filter"):
             return result.hasPrefix("LOCAL DATA CSV FILTER") ? pass("Local CSV filter validated without AI.") : nil
+        case ("local_data", "csv_numeric_stats"):
+            return result.hasPrefix("LOCAL DATA CSV NUMERIC STATS") ? pass("Local CSV numeric statistics validated without AI.") : nil
+        case ("local_data", "csv_group_count"):
+            return result.hasPrefix("LOCAL DATA CSV GROUP COUNT") ? pass("Local CSV grouping validated without AI.") : nil
         case ("local_data", "csv_to_json"):
             return result.hasPrefix("LOCAL DATA JSON") ? pass("Local CSV to JSON conversion validated without AI.") : nil
         case ("local_data", "json_pretty"):
@@ -54,8 +57,7 @@ enum DeterministicStepVerifier {
             return valid ? pass("Local clipboard read validated without AI.") : nil
 
         case ("local_productivity", "system_info"):
-            return result.hasPrefix("LOCAL SYSTEM INFO")
-                ? pass("Local system information validated without AI.") : nil
+            return result.hasPrefix("LOCAL SYSTEM INFO") ? pass("Local system information validated without AI.") : nil
 
         default:
             return nil
