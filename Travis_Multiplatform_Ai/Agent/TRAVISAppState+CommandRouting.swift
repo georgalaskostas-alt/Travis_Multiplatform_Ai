@@ -163,14 +163,27 @@ extension TRAVISAppState {
                 let planningGoal = enrichedGoal(goal, projectId: projectId)
                 let registry = CapabilityRegistry(capabilities: orchestrator.capabilities)
 
-                let deterministicMatch = SkillExecutionEngine.shared.deterministicPlan(
+                // Cheapest and safest planning order:
+                // 1. Exact local workflow that can be represented with structured arguments.
+                // 2. Previously verified reusable skill.
+                // 3. Cloud/AI planner only when the first two cannot safely understand the goal.
+                let localWorkflowPlan = LocalWorkflowIntentRouter.shared.plan(
                     for: goal,
                     capabilities: orchestrator.capabilities
                 )
+                let deterministicMatch = localWorkflowPlan == nil
+                    ? SkillExecutionEngine.shared.deterministicPlan(
+                        for: goal,
+                        capabilities: orchestrator.capabilities
+                    )
+                    : nil
 
                 let plan: TaskPlan
                 let planningSource: String
-                if let deterministicMatch {
+                if let localWorkflowPlan {
+                    plan = localWorkflowPlan
+                    planningSource = "LOCAL WORKFLOW — exact structured operations, 0 planner tokens"
+                } else if let deterministicMatch {
                     plan = deterministicMatch.plan
                     planningSource = "LOCAL VERIFIED SKILL — similarity \(String(format: "%.2f", deterministicMatch.similarity)), observations \(deterministicMatch.skill.observationCount), 0 planner tokens"
                 } else {
