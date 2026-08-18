@@ -15,29 +15,18 @@ final class DeterministicCommandRouter {
         let available = Set(capabilities.map(\.id))
         let paths = absolutePaths(in: command)
 
-        if available.contains("advanced_filesystem"), let invocation = advancedFilesystem(command: command, normalized: normalized, paths: paths) {
-            return invocation
-        }
-        if available.contains("local_file_search"), let invocation = fileSearch(command: command, normalized: normalized, paths: paths) {
-            return invocation
-        }
-        if available.contains("local_documents"), let invocation = document(command: command, normalized: normalized, paths: paths) {
-            return invocation
-        }
+        if available.contains("advanced_filesystem"), let invocation = advancedFilesystem(command: command, normalized: normalized, paths: paths) { return invocation }
+        if available.contains("local_file_search"), let invocation = fileSearch(command: command, normalized: normalized, paths: paths) { return invocation }
+        if available.contains("local_documents"), let invocation = document(command: command, normalized: normalized, paths: paths) { return invocation }
         return nil
     }
 
     private func advancedFilesystem(command: String, normalized: String, paths: [String]) -> DeterministicCapabilityInvocation? {
-        // Create folder: one exact parent path + one quoted folder name.
         let createMarkers = ["create folder", "new folder", "δημιουργησε φακελο", "δημιουργία φακέλου", "φτιαξε φακελο"]
         if createMarkers.contains(where: { normalized.contains($0) }), let parent = paths.first {
             let quoted = quotedValues(in: command)
             guard let folderName = quoted.first, isSafeSimpleName(folderName) else { return nil }
-            return DeterministicCapabilityInvocation(
-                capabilityId: "advanced_filesystem",
-                operation: "create_folder",
-                arguments: ["sourcePath": parent, "folderName": folderName]
-            )
+            return DeterministicCapabilityInvocation(capabilityId: "advanced_filesystem", operation: "create_folder", arguments: ["sourcePath": parent, "folderName": folderName])
         }
 
         let moveMarkers = ["move files", "move all", "μετακινησε", "μεταφερε", "μετακίνησε", "μετέφερε"]
@@ -62,18 +51,13 @@ final class DeterministicCommandRouter {
 
         guard paths.count >= 2 else { return nil }
         var args = ["sourcePath": paths[0], "destinationPath": paths[1]]
-        if let ext = explicitExtension(in: command) {
-            args["matchExtension"] = ext
-        } else {
+        if let ext = explicitExtension(in: command) { args["matchExtension"] = ext }
+        else {
             let quoted = quotedValues(in: command).filter(isSafeSimpleName)
             guard !quoted.isEmpty else { return nil }
             args["names"] = quoted.joined(separator: "|")
         }
-        return DeterministicCapabilityInvocation(
-            capabilityId: "advanced_filesystem",
-            operation: wantsMove ? "move" : "copy",
-            arguments: args
-        )
+        return DeterministicCapabilityInvocation(capabilityId: "advanced_filesystem", operation: wantsMove ? "move" : "copy", arguments: args)
     }
 
     private func fileSearch(command: String, normalized: String, paths: [String]) -> DeterministicCapabilityInvocation? {
@@ -87,37 +71,42 @@ final class DeterministicCommandRouter {
 
     private func document(command: String, normalized: String, paths: [String]) -> DeterministicCapabilityInvocation? {
         guard let path = paths.first else { return nil }
+        var commonArgs = ["path": path]
+        if paths.count >= 2 { commonArgs["output_path"] = paths[1] }
 
         if normalized.contains("document stats") || normalized.contains("file stats") || normalized.contains("στατιστικ") {
             return DeterministicCapabilityInvocation(capabilityId: "local_documents", operation: "stats", arguments: ["path": path])
         }
-
         if normalized.contains("head") || normalized.contains("πρωτες γραμμ") || normalized.contains("πρώτες γραμμ") {
             var args = ["path": path]
             if let lines = integer(afterAny: ["head", "γραμμές", "γραμμες"], in: normalized) { args["lines"] = String(min(max(lines, 1), 500)) }
             return DeterministicCapabilityInvocation(capabilityId: "local_documents", operation: "head", arguments: args)
         }
-
         if normalized.contains("find in file") || normalized.contains("search in file") || normalized.contains("βρες στο αρχείο") || normalized.contains("βρες στο αρχειο") {
             let quoted = quotedValues(in: command)
             guard let query = quoted.first, !query.isEmpty else { return nil }
             return DeterministicCapabilityInvocation(capabilityId: "local_documents", operation: "find", arguments: ["path": path, "query": query])
         }
-
         if normalized.contains("normalize whitespace") || (normalized.contains("κανονικοποι") && normalized.contains("κενα")) {
-            var args = ["path": path]
-            if paths.count >= 2 { args["output_path"] = paths[1] }
-            return DeterministicCapabilityInvocation(capabilityId: "local_documents", operation: "write_normalized", arguments: args)
+            return DeterministicCapabilityInvocation(capabilityId: "local_documents", operation: "write_normalized", arguments: commonArgs)
         }
-
         if normalized.contains("replace") || normalized.contains("αντικαταστ") {
             let quoted = quotedValues(in: command)
             guard quoted.count >= 2, !quoted[0].isEmpty else { return nil }
-            var args = ["path": path, "find": quoted[0], "replace": quoted[1]]
-            if paths.count >= 2 { args["output_path"] = paths[1] }
-            return DeterministicCapabilityInvocation(capabilityId: "local_documents", operation: "write_replace", arguments: args)
+            commonArgs["find"] = quoted[0]
+            commonArgs["replace"] = quoted[1]
+            return DeterministicCapabilityInvocation(capabilityId: "local_documents", operation: "write_replace", arguments: commonArgs)
         }
-
+        if normalized.contains("sort lines") || normalized.contains("ταξινομησε τις γραμμες") || normalized.contains("ταξινόμησε τις γραμμές") {
+            if normalized.contains("descending") || normalized.contains("φθινουσα") { commonArgs["descending"] = "true" }
+            return DeterministicCapabilityInvocation(capabilityId: "local_documents", operation: "write_sort_lines", arguments: commonArgs)
+        }
+        if normalized.contains("remove duplicate lines") || normalized.contains("unique lines") || normalized.contains("αφαιρεσε διπλοτυπες γραμμες") || normalized.contains("αφαίρεσε διπλότυπες γραμμές") {
+            return DeterministicCapabilityInvocation(capabilityId: "local_documents", operation: "write_unique_lines", arguments: commonArgs)
+        }
+        if normalized.contains("pretty json") || normalized.contains("format json") || normalized.contains("μορφοποιησε json") || normalized.contains("μορφοποίησε json") {
+            return DeterministicCapabilityInvocation(capabilityId: "local_documents", operation: "write_pretty_json", arguments: commonArgs)
+        }
         return nil
     }
 
@@ -132,10 +121,7 @@ final class DeterministicCommandRouter {
 
     private func explicitExtension(in text: String) -> String? {
         let pattern = #"\.([A-Za-z0-9]{1,10})(?:\s|$|,|;)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-              match.numberOfRanges >= 2,
-              let range = Range(match.range(at: 1), in: text) else { return nil }
+        guard let regex = try? NSRegularExpression(pattern: pattern), let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)), match.numberOfRanges >= 2, let range = Range(match.range(at: 1), in: text) else { return nil }
         return String(text[range]).lowercased()
     }
 
