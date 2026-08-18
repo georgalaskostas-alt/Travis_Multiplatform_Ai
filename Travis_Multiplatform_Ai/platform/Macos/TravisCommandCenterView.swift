@@ -104,7 +104,36 @@ struct TravisCommandCenterView: View {
     private var hudBackground:some View { ZStack { LinearGradient(colors:[deep,Color(red:0.005,green:0.075,blue:0.16),Color(red:0.008,green:0.03,blue:0.09)],startPoint:.topLeading,endPoint:.bottomTrailing); Canvas { context,size in let step:CGFloat=34; var p=Path(); stride(from:CGFloat.zero,through:size.width,by:step).forEach{x in p.move(to:CGPoint(x:x,y:0));p.addLine(to:CGPoint(x:x,y:size.height))}; stride(from:CGFloat.zero,through:size.height,by:step).forEach{y in p.move(to:CGPoint(x:0,y:y));p.addLine(to:CGPoint(x:size.width,y:y))}; context.stroke(p,with:.color(cyan.opacity(0.045)),lineWidth:0.5) }; RadialGradient(colors:[cyan.opacity(0.07),.clear],center:.center,startRadius:20,endRadius:600) } }
 }
 
-private struct HUDPanel<Content:View>:View { let title:String;let icon:String;@ViewBuilder let content:Content;init(title:String,icon:String="circle.fill",@ViewBuilder content:()->Content){self.title=title;self.icon=icon;self.content=content} var body:some View { VStack(alignment:.leading,spacing:9) { HStack(spacing:6) { Image(systemName:icon).font(.system(size:9));Text(title).tracking(1.15);Spacer();Rectangle().fill(Color.cyan.opacity(0.35)).frame(width:26,height:1) }.font(.system(size:9,weight:.bold,design:.monospaced)).foregroundStyle(Color(red:0.18,green:0.82,blue:1));content }.padding(12).background(HUDChromeShape().fill(Color(red:0.008,green:0.052,blue:0.115).opacity(0.91))).overlay(HUDChromeShape().stroke(Color(red:0.08,green:0.72,blue:1).opacity(0.48),lineWidth:0.8)).shadow(color:Color.cyan.opacity(0.075),radius:10) } }
+private struct HUDPanel<Content: View>: View {
+    let title: String
+    let icon: String
+    let content: Content
+
+    init(title: String, icon: String = "circle.fill", @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.icon = icon
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: 9))
+                Text(title).tracking(1.15)
+                Spacer()
+                Rectangle().fill(Color.cyan.opacity(0.35)).frame(width: 26, height: 1)
+            }
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .foregroundStyle(Color(red: 0.18, green: 0.82, blue: 1))
+            content
+        }
+        .padding(12)
+        .background(HUDChromeShape().fill(Color(red: 0.008, green: 0.052, blue: 0.115).opacity(0.91)))
+        .overlay(HUDChromeShape().stroke(Color(red: 0.08, green: 0.72, blue: 1).opacity(0.48), lineWidth: 0.8))
+        .shadow(color: Color.cyan.opacity(0.075), radius: 10)
+    }
+}
+
 private struct HUDChromeShape:Shape { func path(in rect:CGRect)->Path { let c:CGFloat=9,cut:CGFloat=15;var p=Path();p.move(to:CGPoint(x:cut,y:0));p.addLine(to:CGPoint(x:rect.maxX-c,y:0));p.addQuadCurve(to:CGPoint(x:rect.maxX,y:c),control:CGPoint(x:rect.maxX,y:0));p.addLine(to:CGPoint(x:rect.maxX,y:rect.maxY-cut));p.addLine(to:CGPoint(x:rect.maxX-cut,y:rect.maxY));p.addLine(to:CGPoint(x:c,y:rect.maxY));p.addQuadCurve(to:CGPoint(x:0,y:rect.maxY-c),control:CGPoint(x:0,y:rect.maxY));p.addLine(to:CGPoint(x:0,y:cut));p.closeSubpath();return p } }
 private struct HUDIconButton:View { let icon:String;let action:()->Void;var body:some View { Button(action:action){Image(systemName:icon).frame(width:30,height:30).foregroundStyle(.cyan)}.buttonStyle(.plain).background(HUDChromeShape().fill(Color.cyan.opacity(0.06))).overlay(HUDChromeShape().stroke(Color.cyan.opacity(0.35))) } }
 #endif
