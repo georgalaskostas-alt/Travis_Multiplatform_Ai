@@ -32,6 +32,23 @@ enum DeterministicStepVerifier {
             guard let values = StructuredStepOutputCodec.values(from: result), values["text"] != nil else { return nil }
             return pass("Structured local text-transform output validated without AI.")
 
+        case ("local_data", "csv_summary"):
+            return result.hasPrefix("LOCAL DATA CSV SUMMARY") ? pass("Local CSV summary validated without AI.") : nil
+        case ("local_data", "csv_select"):
+            return result.hasPrefix("LOCAL DATA CSV SELECT") ? pass("Local CSV projection validated without AI.") : nil
+        case ("local_data", "csv_filter"):
+            return result.hasPrefix("LOCAL DATA CSV FILTER") ? pass("Local CSV filter validated without AI.") : nil
+        case ("local_data", "csv_to_json"):
+            return result.hasPrefix("LOCAL DATA JSON") ? pass("Local CSV to JSON conversion validated without AI.") : nil
+        case ("local_data", "json_pretty"):
+            return result.hasPrefix("LOCAL DATA JSON PRETTY") ? pass("Local JSON formatting validated without AI.") : nil
+        case ("local_data", "json_keys"):
+            return result.hasPrefix("LOCAL DATA JSON KEYS") ? pass("Local JSON key inspection validated without AI.") : nil
+        case ("local_data", "json_get"):
+            return result.hasPrefix("LOCAL DATA JSON VALUE") ? pass("Local JSON value lookup validated without AI.") : nil
+        case ("local_data", "json_to_csv"):
+            return result.hasPrefix("LOCAL DATA CSV") ? pass("Local JSON to CSV conversion validated without AI.") : nil
+
         case ("local_productivity", "clipboard_read"):
             let valid = result.hasPrefix("CLIPBOARD") || result.contains("Το πρόχειρο δεν περιέχει κείμενο")
             return valid ? pass("Local clipboard read validated without AI.") : nil
