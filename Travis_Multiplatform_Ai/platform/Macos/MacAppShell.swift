@@ -4,16 +4,21 @@ struct MacAppShell: View {
     @Bindable var appState: TRAVISAppState
 
     var body: some View {
-        NavigationSplitView {
-            List(SidebarItem.allCases, selection: $appState.selectedSidebarItem) {
-                item in
-                Label(item.title, systemImage: icon(for: item))
-                    .tag(item)
+        Group {
+            if appState.selectedSidebarItem == .chat {
+                TravisCommandCenterView(appState: appState)
+            } else {
+                NavigationSplitView {
+                    List(SidebarItem.allCases, selection: $appState.selectedSidebarItem) { item in
+                        Label(item.title, systemImage: icon(for: item))
+                            .tag(item)
+                    }
+                    .navigationSplitViewColumnWidth(min: 180, ideal: 220)
+                } detail: {
+                    detailView(for: appState.selectedSidebarItem)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 220)
-        } detail: {
-            detailView(for: appState.selectedSidebarItem)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .preferredColorScheme(.dark)
     }
@@ -53,7 +58,7 @@ struct MacAppShell: View {
 
     private func icon(for item: SidebarItem) -> String {
         switch item {
-        case .chat: return "message"
+        case .chat: return "square.grid.2x2"
         case .history: return "clock.arrow.circlepath"
         case .tasks: return "checklist"
         case .permissions: return "lock.shield"
