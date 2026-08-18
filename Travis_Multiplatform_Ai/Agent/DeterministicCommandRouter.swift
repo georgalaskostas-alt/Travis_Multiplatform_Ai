@@ -17,6 +17,7 @@ final class DeterministicCommandRouter {
 
         if available.contains("advanced_filesystem"), let invocation = advancedFilesystem(command: command, normalized: normalized, paths: paths) { return invocation }
         if available.contains("local_file_search"), let invocation = fileSearch(command: command, normalized: normalized, paths: paths) { return invocation }
+        if available.contains("local_data"), let invocation = localData(command: command, normalized: normalized, paths: paths) { return invocation }
         if available.contains("local_documents"), let invocation = document(command: command, normalized: normalized, paths: paths) { return invocation }
         return nil
     }
@@ -67,6 +68,55 @@ final class DeterministicCommandRouter {
         if let ext = explicitExtension(in: command) { arguments["extension"] = ext }
         if let limit = integer(afterAny: ["limit", "όριο", "οριο"], in: normalized) { arguments["limit"] = String(min(max(limit, 1), 1000)) }
         return DeterministicCapabilityInvocation(capabilityId: "local_file_search", operation: "search", arguments: arguments)
+    }
+
+    private func localData(command: String, normalized: String, paths: [String]) -> DeterministicCapabilityInvocation? {
+        guard let path = paths.first else { return nil }
+        let lowerPath = path.lowercased()
+        let quoted = quotedValues(in: command)
+        var args = ["path": path]
+        if let limit = integer(afterAny: ["limit", "όριο", "οριο", "rows", "γραμμες", "γραμμές"], in: normalized) {
+            args["limit"] = String(min(max(limit, 1), 5000))
+        }
+
+        if lowerPath.hasSuffix(".csv") {
+            if normalized.contains("summary") || normalized.contains("summarize csv") || normalized.contains("csv stats") || normalized.contains("περιληψη csv") || normalized.contains("σύνοψη csv") || normalized.contains("συνοψη csv") {
+                return DeterministicCapabilityInvocation(capabilityId: "local_data", operation: "csv_summary", arguments: args)
+            }
+            if normalized.contains("select columns") || normalized.contains("keep columns") || normalized.contains("στηλες") || normalized.contains("στήλες") {
+                guard !quoted.isEmpty else { return nil }
+                args["columns"] = quoted.joined(separator: "|")
+                return DeterministicCapabilityInvocation(capabilityId: "local_data", operation: "csv_select", arguments: args)
+            }
+            if normalized.contains("filter csv") || normalized.contains("filter rows") || normalized.contains("φιλτραρε") || normalized.contains("φίλτραρε") {
+                guard quoted.count >= 2 else { return nil }
+                args["column"] = quoted[0]
+                args["value"] = quoted[1]
+                if normalized.contains("contains") || normalized.contains("περιεχει") || normalized.contains("περιέχει") { args["mode"] = "contains" }
+                return DeterministicCapabilityInvocation(capabilityId: "local_data", operation: "csv_filter", arguments: args)
+            }
+            if normalized.contains("csv to json") || normalized.contains("csv → json") || normalized.contains("csv σε json") {
+                return DeterministicCapabilityInvocation(capabilityId: "local_data", operation: "csv_to_json", arguments: args)
+            }
+        }
+
+        if lowerPath.hasSuffix(".json") {
+            if normalized.contains("pretty json") || normalized.contains("format json") || normalized.contains("μορφοποιησε json") || normalized.contains("μορφοποίησε json") {
+                return DeterministicCapabilityInvocation(capabilityId: "local_data", operation: "json_pretty", arguments: args)
+            }
+            if normalized.contains("json keys") || normalized.contains("keys του json") || normalized.contains("κλειδια json") || normalized.contains("κλειδιά json") {
+                return DeterministicCapabilityInvocation(capabilityId: "local_data", operation: "json_keys", arguments: args)
+            }
+            if normalized.contains("json get") || normalized.contains("json value") || normalized.contains("τιμη json") || normalized.contains("τιμή json") {
+                guard let keyPath = quoted.first, !keyPath.isEmpty else { return nil }
+                args["key_path"] = keyPath
+                return DeterministicCapabilityInvocation(capabilityId: "local_data", operation: "json_get", arguments: args)
+            }
+            if normalized.contains("json to csv") || normalized.contains("json → csv") || normalized.contains("json σε csv") {
+                return DeterministicCapabilityInvocation(capabilityId: "local_data", operation: "json_to_csv", arguments: args)
+            }
+        }
+        return nil
     }
 
     private func document(command: String, normalized: String, paths: [String]) -> DeterministicCapabilityInvocation? {
