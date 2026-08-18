@@ -31,7 +31,23 @@ final class FileLocationService {
         }
 
         #if os(macOS)
-        return resolveHomeSubdirectory(for: location)
+        let trimmed = location.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Exact absolute/relative paths are resolved through the same
+        // containment-safe security-scope logic used for existing filesystem
+        // operations. This prevents silently redirecting an arbitrary requested
+        // output folder back to the bookmark root.
+        if trimmed.hasPrefix("/") || trimmed.contains("/") {
+            guard let resolved = resolveExistingPath(trimmed) else { return nil }
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: resolved.url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                resolved.stopAccessing()
+                return nil
+            }
+            return resolved
+        }
+
+        return resolveHomeSubdirectory(for: trimmed)
         #else
         return defaultDirectory()
         #endif
