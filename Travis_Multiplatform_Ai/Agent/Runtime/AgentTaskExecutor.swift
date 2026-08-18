@@ -496,6 +496,10 @@ final class AgentStepVerifier {
     }
 
     func verify(taskGoal: String, step: PlanStep, capabilityResult: String) async throws -> StepVerificationResult {
+        if let deterministic = DeterministicStepVerifier.verify(step: step, capabilityResult: capabilityResult) {
+            return deterministic
+        }
+
         let criteria = step.successCriteria.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
         let basePrompt = """
         You are the scope-aware verification component of TRAVIS.
