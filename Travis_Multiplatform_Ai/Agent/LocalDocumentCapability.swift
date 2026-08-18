@@ -47,7 +47,6 @@ final class LocalDocumentCapability: AgentCapability, DeterministicInvocableCapa
             return .reply("Το document path δεν υπάρχει μέσα στο εγκεκριμένο security scope.")
         }
         defer { resolved.stopAccessing() }
-        LocalIntelligenceMetrics.shared.record(.structuredCapabilityExecution)
 
         let url = resolved.url
         guard Self.allowedExtensions.contains(url.pathExtension.lowercased()) else {
