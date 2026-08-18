@@ -17,6 +17,22 @@ extension AgentOrchestrator {
             throw AgentTaskExecutorError.missingCapability(capabilityId)
         }
 
+        if let invocation = StructuredInvocationCodec.decode(from: command),
+           invocation.capabilityId == capabilityId,
+           capability is any DeterministicInvocableCapability {
+            LocalIntelligenceMetrics.shared.record(.structuredCapabilityExecution)
+            return try await UniversalCapabilityRunner.shared.run(
+                capability: capability,
+                invocation: invocation,
+                context: .init(
+                    taskId: taskId,
+                    stepId: stepId,
+                    projectId: projectId,
+                    recentHistory: recentHistory
+                )
+            )
+        }
+
         return try await UniversalCapabilityRunner.shared.run(
             capability: capability,
             command: command,
