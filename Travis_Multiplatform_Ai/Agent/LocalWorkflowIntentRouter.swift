@@ -5,6 +5,8 @@ final class LocalWorkflowIntentRouter {
     static let shared = LocalWorkflowIntentRouter()
 
     func plan(for goal: String, capabilities: [AgentCapability]) -> TaskPlan? {
+        if let plan = LocalDataArtifactWorkflowIntentRouter.shared.plan(for: goal, capabilities: capabilities) { return plan }
+
         let normalized = goal
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "el_GR"))
             .lowercased()
