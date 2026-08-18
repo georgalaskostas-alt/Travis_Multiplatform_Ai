@@ -72,6 +72,7 @@ final class TRAVISAppState {
         let localBatchTextCapability = LocalBatchTextCapability()
         let localArtifactCapability = LocalArtifactCapability()
         let localDirectoryAnalysisCapability = LocalDirectoryAnalysisCapability()
+        let localDeliveryBundleCapability = LocalDeliveryBundleCapability()
 
         orchestrator.register(TextTaskCapability())
         orchestrator.register(cryptoTradingCapability)
@@ -88,6 +89,7 @@ final class TRAVISAppState {
         orchestrator.register(localBatchTextCapability)
         orchestrator.register(localArtifactCapability)
         orchestrator.register(localDirectoryAnalysisCapability)
+        orchestrator.register(localDeliveryBundleCapability)
 
         orchestrator.onAssistantMessage = { [weak self] text in self?.addAssistantMessage(text) }
         orchestrator.onSessionRecall = { [weak self] sessionId in self?.viewSession(sessionId) }
@@ -100,6 +102,7 @@ final class TRAVISAppState {
         localDocumentCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
         localBatchTextCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
         localArtifactCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
+        localDeliveryBundleCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
 
         SpeechRecognitionService.shared.onFinalTranscript = { [weak self] text in self?.sendCommand(text, source: .voice) }
 
