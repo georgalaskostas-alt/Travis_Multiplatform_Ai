@@ -92,7 +92,21 @@ final class LocalFileSearchCapability: AgentCapability, DeterministicInvocableCa
             let modified = item.2.map { Self.iso8601.string(from: $0) } ?? "unknown"
             return "\(kind) | \(item.1) B | \(modified) | \(relative)"
         }.joined(separator: "\n")
-        return .reply("LOCAL FILE SEARCH\n\nroot: \(root)\nmatches: \(matches.count)\n\n\(rows)")
+
+        let humanText = "LOCAL FILE SEARCH\n\nroot: \(root)\nmatches: \(matches.count)\n\n\(rows)"
+        let fileMatches = matches.filter { !$0.3 }
+        let names = fileMatches.map { $0.0.lastPathComponent }.joined(separator: "|")
+        let absolutePaths = fileMatches.map { $0.0.standardizedFileURL.path }.joined(separator: "|")
+        let structured = StructuredStepOutputCodec.append(
+            values: [
+                "root": root,
+                "count": String(fileMatches.count),
+                "names": names,
+                "paths": absolutePaths
+            ],
+            to: humanText
+        )
+        return .reply(structured)
     }
 
     /// Search is read-only; approval resolution is intentionally a no-op.
