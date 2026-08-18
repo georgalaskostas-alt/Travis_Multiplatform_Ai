@@ -15,6 +15,9 @@ final class DeterministicCommandRouter {
         let available = Set(capabilities.map(\.id))
         let paths = absolutePaths(in: command)
 
+        if available.contains("advanced_filesystem"), let invocation = advancedFilesystem(command: command, normalized: normalized, paths: paths) {
+            return invocation
+        }
         if available.contains("local_file_search"), let invocation = fileSearch(command: command, normalized: normalized, paths: paths) {
             return invocation
         }
@@ -22,6 +25,55 @@ final class DeterministicCommandRouter {
             return invocation
         }
         return nil
+    }
+
+    private func advancedFilesystem(command: String, normalized: String, paths: [String]) -> DeterministicCapabilityInvocation? {
+        // Create folder: one exact parent path + one quoted folder name.
+        let createMarkers = ["create folder", "new folder", "δημιουργησε φακελο", "δημιουργία φακέλου", "φτιαξε φακελο"]
+        if createMarkers.contains(where: { normalized.contains($0) }), let parent = paths.first {
+            let quoted = quotedValues(in: command)
+            guard let folderName = quoted.first, isSafeSimpleName(folderName) else { return nil }
+            return DeterministicCapabilityInvocation(
+                capabilityId: "advanced_filesystem",
+                operation: "create_folder",
+                arguments: ["sourcePath": parent, "folderName": folderName]
+            )
+        }
+
+        let moveMarkers = ["move files", "move all", "μετακινησε", "μεταφερε", "μετακίνησε", "μετέφερε"]
+        let copyMarkers = ["copy files", "copy all", "αντιγραψε", "αντίγραψε"]
+        let deleteMarkers = ["delete files", "delete all", "διαγραψε", "διεγραψε", "διέγραψε"]
+        let wantsMove = moveMarkers.contains(where: { normalized.contains($0) })
+        let wantsCopy = copyMarkers.contains(where: { normalized.contains($0) })
+        let wantsDelete = deleteMarkers.contains(where: { normalized.contains($0) })
+        guard [wantsMove, wantsCopy, wantsDelete].filter({ $0 }).count == 1 else { return nil }
+
+        if wantsDelete {
+            guard let source = paths.first else { return nil }
+            var args = ["sourcePath": source]
+            if let ext = explicitExtension(in: command) { args["matchExtension"] = ext }
+            else {
+                let quoted = quotedValues(in: command).filter(isSafeSimpleName)
+                guard !quoted.isEmpty else { return nil }
+                args["names"] = quoted.joined(separator: "|")
+            }
+            return DeterministicCapabilityInvocation(capabilityId: "advanced_filesystem", operation: "delete", arguments: args)
+        }
+
+        guard paths.count >= 2 else { return nil }
+        var args = ["sourcePath": paths[0], "destinationPath": paths[1]]
+        if let ext = explicitExtension(in: command) {
+            args["matchExtension"] = ext
+        } else {
+            let quoted = quotedValues(in: command).filter(isSafeSimpleName)
+            guard !quoted.isEmpty else { return nil }
+            args["names"] = quoted.joined(separator: "|")
+        }
+        return DeterministicCapabilityInvocation(
+            capabilityId: "advanced_filesystem",
+            operation: wantsMove ? "move" : "copy",
+            arguments: args
+        )
     }
 
     private func fileSearch(command: String, normalized: String, paths: [String]) -> DeterministicCapabilityInvocation? {
@@ -103,5 +155,9 @@ final class DeterministicCommandRouter {
             if let token = tail.split(whereSeparator: { !$0.isNumber }).first, let value = Int(token) { return value }
         }
         return nil
+    }
+
+    private func isSafeSimpleName(_ value: String) -> Bool {
+        !value.isEmpty && value != "." && value != ".." && !value.contains("/") && !value.contains("\\")
     }
 }
