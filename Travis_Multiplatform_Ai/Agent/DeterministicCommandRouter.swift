@@ -83,6 +83,16 @@ final class DeterministicCommandRouter {
             if normalized.contains("summary") || normalized.contains("summarize csv") || normalized.contains("csv stats") || normalized.contains("περιληψη csv") || normalized.contains("σύνοψη csv") || normalized.contains("συνοψη csv") {
                 return DeterministicCapabilityInvocation(capabilityId: "local_data", operation: "csv_summary", arguments: args)
             }
+            if normalized.contains("numeric stats") || normalized.contains("average") || normalized.contains("mean") || normalized.contains("median") || normalized.contains("minimum") || normalized.contains("maximum") || normalized.contains("sum") || normalized.contains("μεσο ορο") || normalized.contains("μέσο όρο") {
+                guard let column = quoted.first, !column.isEmpty else { return nil }
+                args["column"] = column
+                return DeterministicCapabilityInvocation(capabilityId: "local_data", operation: "csv_numeric_stats", arguments: args)
+            }
+            if normalized.contains("group by") || normalized.contains("group count") || normalized.contains("ομαδοποι") {
+                guard let column = quoted.first, !column.isEmpty else { return nil }
+                args["column"] = column
+                return DeterministicCapabilityInvocation(capabilityId: "local_data", operation: "csv_group_count", arguments: args)
+            }
             if normalized.contains("select columns") || normalized.contains("keep columns") || normalized.contains("στηλες") || normalized.contains("στήλες") {
                 guard !quoted.isEmpty else { return nil }
                 args["columns"] = quoted.joined(separator: "|")
