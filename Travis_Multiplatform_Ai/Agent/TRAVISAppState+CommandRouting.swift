@@ -60,11 +60,11 @@ extension TRAVISAppState {
                 return
             }
 
-            // Natural-language local work should not require the user to know
-            // /plan. Only exact workflows accepted by the conservative local
-            // router are promoted to autonomous tasks here. Ambiguous requests
-            // continue through the normal project/AI routing path.
-            if LocalWorkflowIntentRouter.shared.plan(for: trimmed, capabilities: orchestrator.capabilities) != nil {
+            // Exact local multi-step work is promoted directly to an autonomous
+            // task. Batch workflows are checked first because they intentionally
+            // operate on a verified set of files rather than a single document.
+            if LocalBatchWorkflowIntentRouter.shared.plan(for: trimmed, capabilities: orchestrator.capabilities) != nil ||
+                LocalWorkflowIntentRouter.shared.plan(for: trimmed, capabilities: orchestrator.capabilities) != nil {
                 createAutonomousPlan(goal: trimmed, projectId: boundProject()?.id)
                 return
             }
@@ -172,11 +172,17 @@ extension TRAVISAppState {
                 let planningGoal = enrichedGoal(goal, projectId: projectId)
                 let registry = CapabilityRegistry(capabilities: orchestrator.capabilities)
 
-                let localWorkflowPlan = LocalWorkflowIntentRouter.shared.plan(
+                let batchWorkflowPlan = LocalBatchWorkflowIntentRouter.shared.plan(
                     for: goal,
                     capabilities: orchestrator.capabilities
                 )
-                let deterministicMatch = localWorkflowPlan == nil
+                let localWorkflowPlan = batchWorkflowPlan == nil
+                    ? LocalWorkflowIntentRouter.shared.plan(
+                        for: goal,
+                        capabilities: orchestrator.capabilities
+                    )
+                    : nil
+                let deterministicMatch = batchWorkflowPlan == nil && localWorkflowPlan == nil
                     ? SkillExecutionEngine.shared.deterministicPlan(
                         for: goal,
                         capabilities: orchestrator.capabilities
@@ -185,7 +191,10 @@ extension TRAVISAppState {
 
                 let plan: TaskPlan
                 let planningSource: String
-                if let localWorkflowPlan {
+                if let batchWorkflowPlan {
+                    plan = batchWorkflowPlan
+                    planningSource = "LOCAL BATCH WORKFLOW — exact verified file set, 0 planner tokens"
+                } else if let localWorkflowPlan {
                     plan = localWorkflowPlan
                     planningSource = "LOCAL WORKFLOW — exact structured operations, 0 planner tokens"
                 } else if let deterministicMatch {
