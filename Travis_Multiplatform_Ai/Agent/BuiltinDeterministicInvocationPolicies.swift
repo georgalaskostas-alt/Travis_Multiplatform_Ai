@@ -15,6 +15,16 @@ extension LocalDocumentCapability: DeterministicInvocationPolicyProviding {
     }
 }
 
+extension LocalTextFileReadCapability: DeterministicInvocationPolicyProviding {
+    func requiresApproval(for invocation: DeterministicCapabilityInvocation) -> Bool { false }
+    func riskLevel(for invocation: DeterministicCapabilityInvocation) -> PlanStepRiskLevel { .low }
+}
+
+extension LocalTextTransformCapability: DeterministicInvocationPolicyProviding {
+    func requiresApproval(for invocation: DeterministicCapabilityInvocation) -> Bool { false }
+    func riskLevel(for invocation: DeterministicCapabilityInvocation) -> PlanStepRiskLevel { .low }
+}
+
 extension LocalProductivityCapability: DeterministicInvocationPolicyProviding {
     func requiresApproval(for invocation: DeterministicCapabilityInvocation) -> Bool {
         invocation.operation == "clipboard_write"
