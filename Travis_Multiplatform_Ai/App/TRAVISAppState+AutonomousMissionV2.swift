@@ -12,7 +12,7 @@ extension TRAVISAppState {
         appendMessage(role: .user, text: trimmed)
         isBusy = true
         isProcessing = true
-        currentDeviceState = .thinking
+        currentDeviceState = .processing
         lastResponseSummary = "Planning autonomous mission"
 
         let engine = makeMissionEngineV2()
@@ -42,7 +42,7 @@ extension TRAVISAppState {
     func continueAutonomousMissionV2(taskId: UUID) {
         isBusy = true
         isProcessing = true
-        currentDeviceState = .thinking
+        currentDeviceState = .processing
         lastResponseSummary = "Continuing autonomous mission"
 
         let engine = makeMissionEngineV2()
