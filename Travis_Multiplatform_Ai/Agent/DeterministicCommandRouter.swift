@@ -17,7 +17,9 @@ final class DeterministicCommandRouter {
 
         if available.contains("advanced_filesystem"), let invocation = advancedFilesystem(command: command, normalized: normalized, paths: paths) { return invocation }
         if available.contains("local_file_search"), let invocation = fileSearch(command: command, normalized: normalized, paths: paths) { return invocation }
+        if available.contains("local_directory_analysis"), let invocation = directoryAnalysis(normalized: normalized, paths: paths) { return invocation }
         if available.contains("local_data"), let invocation = localData(command: command, normalized: normalized, paths: paths) { return invocation }
+        if available.contains("local_artifact"), let invocation = localArtifact(command: command, normalized: normalized, paths: paths) { return invocation }
         if available.contains("local_documents"), let invocation = document(command: command, normalized: normalized, paths: paths) { return invocation }
         return nil
     }
@@ -68,6 +70,27 @@ final class DeterministicCommandRouter {
         if let ext = explicitExtension(in: command) { arguments["extension"] = ext }
         if let limit = integer(afterAny: ["limit", "όριο", "οριο"], in: normalized) { arguments["limit"] = String(min(max(limit, 1), 1000)) }
         return DeterministicCapabilityInvocation(capabilityId: "local_file_search", operation: "search", arguments: arguments)
+    }
+
+    private func directoryAnalysis(normalized: String, paths: [String]) -> DeterministicCapabilityInvocation? {
+        guard let path = paths.first else { return nil }
+        let operation: String
+        if normalized.contains("duplicate files") || normalized.contains("find duplicates") || normalized.contains("διπλοτυπα αρχεια") || normalized.contains("διπλοτυπ") {
+            operation = "duplicates"
+        } else if normalized.contains("largest files") || normalized.contains("biggest files") || normalized.contains("μεγαλυτερα αρχεια") || normalized.contains("μεγαλύτερα αρχεία") {
+            operation = "largest_files"
+        } else if normalized.contains("extension summary") || normalized.contains("types of files") || normalized.contains("ανα επεκταση") || normalized.contains("ανά επέκταση") {
+            operation = "extension_summary"
+        } else if normalized.contains("folder inventory") || normalized.contains("directory inventory") || normalized.contains("απογραφη φακελου") || normalized.contains("ανάλυση φακέλου") || normalized.contains("αναλυση φακελου") {
+            operation = "inventory"
+        } else {
+            return nil
+        }
+        var args = ["path": path, "recursive": normalized.contains("non recursive") || normalized.contains("μη αναδρομ") ? "false" : "true"]
+        if operation == "largest_files", let limit = integer(afterAny: ["top", "limit", "πρωτα", "πρώτα"], in: normalized) {
+            args["limit"] = String(min(max(limit, 1), 200))
+        }
+        return DeterministicCapabilityInvocation(capabilityId: "local_directory_analysis", operation: operation, arguments: args)
     }
 
     private func localData(command: String, normalized: String, paths: [String]) -> DeterministicCapabilityInvocation? {
@@ -127,6 +150,21 @@ final class DeterministicCommandRouter {
             }
         }
         return nil
+    }
+
+    private func localArtifact(command: String, normalized: String, paths: [String]) -> DeterministicCapabilityInvocation? {
+        let markers = ["save text", "write text", "create text file", "αποθηκευσε κειμενο", "αποθήκευσε κείμενο", "γραψε αρχειο", "γράψε αρχείο"]
+        guard markers.contains(where: { normalized.contains($0) }), let targetPath = paths.first else { return nil }
+        let quoted = quotedValues(in: command)
+        guard let text = quoted.first else { return nil }
+        let target = URL(fileURLWithPath: targetPath)
+        let filename = target.lastPathComponent
+        guard !filename.isEmpty, !(target.pathExtension.isEmpty) else { return nil }
+        return DeterministicCapabilityInvocation(
+            capabilityId: "local_artifact",
+            operation: "write_new",
+            arguments: ["directory": target.deletingLastPathComponent().path, "filename": filename, "text": text]
+        )
     }
 
     private func document(command: String, normalized: String, paths: [String]) -> DeterministicCapabilityInvocation? {
