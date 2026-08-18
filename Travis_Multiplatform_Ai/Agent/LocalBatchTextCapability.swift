@@ -65,7 +65,7 @@ final class LocalBatchTextCapability: AgentCapability, DeterministicInvocableCap
         guard Self.allowedTransforms.contains(transform) else { return .reply("Μη υποστηριζόμενο batch transform: \(transform)") }
 
         let destinationPath = invocation.arguments["destinationPath"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let outputDirectory: FileLocationService.ScopedURL?
+        let outputDirectory: FileLocationService.ResolvedLocation?
         if let destinationPath, !destinationPath.isEmpty {
             outputDirectory = locations.resolveExistingPath(destinationPath)
             guard outputDirectory != nil else { return .reply("Ο destination folder δεν είναι μέσα στο εγκεκριμένο filesystem scope.") }
@@ -136,9 +136,6 @@ final class LocalBatchTextCapability: AgentCapability, DeterministicInvocableCap
         defer { source.stopAccessing() }
 
         do {
-            // All preflight checks happen before the first write so a changed
-            // source or output collision stops the whole batch atomically enough
-            // for user-facing semantics.
             var prepared: [(URL, URL, Data)] = []
             for snapshot in payload.files {
                 guard isSafeSimpleName(snapshot.name) else { throw BatchError.unsafeName(snapshot.name) }
