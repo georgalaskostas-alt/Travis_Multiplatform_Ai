@@ -10,24 +10,15 @@ final class LocalWorkflowIntentRouter {
             .lowercased()
         let paths = absolutePaths(in: goal)
 
-        if let plan = fileTransferPlan(goal: goal, normalized: normalized, paths: paths, capabilities: capabilities) {
-            return plan
-        }
-        if let plan = documentNormalizePlan(normalized: normalized, paths: paths, capabilities: capabilities) {
-            return plan
-        }
-        if let plan = documentReplacePlan(goal: goal, normalized: normalized, paths: paths, capabilities: capabilities) {
-            return plan
-        }
+        if let plan = fileTransferPlan(goal: goal, normalized: normalized, paths: paths, capabilities: capabilities) { return plan }
+        if let plan = fileDeletePlan(goal: goal, normalized: normalized, paths: paths, capabilities: capabilities) { return plan }
+        if let plan = createFolderPlan(goal: goal, normalized: normalized, paths: paths, capabilities: capabilities) { return plan }
+        if let plan = documentNormalizePlan(normalized: normalized, paths: paths, capabilities: capabilities) { return plan }
+        if let plan = documentReplacePlan(goal: goal, normalized: normalized, paths: paths, capabilities: capabilities) { return plan }
         return nil
     }
 
-    private func fileTransferPlan(
-        goal: String,
-        normalized: String,
-        paths: [String],
-        capabilities: [AgentCapability]
-    ) -> TaskPlan? {
+    private func fileTransferPlan(goal: String, normalized: String, paths: [String], capabilities: [AgentCapability]) -> TaskPlan? {
         guard paths.count >= 2 else { return nil }
         let isMove = ["move", "μετακινησ", "μεταφερ"].contains { normalized.contains($0) }
         let isCopy = ["copy", "αντιγρα"].contains { normalized.contains($0) }
@@ -36,22 +27,6 @@ final class LocalWorkflowIntentRouter {
 
         let source = paths[0]
         let destination = paths[1]
-        let transferOperation = isMove ? "organize_extension" : "copy"
-        let transferArgs: [String: String]
-        if isMove {
-            transferArgs = [
-                "sourcePath": source,
-                "destinationPath": destination,
-                "matchExtension": ext
-            ]
-        } else {
-            // AdvancedFilesystem supports selecting all matching files when
-            // names is empty and matchExtension is supplied through its
-            // natural parser, but its structured invocation currently accepts
-            // explicit names only. Avoid guessing a dynamic file list here.
-            return nil
-        }
-
         let specs = [
             LocalWorkflowComposer.StepSpec(
                 title: "Find .\(ext) files locally",
@@ -63,55 +38,98 @@ final class LocalWorkflowIntentRouter {
                 successCriteria: ["Return the matching local files or explicitly report that none exist."]
             ),
             LocalWorkflowComposer.StepSpec(
-                title: "Move matching .\(ext) files",
+                title: "\(isMove ? "Move" : "Copy") matching .\(ext) files",
                 invocation: DeterministicCapabilityInvocation(
                     capabilityId: "advanced_filesystem",
-                    operation: transferOperation,
-                    arguments: transferArgs
+                    operation: isMove ? "move" : "copy",
+                    arguments: [
+                        "sourcePath": source,
+                        "destinationPath": destination,
+                        "matchExtension": ext
+                    ]
                 ),
-                successCriteria: ["Prepare or execute the scoped filesystem move without collisions."],
+                successCriteria: ["Prepare the scoped filesystem operation without collisions."],
                 riskLevel: .medium
             )
         ]
         return try? LocalWorkflowComposer.shared.compose(
-            summary: "Local file search → move workflow (0 planner tokens)",
+            summary: "Local file search → \(isMove ? "move" : "copy") workflow (0 planner tokens)",
             steps: specs,
             capabilities: capabilities
         )
     }
 
-    private func documentNormalizePlan(
-        normalized: String,
-        paths: [String],
-        capabilities: [AgentCapability]
-    ) -> TaskPlan? {
+    private func fileDeletePlan(goal: String, normalized: String, paths: [String], capabilities: [AgentCapability]) -> TaskPlan? {
+        let marker = ["delete files", "delete all", "διαγραψε", "διεγραψε", "διέγραψε"].contains { normalized.contains($0) }
+        guard marker, let source = paths.first, let ext = explicitExtension(in: goal) else { return nil }
+        let specs = [
+            LocalWorkflowComposer.StepSpec(
+                title: "Find .\(ext) files before deletion",
+                invocation: DeterministicCapabilityInvocation(
+                    capabilityId: "local_file_search",
+                    operation: "search",
+                    arguments: ["path": source, "extension": ext, "recursive": "false", "limit": "1000"]
+                ),
+                successCriteria: ["List the exact matching files before any deletion is proposed."]
+            ),
+            LocalWorkflowComposer.StepSpec(
+                title: "Delete matching .\(ext) files",
+                invocation: DeterministicCapabilityInvocation(
+                    capabilityId: "advanced_filesystem",
+                    operation: "delete",
+                    arguments: ["sourcePath": source, "matchExtension": ext]
+                ),
+                successCriteria: ["Prepare an approval-gated deletion proposal for only the matching files."],
+                riskLevel: .high
+            )
+        ]
+        return try? LocalWorkflowComposer.shared.compose(
+            summary: "Local file search → delete workflow (0 planner tokens)",
+            steps: specs,
+            capabilities: capabilities
+        )
+    }
+
+    private func createFolderPlan(goal: String, normalized: String, paths: [String], capabilities: [AgentCapability]) -> TaskPlan? {
+        let marker = ["create folder", "new folder", "δημιουργησε φακελο", "φτιαξε φακελο"].contains { normalized.contains($0) }
+        guard marker, let parent = paths.first else { return nil }
+        let quoted = quotedValues(in: goal)
+        guard let name = quoted.first, isSafeSimpleName(name) else { return nil }
+        let spec = LocalWorkflowComposer.StepSpec(
+            title: "Create folder \(name)",
+            invocation: DeterministicCapabilityInvocation(
+                capabilityId: "advanced_filesystem",
+                operation: "create_folder",
+                arguments: ["sourcePath": parent, "folderName": name]
+            ),
+            successCriteria: ["Prepare an approval-gated folder creation at the exact requested path."],
+            riskLevel: .medium
+        )
+        return try? LocalWorkflowComposer.shared.compose(
+            summary: "Local create-folder workflow (0 planner tokens)",
+            steps: [spec],
+            capabilities: capabilities
+        )
+    }
+
+    private func documentNormalizePlan(normalized: String, paths: [String], capabilities: [AgentCapability]) -> TaskPlan? {
         let marker = normalized.contains("normalize whitespace") || normalized.contains("κανονικοποι") && normalized.contains("κενα")
         guard marker, let source = paths.first else { return nil }
         var args = ["path": source]
         if paths.count >= 2 { args["output_path"] = paths[1] }
         let spec = LocalWorkflowComposer.StepSpec(
             title: "Normalize document whitespace locally",
-            invocation: DeterministicCapabilityInvocation(
-                capabilityId: "local_documents",
-                operation: "write_normalized",
-                arguments: args
-            ),
+            invocation: DeterministicCapabilityInvocation(capabilityId: "local_documents", operation: "write_normalized", arguments: args),
             successCriteria: ["Produce a deterministic whitespace-normalized document proposal or report that no change is required."],
             riskLevel: .medium
         )
         return try? LocalWorkflowComposer.shared.compose(
             summary: "Local document normalization workflow (0 planner tokens)",
-            steps: [spec],
-            capabilities: capabilities
+            steps: [spec], capabilities: capabilities
         )
     }
 
-    private func documentReplacePlan(
-        goal: String,
-        normalized: String,
-        paths: [String],
-        capabilities: [AgentCapability]
-    ) -> TaskPlan? {
+    private func documentReplacePlan(goal: String, normalized: String, paths: [String], capabilities: [AgentCapability]) -> TaskPlan? {
         guard normalized.contains("replace") || normalized.contains("αντικαταστ") else { return nil }
         guard let source = paths.first else { return nil }
         let quoted = quotedValues(in: goal)
@@ -120,18 +138,13 @@ final class LocalWorkflowIntentRouter {
         if paths.count >= 2 { args["output_path"] = paths[1] }
         let spec = LocalWorkflowComposer.StepSpec(
             title: "Replace exact text in document locally",
-            invocation: DeterministicCapabilityInvocation(
-                capabilityId: "local_documents",
-                operation: "write_replace",
-                arguments: args
-            ),
+            invocation: DeterministicCapabilityInvocation(capabilityId: "local_documents", operation: "write_replace", arguments: args),
             successCriteria: ["Prepare the exact text replacement as a scoped document mutation proposal."],
             riskLevel: .medium
         )
         return try? LocalWorkflowComposer.shared.compose(
             summary: "Local exact-text replacement workflow (0 planner tokens)",
-            steps: [spec],
-            capabilities: capabilities
+            steps: [spec], capabilities: capabilities
         )
     }
 
@@ -160,5 +173,9 @@ final class LocalWorkflowIntentRouter {
             guard match.numberOfRanges >= 2, let range = Range(match.range(at: 1), in: text) else { return nil }
             return String(text[range])
         }
+    }
+
+    private func isSafeSimpleName(_ value: String) -> Bool {
+        !value.isEmpty && value != "." && value != ".." && !value.contains("/") && !value.contains("\\")
     }
 }
