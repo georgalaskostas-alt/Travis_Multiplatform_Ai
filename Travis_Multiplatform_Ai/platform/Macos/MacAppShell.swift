@@ -6,7 +6,7 @@ struct MacAppShell: View {
     var body: some View {
         Group {
             if appState.selectedSidebarItem == .chat {
-                TravisCommandCenterView(appState: appState)
+                TravisPremiumCommandCenterView(appState: appState)
             } else {
                 NavigationSplitView {
                     List(SidebarItem.allCases, selection: $appState.selectedSidebarItem) { item in
