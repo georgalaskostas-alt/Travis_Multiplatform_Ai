@@ -11,18 +11,18 @@ final class LocalWorkflowComposer {
         var title: String
         var invocation: DeterministicCapabilityInvocation
         var successCriteria: [String]
-        var riskLevel: PlanStepRiskLevel
+        var riskLevelOverride: PlanStepRiskLevel?
 
         init(
             title: String,
             invocation: DeterministicCapabilityInvocation,
             successCriteria: [String] = ["The capability returns a non-empty result that can be verified."],
-            riskLevel: PlanStepRiskLevel = .low
+            riskLevel: PlanStepRiskLevel? = nil
         ) {
             self.title = title
             self.invocation = invocation
             self.successCriteria = successCriteria
-            self.riskLevel = riskLevel
+            self.riskLevelOverride = riskLevel
         }
     }
 
@@ -67,8 +67,14 @@ final class LocalWorkflowComposer {
             catch { throw CompositionError.encodingFailed(spec.invocation.capabilityId) }
 
             let descriptor = capability.descriptor
+            let provider = capability as? any DeterministicInvocationPolicyProviding
+            let needsApproval = provider?.requiresApproval(for: spec.invocation)
+                ?? (descriptor.policy.requiresExplicitApproval || descriptor.policy.declares(.localMutation))
+            let riskLevel = spec.riskLevelOverride
+                ?? provider?.riskLevel(for: spec.invocation)
+                ?? .low
+
             let stepId = UUID()
-            let needsApproval = descriptor.policy.requiresExplicitApproval || descriptor.policy.declares(.localMutation)
             steps.append(PlanStep(
                 id: stepId,
                 order: index + 1,
@@ -78,7 +84,7 @@ final class LocalWorkflowComposer {
                 capabilityId: spec.invocation.capabilityId,
                 dependencyStepIds: previous.map { [$0] } ?? [],
                 successCriteria: spec.successCriteria,
-                riskLevel: spec.riskLevel,
+                riskLevel: riskLevel,
                 requiresApproval: needsApproval,
                 canRunInBackground: descriptor.policy.supportsBackgroundExecution,
                 estimatedEffort: .short,
