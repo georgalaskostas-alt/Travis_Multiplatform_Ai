@@ -15,6 +15,15 @@ enum DeterministicStepVerifier {
             let valid = result.hasPrefix("LOCAL FILE SEARCH") || result.contains("Δεν βρέθηκαν αρχεία")
             return valid ? pass("Deterministic local file-search result validated without AI.") : nil
 
+        case ("local_directory_analysis", "inventory"):
+            return result.hasPrefix("LOCAL DIRECTORY INVENTORY") ? pass("Local directory inventory validated without AI.") : nil
+        case ("local_directory_analysis", "extension_summary"):
+            return result.hasPrefix("LOCAL DIRECTORY EXTENSION SUMMARY") ? pass("Local extension summary validated without AI.") : nil
+        case ("local_directory_analysis", "largest_files"):
+            return result.hasPrefix("LOCAL DIRECTORY LARGEST FILES") ? pass("Local largest-file report validated without AI.") : nil
+        case ("local_directory_analysis", "duplicates"):
+            return result.hasPrefix("LOCAL DIRECTORY DUPLICATES") ? pass("Local duplicate-file analysis validated without AI.") : nil
+
         case ("local_documents", "stats"):
             return result.hasPrefix("DOCUMENT STATS") ? pass("Deterministic document statistics validated without AI.") : nil
 
