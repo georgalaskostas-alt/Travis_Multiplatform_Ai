@@ -20,3 +20,21 @@ struct DeterministicCapabilityInvocation: Codable, Hashable, Sendable {
 protocol DeterministicInvocableCapability: AgentCapability {
     func handle(invocation: DeterministicCapabilityInvocation) async throws -> CapabilityOutcome
 }
+
+/// Optional finer-grained policy metadata for structured operations. This
+/// prevents a mixed read/write capability from forcing approval on harmless
+/// reads just because some other operation in the same capability mutates state.
+protocol DeterministicInvocationPolicyProviding {
+    func requiresApproval(for invocation: DeterministicCapabilityInvocation) -> Bool
+    func riskLevel(for invocation: DeterministicCapabilityInvocation) -> PlanStepRiskLevel
+}
+
+extension DeterministicInvocationPolicyProviding where Self: AgentCapability {
+    func requiresApproval(for invocation: DeterministicCapabilityInvocation) -> Bool {
+        descriptor.policy.requiresExplicitApproval || descriptor.policy.declares(.localMutation)
+    }
+
+    func riskLevel(for invocation: DeterministicCapabilityInvocation) -> PlanStepRiskLevel {
+        descriptor.policy.declares(.financial) || descriptor.policy.declares(.externalMutation) ? .high : .low
+    }
+}
