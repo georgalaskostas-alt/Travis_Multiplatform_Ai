@@ -83,6 +83,29 @@ final class AgentOrchestrator {
             return
         }
 
+        // Local-first execution boundary. If the request can be represented as
+        // a fully structured deterministic invocation, execute it before any
+        // semantic capability-selection LLM is consulted. Ambiguous requests
+        // deliberately return nil and continue through the existing AI path.
+        if let invocation = DeterministicCommandRouter.shared.invocation(for: trimmed, capabilities: capabilities),
+           let capability = capabilities.first(where: { $0.id == invocation.capabilityId }) {
+            do {
+                let outcome = try await capabilityRunner.run(
+                    capability: capability,
+                    invocation: invocation,
+                    context: .init(recentHistory: recentHistory)
+                )
+                switch outcome {
+                case .reply(let text): onAssistantMessage?(text)
+                case .proposal(let action): approvalGate.submit(action)
+                case .none: break
+                }
+            } catch {
+                onAssistantMessage?("Σφάλμα local execution: \(error.localizedDescription)")
+            }
+            return
+        }
+
         if let outcome = try? await sessionRecallService.evaluate(message, excluding: liveSessionId, recentHistory: recentHistory) {
             switch outcome {
             case .found(let sessionId):
@@ -219,36 +242,59 @@ final class AgentOrchestrator {
             guard step.status == .pending || step.status == .ready else { return false }
             return step.dependencyStepIds.allSatisfy { completedIds.contains($0) }
         }
-        let activeStepText: String
-        if let currentStep { activeStepText = "#\(currentStep.order) — \(currentStep.title) [\(currentStep.status.rawValue)]" }
-        else if let nextStep { activeStepText = "#\(nextStep.order) — \(nextStep.title) [\(nextStep.status.rawValue)]" }
-        else { activeStepText = "κανένα" }
+        let budgetRuntime = task.budget.maxRuntimeSeconds.map { "\(Int($0))s" } ?? "unlimited"
+        let budgetSteps = task.budget.maxSteps.map(String.init) ?? "unlimited"
+        return """
+        AUTONOMOUS TASK STATUS
 
-        let attempts = task.plan.steps.reduce(0) { $0 + $1.attemptCount }
-        let pauseDetail = task.status == .paused
-            ? task.events.reversed().first(where: { $0.type == .paused })?.message
-            : nil
-        let maxStepsText = task.budget.maxSteps.map(String.init) ?? "unlimited"
-        let maxRuntimeText = task.budget.maxRuntimeSeconds.map { String(Int($0)) + "s" } ?? "unlimited"
+        TASK
+        \(task.id.uuidString)
 
-        return "AUTONOMOUS TASK STATUS\n\nTASK\n\(task.id.uuidString)\n\nTITLE\n\(task.title)\n\nSTATUS\n\(task.status.rawValue)\n\nPLAN VERSION\nv\(task.plan.version)\n\nPROGRESS\n\(progress)% (\(completedSteps)/\(totalSteps) steps)\n\nCURRENT / NEXT STEP\n\(activeStepText)\n\nTOTAL EXECUTION ATTEMPTS\n\(attempts)\n\nLAST CHECKPOINT\n\(task.executionState.lastCheckpoint?.summary ?? "κανένα")\n\nFAILURE / PAUSE DETAIL\n\(task.failureReason ?? pauseDetail ?? "κανένα")\n\nBUDGET\nmaxSteps: \(maxStepsText)\nmaxRuntime: \(maxRuntimeText)\nmaxRetriesPerStep: \(task.budget.maxRetriesPerStep)"
+        TITLE
+        \(task.title)
+
+        STATUS
+        \(task.status.rawValue)
+
+        PLAN VERSION
+        v\(task.plan.version)
+
+        PROGRESS
+        \(progress)% (\(completedSteps)/\(totalSteps) steps)
+
+        CURRENT / NEXT STEP
+        \(currentStep.map { "#\($0.order) — \($0.title)" } ?? nextStep.map { "#\($0.order) — \($0.title)" } ?? "κανένα")
+
+        TOTAL EXECUTION ATTEMPTS
+        \(task.plan.steps.reduce(0) { $0 + $1.attemptCount })
+
+        LAST CHECKPOINT
+        \(task.executionState.lastCheckpoint?.summary ?? "κανένα")
+
+        FAILURE / PAUSE DETAIL
+        \(task.failureReason ?? currentStep?.lastError ?? "κανένα")
+
+        BUDGET
+        maxSteps: \(budgetSteps)
+        maxRuntime: \(budgetRuntime)
+        maxRetriesPerStep: \(task.budget.maxRetriesPerStep)
+        """
     }
 
     private func renderTaskLog(reference: String?) -> String {
         do {
             switch try resolveTask(reference: reference) {
-            case .notFound: return "Δεν βρέθηκε autonomous task. Χρησιμοποίησε /tasks."
+            case .notFound: return "Δεν βρέθηκε autonomous task που να ταιριάζει με \(reference ?? "την επιλογή"). Χρησιμοποίησε /tasks για τη λίστα."
             case .ambiguous(let tasks): return renderAmbiguousTaskSelection(tasks, command: "/task-log")
             case .found(let task):
-                let formatter = ISO8601DateFormatter()
-                let events = task.events.map { "[\(formatter.string(from: $0.createdAt))] \($0.type.rawValue.uppercased()) — \($0.message)" }.joined(separator: "\n")
-                return "AUTONOMOUS TASK LOG\n\nTASK\n\(task.id.uuidString)\n\nSTATUS\n\(task.status.rawValue)\n\nEVENTS\n\(events.isEmpty ? "κανένα" : events)"
+                let rows = task.events.map { event in "[\(ISO8601DateFormatter().string(from: event.createdAt))] \(event.type.rawValue.uppercased()) — \(event.message)" }.joined(separator: "\n")
+                return "AUTONOMOUS TASK LOG\n\nTASK\n\(task.id.uuidString)\n\nSTATUS\n\(task.status.rawValue)\n\nEVENTS\n\(rows.isEmpty ? "κανένα" : rows)"
             }
         } catch { return "Αποτυχία ανάγνωσης autonomous task log: \(error.localizedDescription)" }
     }
 
     private func renderAmbiguousTaskSelection(_ tasks: [AgentTask], command: String) -> String {
-        let rows = tasks.prefix(10).map { "\($0.id.uuidString.prefix(8)) [\($0.status.rawValue)] — \($0.title)" }.joined(separator: "\n")
-        return "Βρήκα περισσότερα από ένα tasks:\n\n\(rows)\n\nΧρησιμοποίησε \(command) <short ID>."
+        let rows = tasks.prefix(8).map { "\($0.id.uuidString.prefix(8)) — [\($0.status.rawValue)] \($0.title)" }.joined(separator: "\n")
+        return "Βρήκα περισσότερα από ένα tasks που ταιριάζουν. Διάλεξε ID:\n\n\(rows)\n\n\(command) <ID>"
     }
 }
