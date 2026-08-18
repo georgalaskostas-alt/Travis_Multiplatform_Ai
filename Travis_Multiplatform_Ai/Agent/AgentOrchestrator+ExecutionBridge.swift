@@ -17,9 +17,13 @@ extension AgentOrchestrator {
             throw AgentTaskExecutorError.missingCapability(capabilityId)
         }
 
-        if let invocation = StructuredInvocationCodec.decode(from: command),
-           invocation.capabilityId == capabilityId,
+        if let encodedInvocation = StructuredInvocationCodec.decode(from: command),
+           encodedInvocation.capabilityId == capabilityId,
            capability is any DeterministicInvocableCapability {
+            let invocation = try StructuredWorkflowBindingResolver.resolve(
+                invocation: encodedInvocation,
+                taskId: taskId
+            )
             return try await UniversalCapabilityRunner.shared.run(
                 capability: capability,
                 invocation: invocation,
@@ -55,9 +59,13 @@ extension AgentOrchestrator {
             throw AgentTaskExecutorError.missingCapability(invocation.capabilityId)
         }
 
+        let resolvedInvocation = try StructuredWorkflowBindingResolver.resolve(
+            invocation: invocation,
+            taskId: taskId
+        )
         return try await UniversalCapabilityRunner.shared.run(
             capability: capability,
-            invocation: invocation,
+            invocation: resolvedInvocation,
             context: .init(
                 taskId: taskId,
                 stepId: stepId,
