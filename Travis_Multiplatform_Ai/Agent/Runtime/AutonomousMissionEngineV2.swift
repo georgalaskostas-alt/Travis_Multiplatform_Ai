@@ -1,0 +1,280 @@
+import Foundation
+import Observation
+
+enum AutonomousMissionEngineV2State: String, Codable {
+    case idle
+    case planning
+    case executing
+    case correcting
+    case waitingForApproval
+    case completed
+    case paused
+    case failed
+}
+
+struct AutonomousMissionV2Report: Codable, Hashable {
+    let taskId: UUID
+    let state: AutonomousMissionEngineV2State
+    let planVersion: Int
+    let replansUsed: Int
+    let progress: Double
+    let message: String
+}
+
+@MainActor
+@Observable
+final class AutonomousMissionEngineV2 {
+    private let runtime: AgentTaskRuntime
+    private let executor: AgentTaskExecutor
+    private let orchestrator: AgentOrchestrator
+    private let planner: AutonomousMissionPlannerV2
+
+    private(set) var state: AutonomousMissionEngineV2State = .idle
+    private(set) var activeTaskId: UUID?
+    private(set) var lastMessage: String = "Ready"
+    var onProgress: ((String) -> Void)?
+
+    init(
+        runtime: AgentTaskRuntime,
+        executor: AgentTaskExecutor,
+        orchestrator: AgentOrchestrator,
+        planner: AutonomousMissionPlannerV2 = AutonomousMissionPlannerV2()
+    ) {
+        self.runtime = runtime
+        self.executor = executor
+        self.orchestrator = orchestrator
+        self.planner = planner
+    }
+
+    @discardableResult
+    func startMission(
+        goal: String,
+        title: String? = nil,
+        priority: AgentTaskPriority = .medium,
+        budget: TaskExecutionBudget = TaskExecutionBudget(),
+        recentHistory: [ChatMessage] = []
+    ) async throws -> AutonomousMissionV2Report {
+        state = .planning
+        lastMessage = "Σχεδιάζω την αποστολή…"
+        onProgress?("🧠 TRAVIS: σχεδιάζω ολόκληρη την αποστολή πριν ξεκινήσω.")
+
+        let task = runtime.createTask(goal: goal, title: title, priority: priority, budget: budget)
+        activeTaskId = task.id
+
+        do {
+            let priorKnowledge = buildPriorExperienceContext(for: goal)
+            let plan = try await planner.makePlan(
+                goal: goal,
+                capabilities: orchestrator.capabilities,
+                priorKnowledge: priorKnowledge
+            )
+            runtime.attachPlan(taskId: task.id, plan: plan)
+            runtime.start(taskId: task.id)
+            state = .executing
+            onProgress?("✅ Το σχέδιο δημιουργήθηκε με \(plan.steps.count) βήματα. Ξεκινώ αυτόνομα.")
+            return try await continueMission(taskId: task.id, recentHistory: recentHistory)
+        } catch {
+            runtime.pause(taskId: task.id, reason: "Mission planning failed: \(error.localizedDescription)")
+            state = .failed
+            lastMessage = error.localizedDescription
+            throw error
+        }
+    }
+
+    @discardableResult
+    func continueMission(
+        taskId: UUID,
+        recentHistory: [ChatMessage] = []
+    ) async throws -> AutonomousMissionV2Report {
+        activeTaskId = taskId
+
+        guard var task = runtime.task(id: taskId) else {
+            state = .failed
+            throw AgentTaskExecutorError.taskNotFound
+        }
+
+        if task.status == .paused {
+            runtime.resume(taskId: taskId)
+            task = runtime.task(id: taskId) ?? task
+        }
+
+        if task.status == .pending {
+            runtime.start(taskId: taskId)
+            task = runtime.task(id: taskId) ?? task
+        }
+
+        var correctionCycles = task.executionState.replanCount
+        let maxReplans = max(0, task.budget.maxReplans)
+
+        while true {
+            guard let current = runtime.task(id: taskId) else {
+                state = .failed
+                throw AgentTaskExecutorError.taskNotFound
+            }
+
+            switch current.status {
+            case .completed:
+                state = .completed
+                lastMessage = "Η αποστολή ολοκληρώθηκε και επαληθεύτηκε."
+                onProgress?("🏁 TRAVIS: η αποστολή ολοκληρώθηκε με verified αποτέλεσμα.")
+                return report(for: current, message: lastMessage)
+            case .waitingForApproval:
+                state = .waitingForApproval
+                lastMessage = "Χρειάζομαι έγκριση για ένα ευαίσθητο βήμα."
+                return report(for: current, message: lastMessage)
+            case .cancelled:
+                state = .paused
+                lastMessage = "Η αποστολή ακυρώθηκε."
+                return report(for: current, message: lastMessage)
+            default:
+                break
+            }
+
+            state = .executing
+            let run = try await executor.executeUntilBlocked(
+                taskId: taskId,
+                recentHistory: recentHistory,
+                maxStepsPerCycle: 12
+            )
+
+            guard let afterRun = runtime.task(id: taskId) else {
+                state = .failed
+                throw AgentTaskExecutorError.taskNotFound
+            }
+
+            switch run.stopReason {
+            case .completed:
+                state = .completed
+                lastMessage = "Η αποστολή ολοκληρώθηκε και επαληθεύτηκε."
+                return report(for: afterRun, message: lastMessage)
+
+            case .waitingForApproval:
+                state = .waitingForApproval
+                lastMessage = "Η αποστολή περιμένει έγκριση."
+                return report(for: afterRun, message: lastMessage)
+
+            case .paused, .budgetExceeded:
+                state = .paused
+                lastMessage = run.failureReason ?? afterRun.failureReason ?? "Η αποστολή σταμάτησε με ασφάλεια."
+                return report(for: afterRun, message: lastMessage)
+
+            case .safetyStepLimitReached:
+                state = .executing
+                runtime.checkpoint(
+                    taskId: taskId,
+                    summary: "Mission V2 cycle checkpoint after \(run.stepsAttempted) attempts",
+                    nextAction: run.nextStepTitle
+                )
+                onProgress?("↻ Συνεχίζω την αποστολή από το checkpoint χωρίς νέα εντολή.")
+                continue
+
+            case .noRunnableStep:
+                if afterRun.status == .running {
+                    state = .paused
+                    lastMessage = "Δεν υπάρχει εκτελέσιμο επόμενο βήμα. Χρειάζεται νέο σχέδιο."
+                } else {
+                    lastMessage = afterRun.failureReason ?? "Δεν υπάρχει εκτελέσιμο επόμενο βήμα."
+                }
+                fallthrough
+
+            case .failed:
+                guard correctionCycles < maxReplans else {
+                    state = .failed
+                    lastMessage = afterRun.failureReason ?? "Εξαντλήθηκαν οι αυτόματες διορθώσεις."
+                    onProgress?("⛔️ Σταματώ: δοκίμασα τις επιτρεπόμενες αυτόματες διορθώσεις χωρίς verified completion.")
+                    return report(for: afterRun, message: lastMessage)
+                }
+
+                correctionCycles += 1
+                state = .correcting
+                onProgress?("🛠️ Self-correction \(correctionCycles)/\(maxReplans): αναλύω τι απέτυχε και αλλάζω σχέδιο.")
+
+                do {
+                    let recoveryPlan = try await planner.makeRecoveryPlan(
+                        task: afterRun,
+                        capabilities: orchestrator.capabilities
+                    )
+                    runtime.replacePlan(
+                        taskId: taskId,
+                        summary: recoveryPlan.summary,
+                        steps: recoveryPlan.steps
+                    )
+                    runtime.start(taskId: taskId)
+                    runtime.checkpoint(
+                        taskId: taskId,
+                        summary: "Recovery plan v\(recoveryPlan.version) attached after failure",
+                        nextAction: recoveryPlan.steps.first?.title
+                    )
+                    onProgress?("✅ Δημιούργησα διαφορετικό recovery plan. Συνεχίζω αυτόματα.")
+                    continue
+                } catch {
+                    state = .failed
+                    lastMessage = "Απέτυχε και η αυτόματη διόρθωση: \(error.localizedDescription)"
+                    runtime.pause(taskId: taskId, reason: lastMessage)
+                    return report(for: runtime.task(id: taskId) ?? afterRun, message: lastMessage)
+                }
+            }
+        }
+    }
+
+    func cancelActiveMission(reason: String = "Cancelled by user") {
+        guard let activeTaskId else { return }
+        if !executor.requestCancellation(taskId: activeTaskId, reason: reason) {
+            runtime.cancel(taskId: activeTaskId, reason: reason)
+        }
+        state = .paused
+        lastMessage = reason
+    }
+
+    private func report(for task: AgentTask, message: String) -> AutonomousMissionV2Report {
+        AutonomousMissionV2Report(
+            taskId: task.id,
+            state: state,
+            planVersion: task.plan.version,
+            replansUsed: task.executionState.replanCount,
+            progress: runtime.progress(taskId: task.id),
+            message: message
+        )
+    }
+
+    private func buildPriorExperienceContext(for goal: String) -> String? {
+        let normalizedWords = Set(
+            goal.lowercased()
+                .split { !$0.isLetter && !$0.isNumber }
+                .map(String.init)
+                .filter { $0.count >= 4 }
+        )
+        guard !normalizedWords.isEmpty else { return nil }
+
+        let similar = runtime.tasks
+            .filter { $0.status == .completed || $0.status == .failed }
+            .compactMap { task -> (AgentTask, Int)? in
+                let words = Set(
+                    (task.title + " " + task.goal).lowercased()
+                        .split { !$0.isLetter && !$0.isNumber }
+                        .map(String.init)
+                        .filter { $0.count >= 4 }
+                )
+                let score = normalizedWords.intersection(words).count
+                return score > 0 ? (task, score) : nil
+            }
+            .sorted { lhs, rhs in
+                lhs.1 != rhs.1 ? lhs.1 > rhs.1 : lhs.0.updatedAt > rhs.0.updatedAt
+            }
+            .prefix(4)
+
+        guard !similar.isEmpty else { return nil }
+        return similar.map { task, _ in
+            let completed = task.plan.steps.filter { $0.status == .completed }
+            let failed = task.plan.steps.filter { $0.status == .failed }
+            let completedText = completed.prefix(4).map { "✓ \($0.title): \(String(($0.resultSummary ?? "completed").prefix(900)))" }.joined(separator: "\n")
+            let failedText = failed.prefix(2).map { "✗ \($0.title): \($0.lastError ?? "failed")" }.joined(separator: "\n")
+            return """
+            PRIOR MISSION: \(task.title)
+            STATUS: \(task.status.rawValue)
+            \(completedText)
+            \(failedText)
+            """
+        }.joined(separator: "\n\n")
+    }
+}
