@@ -1,12 +1,17 @@
 import Foundation
 
-/// Builds exact two-step local workflows: analyze/convert one CSV or JSON file,
-/// then save the verified result as a new artifact. Ambiguous requests return nil.
+/// Builds exact local workflows that turn verified local analysis into a saved
+/// artifact. Folder-report requests are delegated first; CSV/JSON requests are
+/// handled directly here. Ambiguous requests return nil.
 @MainActor
 final class LocalDataArtifactWorkflowIntentRouter {
     static let shared = LocalDataArtifactWorkflowIntentRouter()
 
     func plan(for goal: String, capabilities: [AgentCapability]) -> TaskPlan? {
+        if let folderPlan = LocalDirectoryArtifactWorkflowIntentRouter.shared.plan(for: goal, capabilities: capabilities) {
+            return folderPlan
+        }
+
         let normalized = goal
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "el_GR"))
             .lowercased()
