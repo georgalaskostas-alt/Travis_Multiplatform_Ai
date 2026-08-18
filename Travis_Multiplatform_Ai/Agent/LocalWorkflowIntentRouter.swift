@@ -35,25 +35,25 @@ final class LocalWorkflowIntentRouter {
                     operation: "search",
                     arguments: ["path": source, "extension": ext, "recursive": "false", "limit": "1000"]
                 ),
-                successCriteria: ["Return the matching local files or explicitly report that none exist."]
+                successCriteria: ["Return the matching local files and expose their exact filenames as structured verified output."]
             ),
             LocalWorkflowComposer.StepSpec(
-                title: "\(isMove ? "Move" : "Copy") matching .\(ext) files",
+                title: "\(isMove ? "Move" : "Copy") the files found in step 1",
                 invocation: DeterministicCapabilityInvocation(
                     capabilityId: "advanced_filesystem",
                     operation: isMove ? "move" : "copy",
                     arguments: [
                         "sourcePath": source,
                         "destinationPath": destination,
-                        "matchExtension": ext
+                        "names": "{{dep:1:names}}"
                     ]
                 ),
-                successCriteria: ["Prepare the scoped filesystem operation without collisions."],
+                successCriteria: ["Prepare the scoped filesystem operation for exactly the filenames verified by step 1, without collisions."],
                 riskLevel: .medium
             )
         ]
         return try? LocalWorkflowComposer.shared.compose(
-            summary: "Local file search → \(isMove ? "move" : "copy") workflow (0 planner tokens)",
+            summary: "Local file search → \(isMove ? "move" : "copy") workflow with verified output chaining (0 planner tokens)",
             steps: specs,
             capabilities: capabilities
         )
@@ -70,21 +70,21 @@ final class LocalWorkflowIntentRouter {
                     operation: "search",
                     arguments: ["path": source, "extension": ext, "recursive": "false", "limit": "1000"]
                 ),
-                successCriteria: ["List the exact matching files before any deletion is proposed."]
+                successCriteria: ["List the exact matching files and expose their filenames as structured verified output before any deletion is proposed."]
             ),
             LocalWorkflowComposer.StepSpec(
-                title: "Delete matching .\(ext) files",
+                title: "Delete only the files found in step 1",
                 invocation: DeterministicCapabilityInvocation(
                     capabilityId: "advanced_filesystem",
                     operation: "delete",
-                    arguments: ["sourcePath": source, "matchExtension": ext]
+                    arguments: ["sourcePath": source, "names": "{{dep:1:names}}"]
                 ),
-                successCriteria: ["Prepare an approval-gated deletion proposal for only the matching files."],
+                successCriteria: ["Prepare an approval-gated deletion proposal for exactly the filenames verified by step 1."],
                 riskLevel: .high
             )
         ]
         return try? LocalWorkflowComposer.shared.compose(
-            summary: "Local file search → delete workflow (0 planner tokens)",
+            summary: "Local file search → delete workflow with verified output chaining (0 planner tokens)",
             steps: specs,
             capabilities: capabilities
         )
