@@ -22,7 +22,7 @@ final class FCCAssistantCapability: AgentCapability, DeterministicInvocableCapab
             id: id,
             displayName: name,
             summary: capabilityDescription,
-            domain: .data,
+            domain: .productivity,
             keywords: keywords,
             policy: CapabilityExecutionPolicy(
                 declaredEffects: [.readOnly],
@@ -67,10 +67,14 @@ final class FCCAssistantCapability: AgentCapability, DeterministicInvocableCapab
             var items = [URLQueryItem(name: "startTime", value: start), URLQueryItem(name: "endTime", value: end)]
             if let tags = invocation.arguments["tags"], !tags.isEmpty { items.append(URLQueryItem(name: "tags", value: tags)) }
             components.queryItems = items
-            return .reply(try await request(url: components.url!))
+            guard let url = components.url else { return .reply("Invalid FCC shift-report URL.") }
+            return .reply(try await request(url: url))
         case "ask_shift":
             guard let question = invocation.arguments["question"], let start = invocation.arguments["start_time"], let end = invocation.arguments["end_time"] else { return .reply("Missing FCC question/start/end.") }
-            let body: [String: Any] = ["question": question, "start_time": start, "end_time": end, "tags": invocation.arguments["tags"]?.split(separator: ",").map { String($0) } ?? NSNull()]
+            var body: [String: Any] = ["question": question, "start_time": start, "end_time": end]
+            if let tags = invocation.arguments["tags"], !tags.isEmpty {
+                body["tags"] = tags.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            }
             return .reply(try await post(path: "/api/v1/assistant/shift", body: body))
         case "ask_tag":
             guard let question = invocation.arguments["question"], let tag = invocation.arguments["tag_key"], let start = invocation.arguments["start_time"], let end = invocation.arguments["end_time"] else { return .reply("Missing FCC tag question arguments.") }
@@ -94,15 +98,11 @@ final class FCCAssistantCapability: AgentCapability, DeterministicInvocableCapab
         return try await requestText(request)
     }
 
-    private func request(url: URL) async throws -> String {
-        try await requestText(URLRequest(url: url))
-    }
+    private func request(url: URL) async throws -> String { try await requestText(URLRequest(url: url)) }
 
     private func requestText(_ request: URLRequest) async throws -> String {
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
         return String(data: data, encoding: .utf8) ?? "{}"
     }
 }
