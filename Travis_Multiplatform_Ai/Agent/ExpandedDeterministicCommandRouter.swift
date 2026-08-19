@@ -21,6 +21,10 @@ final class ExpandedDeterministicCommandRouter {
            let invocation = productivity(command: command, normalized: normalized) {
             return invocation
         }
+        if available.contains("local_batch_text"),
+           let invocation = batchText(command: command, normalized: normalized) {
+            return invocation
+        }
         return nil
     }
 
@@ -77,17 +81,26 @@ final class ExpandedDeterministicCommandRouter {
     }
 
     private func productivity(command: String, normalized: String) -> DeterministicCapabilityInvocation? {
-        let readMarkers = ["read clipboard", "show clipboard", "διαβασε το προχειρο", "δειξε το προχειρο"]
+        let readMarkers = [
+            "read clipboard", "show clipboard", "clipboard contents",
+            "διαβασε το προχειρο", "δειξε το προχειρο", "περιεχομενο προχειρου"
+        ]
         if readMarkers.contains(where: { normalized.contains($0) }) {
             return DeterministicCapabilityInvocation(capabilityId: "local_productivity", operation: "clipboard_read")
         }
 
-        let systemMarkers = ["system info", "device info", "στοιχεια συστηματος", "πληροφοριες συστηματος"]
+        let systemMarkers = [
+            "system info", "device info", "computer info",
+            "στοιχεια συστηματος", "πληροφοριες συστηματος", "στοιχεια υπολογιστη"
+        ]
         if systemMarkers.contains(where: { normalized.contains($0) }) {
             return DeterministicCapabilityInvocation(capabilityId: "local_productivity", operation: "system_info")
         }
 
-        let writeMarkers = ["copy to clipboard", "write to clipboard", "γραψε στο προχειρο", "αντιγραψε στο προχειρο"]
+        let writeMarkers = [
+            "copy to clipboard", "write to clipboard", "put on clipboard",
+            "γραψε στο προχειρο", "αντιγραψε στο προχειρο", "βαλε στο προχειρο"
+        ]
         guard writeMarkers.contains(where: { normalized.contains($0) }) else { return nil }
 
         if let dependencyText = firstDependencyTextBinding(in: command) {
@@ -105,6 +118,56 @@ final class ExpandedDeterministicCommandRouter {
         )
     }
 
+    /// Zero-model batch transforms. We only route when the user/plan gives an
+    /// explicit source folder, explicit filenames and an unambiguous transform.
+    /// Mutations still go through the capability's normal approval gate.
+    private func batchText(command: String, normalized: String) -> DeterministicCapabilityInvocation? {
+        let paths = absolutePaths(in: command)
+        guard let sourcePath = paths.first else { return nil }
+
+        let transform: String
+        if normalized.contains("unique lines") || normalized.contains("remove duplicate lines") || normalized.contains("αφαιρεσε διπλοτυπες γραμμες") || normalized.contains("αφαίρεσε διπλότυπες γραμμές") {
+            transform = "unique_lines"
+        } else if normalized.contains("sort lines") || normalized.contains("ταξινομησε γραμμες") || normalized.contains("ταξινόμησε γραμμές") {
+            transform = "sort_lines"
+        } else if normalized.contains("normalize whitespace") || normalized.contains("normalize spaces") || (normalized.contains("κανονικοποι") && normalized.contains("κενα")) {
+            transform = "normalize_whitespace"
+        } else if normalized.contains("pretty json") || normalized.contains("format json") || normalized.contains("μορφοποιησε json") || normalized.contains("μορφοποίησε json") {
+            transform = "pretty_json"
+        } else if normalized.contains("replace") || normalized.contains("αντικαταστ") {
+            transform = "replace"
+        } else {
+            return nil
+        }
+
+        let quoted = quotedValues(in: command)
+        var arguments: [String: String] = [
+            "sourcePath": sourcePath,
+            "transform": transform
+        ]
+
+        if paths.count >= 2 { arguments["destinationPath"] = paths[1] }
+
+        if transform == "replace" {
+            guard quoted.count >= 3 else { return nil }
+            let filenames = Array(quoted.dropLast(2)).filter(isSafeSimpleName)
+            guard !filenames.isEmpty else { return nil }
+            arguments["names"] = filenames.joined(separator: "|")
+            arguments["find"] = quoted[quoted.count - 2]
+            arguments["replace"] = quoted[quoted.count - 1]
+        } else {
+            let filenames = quoted.filter(isSafeSimpleName)
+            guard !filenames.isEmpty else { return nil }
+            arguments["names"] = filenames.joined(separator: "|")
+        }
+
+        return DeterministicCapabilityInvocation(
+            capabilityId: "local_batch_text",
+            operation: "transform_files",
+            arguments: arguments
+        )
+    }
+
     /// Keeps dependency handling exact. We only accept the already-supported
     /// structured binding syntax and never infer which previous step to use.
     private func firstDependencyTextBinding(in text: String) -> String? {
@@ -115,6 +178,15 @@ final class ExpandedDeterministicCommandRouter {
         return String(text[range])
     }
 
+    private func absolutePaths(in text: String) -> [String] {
+        let pattern = #"/Users/[^\s\n\r\t,;]+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let ns = text as NSString
+        return regex.matches(in: text, range: NSRange(location: 0, length: ns.length)).map {
+            ns.substring(with: $0.range).trimmingCharacters(in: CharacterSet(charactersIn: "\"'`()[]{}.!?"))
+        }
+    }
+
     private func quotedValues(in text: String) -> [String] {
         let pattern = #"[\"']([^\"']*)[\"']"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
@@ -123,5 +195,9 @@ final class ExpandedDeterministicCommandRouter {
                   let range = Range(match.range(at: 1), in: text) else { return nil }
             return String(text[range])
         }
+    }
+
+    private func isSafeSimpleName(_ value: String) -> Bool {
+        !value.isEmpty && value != "." && value != ".." && !value.contains("/") && !value.contains("\\")
     }
 }
