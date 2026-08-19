@@ -6,7 +6,9 @@ struct MacAppShell: View {
     var body: some View {
         Group {
             if appState.selectedSidebarItem == .chat {
-                TravisPremiumCommandCenterView(appState: appState)
+                TravisWorkspaceLayer(appState: appState) {
+                    TravisPremiumCommandCenterView(appState: appState)
+                }
             } else {
                 NavigationSplitView {
                     List(SidebarItem.allCases, selection: $appState.selectedSidebarItem) { item in
@@ -42,14 +44,9 @@ struct MacAppShell: View {
     private var taskPanel: some View {
         List(appState.activeTasks) { task in
             VStack(alignment: .leading, spacing: 6) {
-                Text(task.title)
-                    .font(.headline)
-                Text(task.details)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Text("\(task.status.rawValue) • \(task.priority.rawValue)")
-                    .font(.caption)
-                    .foregroundStyle(.cyan)
+                Text(task.title).font(.headline)
+                Text(task.details).font(.subheadline).foregroundStyle(.secondary)
+                Text("\(task.status.rawValue) • \(task.priority.rawValue)").font(.caption).foregroundStyle(.cyan)
             }
             .padding(.vertical, 4)
         }
