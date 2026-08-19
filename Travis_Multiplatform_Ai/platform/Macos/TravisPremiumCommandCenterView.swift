@@ -10,8 +10,8 @@ struct TravisPremiumCommandCenterView: View {
 
     private let cyan = Color(red: 0.04, green: 0.82, blue: 1)
     private let electric = Color(red: 0.16, green: 0.48, blue: 1)
-    private let navy = Color(red: 0.002, green: 0.025, blue: 0.085)
-    private let panel = Color(red: 0.004, green: 0.040, blue: 0.105)
+    private let navy = Color(red: 0.001, green: 0.018, blue: 0.072)
+    private let panel = Color(red: 0.004, green: 0.042, blue: 0.125)
 
     var body: some View {
         GeometryReader { geo in
@@ -71,11 +71,14 @@ struct TravisPremiumCommandCenterView: View {
             iconButton("gearshape.fill") { appState.selectedSidebarItem = .settings }
         }
         .padding(.horizontal, 15).padding(.vertical, 10)
-        .background(PremiumPanelShape(cut: 20).fill(LinearGradient(colors: [.white.opacity(0.035), panel.opacity(0.99), navy.opacity(0.96)], startPoint: .top, endPoint: .bottom)))
-        .overlay(PremiumPanelShape(cut: 20).stroke(LinearGradient(colors: [.white.opacity(0.26), cyan.opacity(0.72), electric.opacity(0.18)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.6))
-        .overlay(PremiumPanelShape(cut: 20).stroke(.white.opacity(0.10), lineWidth: 0.7).padding(3))
-        .shadow(color: .black.opacity(0.95), radius: 18, y: 10)
-        .shadow(color: cyan.opacity(0.13), radius: 14)
+        .background(PremiumPanelShape(cut: 20).fill(Color.black.opacity(0.78)).offset(y: 7))
+        .background(PremiumPanelShape(cut: 20).fill(LinearGradient(colors: [.white.opacity(0.065), panel.opacity(0.98), navy.opacity(0.99)], startPoint: .top, endPoint: .bottom)))
+        .overlay(PremiumPanelShape(cut: 20).stroke(LinearGradient(colors: [.white.opacity(0.38), cyan.opacity(0.82), electric.opacity(0.24)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.8))
+        .overlay(PremiumPanelShape(cut: 20).stroke(.white.opacity(0.13), lineWidth: 0.65).padding(3))
+        .overlay(alignment: .top) { LinearGradient(colors: [.white.opacity(0.38), cyan.opacity(0.12), .clear], startPoint: .leading, endPoint: .trailing).frame(height: 1.2).padding(.horizontal, 28) }
+        .overlay(alignment: .bottom) { LinearGradient(colors: [.clear, electric.opacity(0.18), cyan.opacity(0.08), .clear], startPoint: .leading, endPoint: .trailing).frame(height: 3).offset(y: 3) }
+        .shadow(color: .black.opacity(0.98), radius: 20, y: 13)
+        .shadow(color: cyan.opacity(0.16), radius: 16, y: -2)
     }
 
     private var navigationRail: some View {
@@ -97,10 +100,10 @@ struct TravisPremiumCommandCenterView: View {
             hudPanel("VOICE CONTROL", "waveform") {
                 Button { appState.toggleListening() } label: {
                     ZStack {
-                        Ellipse().fill(Color.black.opacity(0.82)).frame(width: 94, height: 20).blur(radius: 9).offset(y: 47)
+                        Ellipse().fill(navy.opacity(0.92)).frame(width: 94, height: 20).blur(radius: 9).offset(y: 47)
                         Circle().stroke(cyan.opacity(0.16), lineWidth: 6).frame(width: 92, height: 92)
                         Circle().stroke(cyan.opacity(0.75), lineWidth: 2).frame(width: 72, height: 72).shadow(color: cyan, radius: 7)
-                        Circle().fill(RadialGradient(colors: [.white.opacity(0.14), cyan.opacity(appState.isListening ? 0.22 : 0.07), navy.opacity(0.82)], center: .topLeading, startRadius: 0, endRadius: 42)).frame(width: 52, height: 52)
+                        Circle().fill(RadialGradient(colors: [.white.opacity(0.14), cyan.opacity(appState.isListening ? 0.22 : 0.07), navy.opacity(0.88)], center: .topLeading, startRadius: 0, endRadius: 42)).frame(width: 52, height: 52)
                         Image(systemName: appState.isListening ? "waveform" : "mic.fill").font(.system(size: 23, weight: .bold)).foregroundStyle(cyan).shadow(color: cyan, radius: 10)
                     }.frame(maxWidth: .infinity)
                 }.buttonStyle(.plain)
@@ -163,11 +166,13 @@ struct TravisPremiumCommandCenterView: View {
             .frame(width: 540, height: 520)
 
             ZStack {
-                CorePlatformShape().fill(LinearGradient(colors: [.white.opacity(0.045), panel.opacity(0.72), navy.opacity(0.97)], startPoint: .top, endPoint: .bottom)).frame(width: 500, height: 88)
-                    .overlay(CorePlatformShape().stroke(LinearGradient(colors: [.white.opacity(0.28), cyan.opacity(0.38), electric.opacity(0.14)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2))
-                    .shadow(color: .black.opacity(0.96), radius: 16, y: 12)
-                    .shadow(color: cyan.opacity(0.06), radius: 10, y: -3)
-                Ellipse().fill(navy.opacity(0.94)).frame(width: 460, height: 34).blur(radius: 12).offset(y: 38)
+                CorePlatformShape().fill(Color.black.opacity(0.72)).frame(width: 500, height: 88).offset(y: 7)
+                CorePlatformShape().fill(LinearGradient(colors: [.white.opacity(0.07), panel.opacity(0.82), navy.opacity(0.99)], startPoint: .top, endPoint: .bottom)).frame(width: 500, height: 88)
+                    .overlay(CorePlatformShape().stroke(LinearGradient(colors: [.white.opacity(0.34), cyan.opacity(0.48), electric.opacity(0.18)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.5))
+                    .overlay(CorePlatformShape().stroke(.white.opacity(0.08), lineWidth: 0.55).padding(3))
+                    .shadow(color: .black.opacity(0.98), radius: 18, y: 13)
+                    .shadow(color: cyan.opacity(0.08), radius: 12, y: -4)
+                Ellipse().fill(navy.opacity(0.96)).frame(width: 460, height: 34).blur(radius: 12).offset(y: 38)
                 HStack(spacing: 8) {
                     modulePedestal("PLANNER", "scope", appState.isProcessing ? "ACTIVE" : "READY", cyan)
                     modulePedestal("EXECUTOR", "bolt.fill", appState.isBusy ? "RUNNING" : "READY", .purple)
@@ -211,55 +216,71 @@ struct TravisPremiumCommandCenterView: View {
     private var signalWave: some View { TimelineView(.animation(minimumInterval:0.12)){timeline in Canvas{context,size in let t=timeline.date.timeIntervalSinceReferenceDate;var p=Path();let mid=size.height/2;for x in stride(from:0.0,through:size.width,by:3.0){let n=x/max(size.width,1);let y=mid+sin(n*18+t*2.4)*10+sin(n*47+t*1.3)*4;if x==0{p.move(to:CGPoint(x:x,y:y))}else{p.addLine(to:CGPoint(x:x,y:y))}};context.stroke(p,with:.color(cyan.opacity(0.12)),lineWidth:8);context.stroke(p,with:.color(cyan),lineWidth:2.2)}} }
     private var coreGrid: some View { Canvas{context,size in let c=CGPoint(x:size.width/2,y:size.height/2);for r in stride(from:CGFloat(60),through:255,by:26){context.stroke(Path(ellipseIn:CGRect(x:c.x-r,y:c.y-r,width:r*2,height:r*2)),with:.color(cyan.opacity(0.07)),lineWidth:0.8)};for a in stride(from:0.0,to:360.0,by:15.0){let rad=a * .pi/180;var p=Path();p.move(to:c);p.addLine(to:CGPoint(x:c.x+cos(rad)*255,y:c.y+sin(rad)*255));context.stroke(p,with:.color(cyan.opacity(0.025)),lineWidth:0.7)}} }
 
-    private var premiumBackground: some View { ZStack { Color(red:0.001,green:0.010,blue:0.045);LinearGradient(colors:[Color(red:0.002,green:0.020,blue:0.080),Color(red:0.003,green:0.045,blue:0.145),Color(red:0.002,green:0.025,blue:0.095)],startPoint:.topLeading,endPoint:.bottomTrailing).opacity(0.94);Canvas{context,size in let grid:CGFloat=32;var p=Path();stride(from:CGFloat.zero,through:size.width,by:grid).forEach{x in p.move(to:CGPoint(x:x,y:0));p.addLine(to:CGPoint(x:x,y:size.height))};stride(from:CGFloat.zero,through:size.height,by:grid).forEach{y in p.move(to:CGPoint(x:0,y:y));p.addLine(to:CGPoint(x:size.width,y:y))};context.stroke(p,with:.color(cyan.opacity(0.028)),lineWidth:0.5)};RadialGradient(colors:[cyan.opacity(0.060),.clear],center:.center,startRadius:20,endRadius:720);RadialGradient(colors:[electric.opacity(0.075),.clear],center:UnitPoint(x:0.82,y:0.28),startRadius:0,endRadius:420) }.ignoresSafeArea() }
+    private var premiumBackground: some View {
+        ZStack {
+            Color(red:0.0005, green:0.004, blue:0.025)
+            LinearGradient(colors:[Color(red:0.001,green:0.012,blue:0.060),Color(red:0.002,green:0.030,blue:0.120),Color(red:0.001,green:0.016,blue:0.075),Color(red:0.0005,green:0.006,blue:0.035)],startPoint:.topLeading,endPoint:.bottomTrailing).opacity(0.98)
+            RadialGradient(colors:[electric.opacity(0.13),.clear],center:.center,startRadius:40,endRadius:820)
+            RadialGradient(colors:[cyan.opacity(0.060),.clear],center:UnitPoint(x:0.16,y:0.20),startRadius:0,endRadius:300)
+            RadialGradient(colors:[electric.opacity(0.085),.clear],center:UnitPoint(x:0.86,y:0.74),startRadius:0,endRadius:360)
+            Canvas{context,size in let grid:CGFloat=32;var p=Path();stride(from:CGFloat.zero,through:size.width,by:grid).forEach{x in p.move(to:CGPoint(x:x,y:0));p.addLine(to:CGPoint(x:x,y:size.height))};stride(from:CGFloat.zero,through:size.height,by:grid).forEach{y in p.move(to:CGPoint(x:0,y:y));p.addLine(to:CGPoint(x:size.width,y:y))};context.stroke(p,with:.color(cyan.opacity(0.024)),lineWidth:0.5)}
+            RadialGradient(colors:[cyan.opacity(0.035),.clear],center:.center,startRadius:20,endRadius:720)
+        }.ignoresSafeArea()
+    }
 
     private var activeTask:AgentTask? { appState.taskRuntime.tasks.first{[.running,.planning,.waitingForApproval,.waitingForDependency].contains($0.status)} ?? appState.taskRuntime.tasks.first }
     private var coreState:String { appState.isProcessing ? "PROCESSING":appState.isBusy ? "EXECUTING":"ONLINE" }
 
     private func hudPanel<Content:View>(_ title:String,_ icon:String,@ViewBuilder content:()->Content)->some View {
         VStack(alignment:.leading,spacing:10){
-            HStack(spacing:7){Image(systemName:icon).font(.system(size:10,weight:.semibold));Text(title).font(.system(size:10,weight:.bold,design:.rounded)).tracking(0.7);Spacer();Rectangle().fill(LinearGradient(colors:[.clear,cyan.opacity(0.65)],startPoint:.leading,endPoint:.trailing)).frame(width:42,height:1)}.foregroundStyle(cyan)
+            HStack(spacing:7){Image(systemName:icon).font(.system(size:10,weight:.semibold));Text(title).font(.system(size:10,weight:.bold,design:.rounded)).tracking(0.7);Spacer();Rectangle().fill(LinearGradient(colors:[.clear,cyan.opacity(0.72)],startPoint:.leading,endPoint:.trailing)).frame(width:48,height:1.2)}.foregroundStyle(cyan)
             content()
-        }.padding(12)
-        .background(PremiumPanelShape(cut:13).fill(LinearGradient(stops:[.init(color:.white.opacity(0.045),location:0),.init(color:panel.opacity(0.98),location:0.10),.init(color:navy.opacity(0.98),location:1)],startPoint:.top,endPoint:.bottom)))
-        .overlay(PremiumPanelShape(cut:13).stroke(LinearGradient(colors:[.white.opacity(0.28),cyan.opacity(0.74),cyan.opacity(0.18),electric.opacity(0.12)],startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1.45))
-        .overlay(PremiumPanelShape(cut:13).stroke(.white.opacity(0.065),lineWidth:0.55).padding(3))
-        .overlay(alignment:.topLeading){Rectangle().fill(LinearGradient(colors:[.white.opacity(0.95),cyan,.clear],startPoint:.leading,endPoint:.trailing)).frame(width:86,height:1.6).shadow(color:cyan,radius:4)}
-        .overlay(alignment:.bottom){LinearGradient(colors:[.clear,navy.opacity(0.68)],startPoint:.top,endPoint:.bottom).frame(height:24).clipShape(PremiumPanelShape(cut:13)).allowsHitTesting(false)}
-        .shadow(color:.black.opacity(0.98),radius:15,y:11)
-        .shadow(color:cyan.opacity(0.08),radius:10,y:-1)
+        }
+        .padding(12)
+        .background(PremiumPanelShape(cut:13).fill(Color.black.opacity(0.82)).offset(y:7))
+        .background(PremiumPanelShape(cut:13).fill(LinearGradient(stops:[.init(color:.white.opacity(0.070),location:0),.init(color:panel.opacity(0.96),location:0.12),.init(color:navy.opacity(0.995),location:1)],startPoint:.topLeading,endPoint:.bottomTrailing)))
+        .overlay(PremiumPanelShape(cut:13).stroke(LinearGradient(colors:[.white.opacity(0.36),cyan.opacity(0.80),electric.opacity(0.20),navy.opacity(0.75)],startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1.7))
+        .overlay(PremiumPanelShape(cut:13).stroke(.white.opacity(0.10),lineWidth:0.55).padding(3))
+        .overlay(alignment:.topLeading){Rectangle().fill(LinearGradient(colors:[.white.opacity(0.98),cyan,.clear],startPoint:.leading,endPoint:.trailing)).frame(width:92,height:1.8).offset(x:15).shadow(color:cyan,radius:5)}
+        .overlay(alignment:.top){LinearGradient(colors:[.white.opacity(0.18),cyan.opacity(0.05),.clear],startPoint:.leading,endPoint:.trailing).frame(height:18).clipShape(PremiumPanelShape(cut:13)).allowsHitTesting(false)}
+        .overlay(alignment:.bottom){LinearGradient(colors:[.clear,navy.opacity(0.20),Color.black.opacity(0.72)],startPoint:.top,endPoint:.bottom).frame(height:30).clipShape(PremiumPanelShape(cut:13)).allowsHitTesting(false)}
+        .overlay(alignment:.bottom){LinearGradient(colors:[.clear,electric.opacity(0.22),cyan.opacity(0.10),.clear],startPoint:.leading,endPoint:.trailing).frame(height:2).offset(y:3)}
+        .shadow(color:.black.opacity(0.99),radius:18,y:13)
+        .shadow(color:cyan.opacity(0.11),radius:12,y:-2)
     }
 
     private func modulePedestal(_ title:String,_ icon:String,_ status:String,_ tint:Color)->some View {
         VStack(spacing:0){
             ZStack {
-                Ellipse().fill(Color.black.opacity(0.88)).frame(width:108,height:26).blur(radius:9).offset(y:59)
+                Ellipse().fill(Color.black.opacity(0.92)).frame(width:108,height:26).blur(radius:9).offset(y:59)
                 Ellipse().fill(tint.opacity(0.16)).frame(width:94,height:17).blur(radius:8).offset(y:57)
                 VStack(spacing:7){
                     ZStack{
-                        PremiumHex().fill(LinearGradient(colors:[.white.opacity(0.12),tint.opacity(0.20),navy.opacity(0.90)],startPoint:.topLeading,endPoint:.bottomTrailing)).frame(width:48,height:44)
-                        PremiumHex().stroke(LinearGradient(colors:[.white.opacity(0.82),tint,navy.opacity(0.68)],startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1.6).frame(width:48,height:44).shadow(color:tint.opacity(0.80),radius:8)
-                        Image(systemName:icon).font(.system(size:17,weight:.semibold)).foregroundStyle(tint).shadow(color:tint,radius:8)
+                        PremiumHex().fill(LinearGradient(colors:[.white.opacity(0.16),tint.opacity(0.20),navy.opacity(0.94)],startPoint:.topLeading,endPoint:.bottomTrailing)).frame(width:48,height:44)
+                        PremiumHex().stroke(LinearGradient(colors:[.white.opacity(0.90),tint,navy.opacity(0.72)],startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1.8).frame(width:48,height:44).shadow(color:tint.opacity(0.85),radius:9)
+                        Image(systemName:icon).font(.system(size:17,weight:.semibold)).foregroundStyle(tint).shadow(color:tint,radius:9)
                     }
-                    Text(title).font(.system(size:10,weight:.semibold,design:.rounded)).foregroundStyle(.white.opacity(0.97))
+                    Text(title).font(.system(size:10,weight:.semibold,design:.rounded)).foregroundStyle(.white.opacity(0.98))
                     Text(status).font(.system(size:7,weight:.bold,design:.rounded)).tracking(0.5).foregroundStyle(tint)
                 }
                 .frame(width:96,height:112)
-                .background(PedestalBodyShape().fill(LinearGradient(stops:[.init(color:.white.opacity(0.075),location:0),.init(color:tint.opacity(0.12),location:0.16),.init(color:navy.opacity(0.98),location:1)],startPoint:.topLeading,endPoint:.bottomTrailing)))
-                .overlay(PedestalBodyShape().stroke(LinearGradient(colors:[.white.opacity(0.38),tint.opacity(0.78),navy],startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1.45))
-                .overlay(PedestalBodyShape().stroke(.white.opacity(0.06), lineWidth: 0.5).padding(3))
-                .shadow(color:.black.opacity(0.96),radius:10,y:10)
-                .shadow(color:tint.opacity(0.22),radius:10,y:-3)
+                .background(PedestalBodyShape().fill(Color.black.opacity(0.78)).offset(y:6))
+                .background(PedestalBodyShape().fill(LinearGradient(stops:[.init(color:.white.opacity(0.10),location:0),.init(color:tint.opacity(0.14),location:0.16),.init(color:panel.opacity(0.90),location:0.42),.init(color:navy.opacity(0.995),location:1)],startPoint:.topLeading,endPoint:.bottomTrailing)))
+                .overlay(PedestalBodyShape().stroke(LinearGradient(colors:[.white.opacity(0.48),tint.opacity(0.88),navy],startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1.7))
+                .overlay(PedestalBodyShape().stroke(.white.opacity(0.08), lineWidth: 0.55).padding(3))
+                .overlay(alignment:.top){LinearGradient(colors:[.white.opacity(0.22),.clear],startPoint:.top,endPoint:.bottom).frame(height:18).clipShape(PedestalBodyShape())}
+                .shadow(color:.black.opacity(0.98),radius:12,y:11)
+                .shadow(color:tint.opacity(0.26),radius:12,y:-4)
             }
             ZStack{
-                Ellipse().fill(Color.black.opacity(0.94)).frame(width:108,height:24).blur(radius:6)
-                Ellipse().fill(LinearGradient(colors:[.white.opacity(0.06),tint.opacity(0.11),navy.opacity(0.88)],startPoint:.top,endPoint:.bottom)).frame(width:98,height:19)
-                Ellipse().stroke(tint.opacity(0.88),lineWidth:1.7).frame(width:84,height:13).shadow(color:tint,radius:9)
-                Ellipse().stroke(.white.opacity(0.32),lineWidth:0.8).frame(width:64,height:7)
+                Ellipse().fill(Color.black.opacity(0.96)).frame(width:108,height:24).blur(radius:6)
+                Ellipse().fill(LinearGradient(colors:[.white.opacity(0.08),tint.opacity(0.14),navy.opacity(0.92)],startPoint:.top,endPoint:.bottom)).frame(width:98,height:19)
+                Ellipse().stroke(tint.opacity(0.95),lineWidth:1.9).frame(width:84,height:13).shadow(color:tint,radius:10)
+                Ellipse().stroke(.white.opacity(0.38),lineWidth:0.8).frame(width:64,height:7)
             }.offset(y:-2)
             ZStack {
-                Ellipse().fill(tint.opacity(0.12)).frame(width:82,height:20).blur(radius:9)
-                PedestalReflectionShape().fill(LinearGradient(colors:[tint.opacity(0.24),tint.opacity(0.08),.clear],startPoint:.top,endPoint:.bottom)).frame(width:74,height:36).blur(radius:1.5)
+                Ellipse().fill(tint.opacity(0.14)).frame(width:82,height:20).blur(radius:10)
+                PedestalReflectionShape().fill(LinearGradient(colors:[tint.opacity(0.28),tint.opacity(0.09),.clear],startPoint:.top,endPoint:.bottom)).frame(width:74,height:38).blur(radius:1.5)
             }.offset(y:-5)
         }.frame(width:110,height:165)
     }
@@ -267,13 +288,13 @@ struct TravisPremiumCommandCenterView: View {
     private func rail(_ title:String,_ icon:String,action:@escaping()->Void)->some View { Button(action:action){HStack{Image(systemName:icon).frame(width:21).foregroundStyle(cyan);Text(title);Spacer();Image(systemName:"chevron.right").font(.system(size:7)).foregroundStyle(cyan)}.font(.system(size:9,weight:.medium,design:.rounded)).padding(.vertical,6)}.buttonStyle(PremiumButton(cyan:cyan)) }
     private func compact(_ title:String,_ icon:String,action:@escaping()->Void)->some View { Button(action:action){HStack(spacing:4){Image(systemName:icon);Text(title)}.font(.system(size:8,weight:.semibold,design:.rounded)).frame(maxWidth:.infinity).padding(.vertical,6)}.buttonStyle(PremiumButton(cyan:cyan)) }
     private func iconButton(_ icon:String,action:@escaping()->Void)->some View { Button(action:action){Image(systemName:icon).frame(width:31,height:31).foregroundStyle(cyan)}.buttonStyle(PremiumButton(cyan:cyan)) }
-    private func statusPill(_ text:String,_ color:Color)->some View { HStack(spacing:6){Circle().fill(color).frame(width:6,height:6).shadow(color:color,radius:5);Text(text)}.font(.system(size:8,weight:.semibold,design:.rounded)).foregroundStyle(color).padding(.horizontal,9).padding(.vertical,6).background(Capsule().fill(LinearGradient(colors:[.white.opacity(0.035),color.opacity(0.07),navy.opacity(0.35)],startPoint:.top,endPoint:.bottom))).overlay(Capsule().stroke(color.opacity(0.35),lineWidth:1)).shadow(color:.black.opacity(0.65),radius:4,y:3) }
+    private func statusPill(_ text:String,_ color:Color)->some View { HStack(spacing:6){Circle().fill(color).frame(width:6,height:6).shadow(color:color,radius:5);Text(text)}.font(.system(size:8,weight:.semibold,design:.rounded)).foregroundStyle(color).padding(.horizontal,9).padding(.vertical,6).background(Capsule().fill(LinearGradient(colors:[.white.opacity(0.04),color.opacity(0.08),navy.opacity(0.55)],startPoint:.top,endPoint:.bottom))).overlay(Capsule().stroke(color.opacity(0.38),lineWidth:1)).shadow(color:.black.opacity(0.72),radius:5,y:4) }
     private func headerMetric(_ label:String,_ value:Double,_ tint:Color)->some View { VStack(alignment:.leading,spacing:2){Text(label).font(.system(size:7,weight:.medium,design:.rounded)).foregroundStyle(.secondary);Text("\(Int(value))%").font(.system(size:12,weight:.bold,design:.rounded)).foregroundStyle(.white);ProgressView(value:value,total:100).tint(tint)}.frame(width:72) }
     private func statusRow(_ name:String,_ value:String,_ tint:Color)->some View { HStack{Circle().stroke(cyan.opacity(0.45),lineWidth:1.2).frame(width:10,height:10);Text(name).font(.system(size:8,weight:.medium,design:.rounded));Spacer();Circle().fill(tint).frame(width:5,height:5).shadow(color:tint,radius:4);Text(value).font(.system(size:8,weight:.semibold,design:.rounded)).foregroundStyle(tint)}.padding(.vertical,4) }
     private func data(_ key:String,_ value:String,_ tint:Color)->some View { HStack{Text(key).font(.system(size:8,weight:.regular,design:.rounded)).foregroundStyle(.secondary);Spacer();Text(value).font(.system(size:9,weight:.semibold,design:.rounded)).foregroundStyle(tint)}.padding(.vertical,2) }
-    private func module(_ title:String,_ icon:String,_ tint:Color)->some View { VStack(spacing:5){Image(systemName:icon).font(.system(size:18,weight:.semibold)).foregroundStyle(tint).shadow(color:tint.opacity(0.7),radius:5);Text(title).font(.system(size:7,weight:.semibold,design:.rounded));Text("ACTIVE").font(.system(size:6,weight:.bold,design:.rounded)).foregroundStyle(.green)}.frame(maxWidth:.infinity,minHeight:64).background(PremiumPanelShape(cut:7).fill(LinearGradient(colors:[.white.opacity(0.045),tint.opacity(0.06),navy.opacity(0.78)],startPoint:.top,endPoint:.bottom))).overlay(PremiumPanelShape(cut:7).stroke(LinearGradient(colors:[.white.opacity(0.22),tint.opacity(0.46),navy],startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1.1)).shadow(color:.black.opacity(0.82),radius:6,y:5).shadow(color:tint.opacity(0.07),radius:4) }
+    private func module(_ title:String,_ icon:String,_ tint:Color)->some View { VStack(spacing:5){Image(systemName:icon).font(.system(size:18,weight:.semibold)).foregroundStyle(tint).shadow(color:tint.opacity(0.7),radius:5);Text(title).font(.system(size:7,weight:.semibold,design:.rounded));Text("ACTIVE").font(.system(size:6,weight:.bold,design:.rounded)).foregroundStyle(.green)}.frame(maxWidth:.infinity,minHeight:64).background(PremiumPanelShape(cut:7).fill(Color.black.opacity(0.72)).offset(y:4)).background(PremiumPanelShape(cut:7).fill(LinearGradient(colors:[.white.opacity(0.065),tint.opacity(0.07),panel.opacity(0.58),navy.opacity(0.92)],startPoint:.topLeading,endPoint:.bottomTrailing))).overlay(PremiumPanelShape(cut:7).stroke(LinearGradient(colors:[.white.opacity(0.30),tint.opacity(0.58),navy],startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1.25)).overlay(PremiumPanelShape(cut:7).stroke(.white.opacity(0.06),lineWidth:0.5).padding(2)).shadow(color:.black.opacity(0.88),radius:7,y:6).shadow(color:tint.opacity(0.09),radius:5,y:-2) }
     private func gauge(_ value:Double,_ label:String,_ tint:Color)->some View { ZStack{Ellipse().fill(.black.opacity(0.80)).frame(width:64,height:15).blur(radius:6).offset(y:35);Circle().stroke(tint.opacity(0.12),lineWidth:8);Circle().trim(from:0,to:min(max(value/100,0),1)).stroke(tint,style:StrokeStyle(lineWidth:7,lineCap:.round)).rotationEffect(.degrees(-90)).shadow(color:tint.opacity(0.7),radius:5);Circle().stroke(.white.opacity(0.10),lineWidth:1).padding(5);VStack(spacing:1){Text(label).font(.system(size:7,weight:.medium,design:.rounded));Text("\(Int(value))%").font(.system(size:10,weight:.bold,design:.rounded))}.foregroundStyle(.white)}.frame(maxWidth:.infinity) }
-    private func flow(_ title:String,_ active:Bool,_ tint:Color?=nil)->some View { let c=tint ?? cyan;return VStack(spacing:4){ZStack{Ellipse().fill(.black.opacity(0.68)).frame(width:36,height:9).blur(radius:4).offset(y:19);Circle().fill(RadialGradient(colors:[.white.opacity(active ? 0.10:0),c.opacity(active ? 0.14:0.025),navy.opacity(0.70)],center:.topLeading,startRadius:0,endRadius:22)).frame(width:40,height:40);Circle().stroke(c.opacity(active ? 0.72:0.16),lineWidth:1.6).frame(width:40,height:40).shadow(color:c.opacity(active ? 0.3:0),radius:4);Circle().fill(active ? c:.secondary).frame(width:6,height:6)};Text(title).font(.system(size:7,weight:.semibold,design:.rounded)).foregroundStyle(active ? .white:.secondary)}.frame(width:68) }
+    private func flow(_ title:String,_ active:Bool,_ tint:Color?=nil)->some View { let c=tint ?? cyan;return VStack(spacing:4){ZStack{Ellipse().fill(.black.opacity(0.68)).frame(width:36,height:9).blur(radius:4).offset(y:19);Circle().fill(RadialGradient(colors:[.white.opacity(active ? 0.10:0),c.opacity(active ? 0.14:0.025),navy.opacity(0.76)],center:.topLeading,startRadius:0,endRadius:22)).frame(width:40,height:40);Circle().stroke(c.opacity(active ? 0.72:0.16),lineWidth:1.6).frame(width:40,height:40).shadow(color:c.opacity(active ? 0.3:0),radius:4);Circle().fill(active ? c:.secondary).frame(width:6,height:6)};Text(title).font(.system(size:7,weight:.semibold,design:.rounded)).foregroundStyle(active ? .white:.secondary)}.frame(width:68) }
     private var connector:some View { HStack(spacing:0){Rectangle().fill(LinearGradient(colors:[cyan.opacity(0.12),cyan.opacity(0.58),cyan.opacity(0.12)],startPoint:.leading,endPoint:.trailing)).frame(height:1.5);Image(systemName:"chevron.right").font(.system(size:7,weight:.semibold)).foregroundStyle(cyan)}.frame(maxWidth:.infinity).shadow(color:cyan.opacity(0.2),radius:2) }
 }
 
@@ -282,5 +303,5 @@ private struct PremiumHex:Shape { func path(in r:CGRect)->Path{var p=Path();p.mo
 private struct PedestalBodyShape:Shape { func path(in r:CGRect)->Path{var p=Path();p.move(to:CGPoint(x:10,y:0));p.addLine(to:CGPoint(x:r.maxX-10,y:0));p.addLine(to:CGPoint(x:r.maxX,y:10));p.addLine(to:CGPoint(x:r.maxX-4,y:r.maxY));p.addLine(to:CGPoint(x:4,y:r.maxY));p.addLine(to:CGPoint(x:0,y:10));p.closeSubpath();return p} }
 private struct PedestalReflectionShape:Shape { func path(in r:CGRect)->Path { var p=Path();p.move(to:CGPoint(x:r.width*0.18,y:0));p.addLine(to:CGPoint(x:r.width*0.82,y:0));p.addLine(to:CGPoint(x:r.width*0.68,y:r.height));p.addLine(to:CGPoint(x:r.width*0.32,y:r.height));p.closeSubpath();return p } }
 private struct CorePlatformShape: Shape { func path(in r: CGRect) -> Path { var p = Path(); p.move(to: CGPoint(x: 28, y: 0)); p.addLine(to: CGPoint(x: r.maxX - 28, y: 0)); p.addLine(to: CGPoint(x: r.maxX, y: 24)); p.addLine(to: CGPoint(x: r.maxX - 18, y: r.maxY)); p.addLine(to: CGPoint(x: 18, y: r.maxY)); p.addLine(to: CGPoint(x: 0, y: 24)); p.closeSubpath(); return p } }
-private struct PremiumButton:ButtonStyle { let cyan:Color;func makeBody(configuration:Configuration)->some View{configuration.label.padding(.horizontal,7).background(PremiumPanelShape(cut:6).fill(LinearGradient(colors:[.white.opacity(configuration.isPressed ? 0.07:0.03),cyan.opacity(configuration.isPressed ? 0.12:0.035),Color(red:0.002,green:0.020,blue:0.070).opacity(0.88)],startPoint:.top,endPoint:.bottom))).overlay(PremiumPanelShape(cut:6).stroke(LinearGradient(colors:[.white.opacity(0.18),cyan.opacity(configuration.isPressed ? 0.75:0.30),Color(red:0.002,green:0.018,blue:0.060)],startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1)).shadow(color:.black.opacity(0.80),radius:5,y:4).shadow(color:cyan.opacity(configuration.isPressed ? 0.18:0.03),radius:4).scaleEffect(configuration.isPressed ? 0.985:1)} }
+private struct PremiumButton:ButtonStyle { let cyan:Color;func makeBody(configuration:Configuration)->some View{configuration.label.padding(.horizontal,7).background(PremiumPanelShape(cut:6).fill(Color.black.opacity(0.72)).offset(y:3)).background(PremiumPanelShape(cut:6).fill(LinearGradient(colors:[.white.opacity(configuration.isPressed ? 0.08:0.04),cyan.opacity(configuration.isPressed ? 0.14:0.04),Color(red:0.002,green:0.022,blue:0.082).opacity(0.94)],startPoint:.topLeading,endPoint:.bottomTrailing))).overlay(PremiumPanelShape(cut:6).stroke(LinearGradient(colors:[.white.opacity(0.22),cyan.opacity(configuration.isPressed ? 0.82:0.36),Color(red:0.002,green:0.015,blue:0.055)],startPoint:.topLeading,endPoint:.bottomTrailing),lineWidth:1.15)).overlay(PremiumPanelShape(cut:6).stroke(.white.opacity(0.05),lineWidth:0.45).padding(2)).shadow(color:.black.opacity(0.88),radius:6,y:5).shadow(color:cyan.opacity(configuration.isPressed ? 0.20:0.04),radius:5,y:-1).scaleEffect(configuration.isPressed ? 0.985:1)} }
 #endif
