@@ -197,7 +197,7 @@ final class AutonomousMissionPlannerV2 {
             }
 
             let raw = try await AIExecutionScope.$context.withValue(
-                AIInvocationContext(workload: .planning, operation: "autonomous.mission.plan.v2")
+                AIInvocationContext(workload: .complex, operation: "autonomous.mission.plan.v2")
             ) {
                 try await aiService.generateText(prompt: request, maxTokens: attempt == 1 ? 5000 : 2500)
             }
@@ -258,7 +258,7 @@ final class AutonomousMissionPlannerV2 {
                 instructions: draftStep.instructions,
                 capabilityId: draftStep.capabilityId,
                 dependencyStepIds: dependencies,
-                successCriteria: draftStep.successCriteria.isEmpty ? ["The requested step result is produced and can be verified."] : draftStep.successCriteria,
+                successCriteria: draftStep.successCriteria,
                 riskLevel: draftStep.riskLevel,
                 canRunInBackground: draftStep.canRunInBackground,
                 estimatedEffort: draftStep.estimatedEffort,
@@ -266,33 +266,29 @@ final class AutonomousMissionPlannerV2 {
             )
         }
 
-        return TaskPlan(summary: draft.summary, steps: steps)
+        return TaskPlan(
+            version: 1,
+            summary: draft.summary.trimmingCharacters(in: .whitespacesAndNewlines),
+            steps: steps
+        )
     }
 
     private func extractJSONObject(from raw: String) -> String {
-        let chars = Array(raw)
-        var start: Int?
-        var depth = 0
-        var inString = false
-        var escaped = false
-
-        for index in chars.indices {
-            let char = chars[index]
-            if inString {
-                if escaped { escaped = false }
-                else if char == "\\" { escaped = true }
-                else if char == "\"" { inString = false }
-                continue
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("```") {
+            let withoutFence = trimmed
+                .replacingOccurrences(of: "```json", with: "")
+                .replacingOccurrences(of: "```JSON", with: "")
+                .replacingOccurrences(of: "```", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let first = withoutFence.firstIndex(of: "{"), let last = withoutFence.lastIndex(of: "}") {
+                return String(withoutFence[first...last])
             }
-            if char == "\"" { inString = true; continue }
-            if char == "{" {
-                if depth == 0 { start = index }
-                depth += 1
-            } else if char == "}", depth > 0 {
-                depth -= 1
-                if depth == 0, let start { return String(chars[start...index]) }
-            }
+            return withoutFence
         }
-        return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let first = trimmed.firstIndex(of: "{"), let last = trimmed.lastIndex(of: "}") {
+            return String(trimmed[first...last])
+        }
+        return trimmed
     }
 }
