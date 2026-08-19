@@ -38,12 +38,12 @@ final class AutonomousMissionEngineV2 {
         runtime: AgentTaskRuntime,
         executor: AgentTaskExecutor,
         orchestrator: AgentOrchestrator,
-        planner: AutonomousMissionPlannerV2 = AutonomousMissionPlannerV2()
+        planner: AutonomousMissionPlannerV2? = nil
     ) {
         self.runtime = runtime
         self.executor = executor
         self.orchestrator = orchestrator
-        self.planner = planner
+        self.planner = planner ?? AutonomousMissionPlannerV2()
     }
 
     @discardableResult
