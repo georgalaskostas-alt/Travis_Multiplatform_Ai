@@ -56,22 +56,38 @@ final class AutonomousMissionEngineV2 {
     ) async throws -> AutonomousMissionV2Report {
         state = .planning
         lastMessage = "Σχεδιάζω την αποστολή…"
-        onProgress?("🧠 TRAVIS: σχεδιάζω ολόκληρη την αποστολή πριν ξεκινήσω.")
+        onProgress?("🧠 TRAVIS: πρώτα ελέγχω αν ξέρω ήδη πώς γίνεται αυτή η αποστολή.")
 
         let task = runtime.createTask(goal: goal, title: title, priority: priority, budget: budget)
         activeTaskId = task.id
 
         do {
-            let priorKnowledge = buildPriorExperienceContext(for: goal)
-            let plan = try await planner.makePlan(
-                goal: goal,
-                capabilities: orchestrator.capabilities,
-                priorKnowledge: priorKnowledge
+            let availableCapabilityIds = Set(orchestrator.capabilities.map(\.id))
+            let localDecision = LocalMissionPlanReuse.makePlan(
+                for: goal,
+                from: runtime.tasks.filter { $0.id != task.id },
+                availableCapabilityIds: availableCapabilityIds
             )
+
+            let plan: TaskPlan
+            if let localDecision {
+                plan = localDecision.plan
+                let percent = Int(localDecision.confidence * 100)
+                onProgress?("🧠 LOCAL LEARNING: βρήκα verified προηγούμενη αποστολή με \(percent)% ομοιότητα. Χρησιμοποιώ το ήδη μαθημένο σχέδιο χωρίς AI planner.")
+            } else {
+                onProgress?("↗️ Δεν έχω ακόμη αρκετά σίγουρο μαθημένο σχέδιο. Χρησιμοποιώ AI μόνο για το planning αυτής της νέας περίπτωσης.")
+                let priorKnowledge = buildPriorExperienceContext(for: goal)
+                plan = try await planner.makePlan(
+                    goal: goal,
+                    capabilities: orchestrator.capabilities,
+                    priorKnowledge: priorKnowledge
+                )
+            }
+
             runtime.attachPlan(taskId: task.id, plan: plan)
             runtime.start(taskId: task.id)
             state = .executing
-            onProgress?("✅ Το σχέδιο δημιουργήθηκε με \(plan.steps.count) βήματα. Ξεκινώ αυτόνομα.")
+            onProgress?("✅ Το σχέδιο είναι έτοιμο με \(plan.steps.count) βήματα. Ξεκινώ αυτόνομα.")
             return try await continueMission(taskId: task.id, recentHistory: recentHistory)
         } catch {
             runtime.pause(taskId: task.id, reason: "Mission planning failed: \(error.localizedDescription)")
