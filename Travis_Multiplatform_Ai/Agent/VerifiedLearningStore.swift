@@ -68,6 +68,7 @@ final class VerifiedLearningStore {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         fileURL = directory.appendingPathComponent("verified-learning-v1.json")
         reload()
+        rebuildLocalProjections()
     }
 
     func ingestCompletedTask(_ task: AgentTask, projectId: UUID?) {
@@ -103,7 +104,10 @@ final class VerifiedLearningStore {
             changed = true
         }
 
-        if changed { persist() }
+        if changed {
+            rebuildLocalProjections()
+            persist()
+        }
     }
 
     func recentExamples(
@@ -156,21 +160,32 @@ final class VerifiedLearningStore {
         BY CAPABILITY
         \(rows.isEmpty ? "κανένα" : rows)
 
+        LOCAL VERIFICATION SAVES
+        \(LearnedVerificationRegistry.shared.localVerificationHits)
+
         Only completed, verified runtime step outputs are eligible.
         """
     }
 
     func reload() {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            rebuildLocalProjections()
+            return
+        }
         do {
             let data = try Data(contentsOf: fileURL)
             let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
             guard snapshot.version == 1 else { return }
             examples = snapshot.examples
+            rebuildLocalProjections()
             persistenceError = nil
         } catch {
             persistenceError = error.localizedDescription
         }
+    }
+
+    private func rebuildLocalProjections() {
+        LearnedVerificationRegistry.shared.rebuild(from: examples)
     }
 
     private func persist() {
