@@ -3,7 +3,6 @@ import Foundation
 import Network
 #endif
 
-@MainActor
 final class TravisFCCBridgeServer {
     static let shared = TravisFCCBridgeServer()
 
@@ -26,14 +25,12 @@ final class TravisFCCBridgeServer {
             let listener = try NWListener(using: parameters, on: 8765)
             listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
             listener.stateUpdateHandler = { [weak self] state in
-                Task { @MainActor in
-                    guard let self else { return }
-                    switch state {
-                    case .ready: self.isRunning = true; self.lastError = nil
-                    case .failed(let error): self.isRunning = false; self.lastError = error.localizedDescription
-                    case .cancelled: self.isRunning = false
-                    default: break
-                    }
+                guard let self else { return }
+                switch state {
+                case .ready: self.isRunning = true; self.lastError = nil
+                case .failed(let error): self.isRunning = false; self.lastError = error.localizedDescription
+                case .cancelled: self.isRunning = false
+                default: break
                 }
             }
             self.listener = listener
@@ -64,7 +61,7 @@ final class TravisFCCBridgeServer {
             var next = buffer
             if let data { next.append(data) }
             if self.requestIsComplete(next) || isComplete || error != nil {
-                Task { @MainActor in
+                Task {
                     let response = await self.handle(rawRequest: next)
                     self.send(response, on: connection)
                 }
