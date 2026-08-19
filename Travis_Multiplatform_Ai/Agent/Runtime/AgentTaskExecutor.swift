@@ -125,7 +125,29 @@ final class AgentStepVerifier {
         if let d=DeterministicStepVerifier.verify(step:step,capabilityResult:capabilityResult){return d}
         if let learned=LearnedVerificationRegistry.shared.verify(step:step,capabilityResult:capabilityResult){return learned}
         let criteria=step.successCriteria.enumerated().map{"\($0.offset+1). \($0.element)"}.joined(separator:"\n")
-        let base="""You are the scope-aware verification component of TRAVIS. Verify ONLY the current step. Judge only evidence in the produced result. OVERALL GOAL: \(taskGoal) CURRENT STEP: \(step.title) INSTRUCTIONS: \(step.instructions) SUCCESS CRITERIA: \(criteria) PRODUCED RESULT: \(capabilityResult) Return ONLY JSON: {\"verdict\":\"pass|retry|insufficient_evidence\",\"confidence\":0.0,\"reason\":\"short reason\",\"unmetCriteria\":[]}"""
+        let base = """
+        You are the scope-aware verification component of TRAVIS.
+        Verify ONLY the current step.
+        Judge only evidence in the produced result.
+
+        OVERALL GOAL:
+        \(taskGoal)
+
+        CURRENT STEP:
+        \(step.title)
+
+        INSTRUCTIONS:
+        \(step.instructions)
+
+        SUCCESS CRITERIA:
+        \(criteria)
+
+        PRODUCED RESULT:
+        \(capabilityResult)
+
+        Return ONLY JSON:
+        {"verdict":"pass|retry|insufficient_evidence","confidence":0.0,"reason":"short reason","unmetCriteria":[]}
+        """
         var lastRaw="";var diagnostic="unknown decode error"
         for attempt in 1...maxDecodeAttempts{try Task.checkCancellation();let prompt=attempt==1 ? base : "Repair into valid verifier JSON only: \(lastRaw)";let raw=try await aiService.generateText(prompt:prompt,maxTokens:attempt==1 ? 1200:500);lastRaw=raw;do{return try decodeVerifierResult(raw)}catch{diagnostic=error.localizedDescription}}
         throw AgentTaskExecutorError.verificationFailed("Verifier returned malformed JSON. \(diagnostic)")
