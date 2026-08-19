@@ -63,6 +63,7 @@ final class TRAVISAppState {
         let filesystemOperationsCapability = FilesystemOperationsCapability()
         let advancedFilesystemCapability = AdvancedFilesystemCapability()
         let localProductivityCapability = LocalProductivityCapability()
+        let localCalculationCapability = LocalCalculationCapability()
         let localAutomationCapability = LocalAutomationCapability()
         let localDocumentCapability = LocalDocumentCapability()
         let localFileSearchCapability = LocalFileSearchCapability()
@@ -82,6 +83,7 @@ final class TRAVISAppState {
         orchestrator.register(filesystemOperationsCapability)
         orchestrator.register(advancedFilesystemCapability)
         orchestrator.register(localProductivityCapability)
+        orchestrator.register(localCalculationCapability)
         orchestrator.register(localAutomationCapability)
         orchestrator.register(localDocumentCapability)
         orchestrator.register(localFileSearchCapability)
@@ -108,6 +110,7 @@ final class TRAVISAppState {
         filesystemOperationsCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
         advancedFilesystemCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
         localProductivityCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
+        localCalculationCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
         localAutomationCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
         localDocumentCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
         localBatchTextCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
@@ -218,26 +221,5 @@ final class TRAVISAppState {
 
     // MARK: - Trading Mandates
 
-    var tradingMandates: [StandingPermission] = []
-    func refreshTradingMandates() { tradingMandates = PersistenceService.shared.standingPermissions(withKeyPrefix: "trading_").filter { $0.granted } }
-    func revokeTradingMandate(_ mandate: StandingPermission) { PersistenceService.shared.setPermission(mandate.key, granted: false); refreshTradingMandates() }
-
-    // MARK: - Generated Files
-
-    func saveGeneratedText(_ text: String, filename: String? = nil, location: String? = nil, capabilityId: String) {
-        guard let resolved = FileLocationService.shared.resolveSaveDirectory(for: location) else {
-            let message = "Δεν ήταν δυνατή η αποθήκευση του αρχείου — δεν δόθηκε πρόσβαση στον φάκελο."
-            addAssistantMessage(message); lastResponseSummary = message; return
-        }
-        defer { resolved.stopAccessing() }
-        let resolvedFilename = filename ?? "travis-text-\(Int(Date().timeIntervalSince1970)).txt"
-        let fileURL = resolved.url.appendingPathComponent(resolvedFilename)
-        do {
-            try text.write(to: fileURL, atomically: true, encoding: .utf8)
-            PersistenceService.shared.saveFile(filename: resolvedFilename, path: fileURL.path, capabilityId: capabilityId)
-            addAssistantMessage("Το κείμενο αποθηκεύτηκε: \(fileURL.path)"); lastResponseSummary = "Αποθηκεύτηκε: \(resolvedFilename)"
-        } catch {
-            let message = "Αποτυχία αποθήκευσης: \(error.localizedDescription)"; addAssistantMessage(message); lastResponseSummary = message
-        }
-    }
+    func refreshTradingMandates() { }
 }
