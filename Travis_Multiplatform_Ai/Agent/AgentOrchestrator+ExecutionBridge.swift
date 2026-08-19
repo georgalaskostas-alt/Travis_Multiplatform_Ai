@@ -48,6 +48,9 @@ extension AgentOrchestrator {
             ) ?? ExpandedDeterministicCommandRouter.shared.invocation(
                 for: currentInstruction,
                 capabilities: capabilities
+            ) ?? AutomationDeterministicCommandRouter.shared.invocation(
+                for: currentInstruction,
+                capabilities: capabilities
             )
 
             if let localInvocation, localInvocation.capabilityId == capabilityId {
