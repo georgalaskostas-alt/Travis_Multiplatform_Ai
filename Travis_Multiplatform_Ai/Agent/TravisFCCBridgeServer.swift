@@ -3,8 +3,6 @@ import Foundation
 import Network
 #endif
 
-/// Localhost-only bridge used by FCC Assistant when it needs TRAVIS intelligence.
-/// No plant write operations are exposed here.
 @MainActor
 final class TravisFCCBridgeServer {
     static let shared = TravisFCCBridgeServer()
@@ -26,23 +24,15 @@ final class TravisFCCBridgeServer {
             let parameters = NWParameters.tcp
             parameters.allowLocalEndpointReuse = true
             let listener = try NWListener(using: parameters, on: 8765)
-            listener.newConnectionHandler = { [weak self] connection in
-                self?.accept(connection)
-            }
+            listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
             listener.stateUpdateHandler = { [weak self] state in
                 Task { @MainActor in
                     guard let self else { return }
                     switch state {
-                    case .ready:
-                        self.isRunning = true
-                        self.lastError = nil
-                    case .failed(let error):
-                        self.isRunning = false
-                        self.lastError = error.localizedDescription
-                    case .cancelled:
-                        self.isRunning = false
-                    default:
-                        break
+                    case .ready: self.isRunning = true; self.lastError = nil
+                    case .failed(let error): self.isRunning = false; self.lastError = error.localizedDescription
+                    case .cancelled: self.isRunning = false
+                    default: break
                     }
                 }
             }
@@ -57,8 +47,7 @@ final class TravisFCCBridgeServer {
 
     func stop() {
         #if os(macOS)
-        listener?.cancel()
-        listener = nil
+        listener?.cancel(); listener = nil
         #endif
         isRunning = false
     }
@@ -74,7 +63,6 @@ final class TravisFCCBridgeServer {
             guard let self else { connection.cancel(); return }
             var next = buffer
             if let data { next.append(data) }
-
             if self.requestIsComplete(next) || isComplete || error != nil {
                 Task { @MainActor in
                     let response = await self.handle(rawRequest: next)
@@ -87,53 +75,35 @@ final class TravisFCCBridgeServer {
     }
 
     private func requestIsComplete(_ data: Data) -> Bool {
-        guard let text = String(data: data, encoding: .utf8),
-              let headerRange = text.range(of: "\r\n\r\n") else { return false }
+        guard let text = String(data: data, encoding: .utf8), let headerRange = text.range(of: "\r\n\r\n") else { return false }
         let headers = String(text[..<headerRange.lowerBound])
         let contentLength = headers.split(separator: "\n").first { $0.lowercased().hasPrefix("content-length:") }
             .flatMap { Int($0.split(separator: ":", maxSplits: 1).last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") } ?? 0
-        let bodyStart = headerRange.upperBound
-        return text[bodyStart...].utf8.count >= contentLength
+        return text[headerRange.upperBound...].utf8.count >= contentLength
     }
 
     private func handle(rawRequest data: Data) async -> HTTPResponse {
-        guard let text = String(data: data, encoding: .utf8),
-              let headerRange = text.range(of: "\r\n\r\n") else {
+        guard let text = String(data: data, encoding: .utf8), let headerRange = text.range(of: "\r\n\r\n") else {
             return .json(status: 400, object: ["error": "invalid request"])
         }
-        let headerText = String(text[..<headerRange.lowerBound])
-        let firstLine = headerText.split(separator: "\n").first.map(String.init) ?? ""
+        let firstLine = text[..<headerRange.lowerBound].split(separator: "\n").first.map(String.init) ?? ""
         let parts = firstLine.split(separator: " ")
         guard parts.count >= 2 else { return .json(status: 400, object: ["error": "invalid request line"]) }
-        let method = String(parts[0]).uppercased()
-        let path = String(parts[1])
+        let method = String(parts[0]).uppercased(), path = String(parts[1])
 
         if method == "GET" && path == "/v1/fcc/status" {
-            return .json(status: 200, object: [
-                "status": "ok",
-                "service": "TRAVIS",
-                "bridge": "fcc",
-                "model": "TRAVIS-router",
-                "read_only": true,
-                "local_link": true
-            ])
+            return .json(status: 200, object: ["status":"ok","service":"TRAVIS","bridge":"fcc","model":"TRAVIS-router","read_only":true,"local_link":true])
         }
 
         if method == "POST" && path == "/v1/fcc/analyze" {
             let bodyText = String(text[headerRange.upperBound...])
-            guard let bodyData = bodyText.data(using: .utf8),
-                  let payload = try? JSONDecoder().decode(FCCRequest.self, from: bodyData),
-                  !payload.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return .json(status: 422, object: ["error": "invalid FCC analysis request"])
+            guard let bodyData = bodyText.data(using: .utf8), let payload = try? JSONDecoder().decode(FCCRequest.self, from: bodyData), !payload.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return .json(status: 422, object: ["error":"invalid FCC analysis request"])
             }
 
-            let evidenceText: String
-            if let data = try? JSONSerialization.data(withJSONObject: payload.evidence, options: [.prettyPrinted, .sortedKeys]),
-               let rendered = String(data: data, encoding: .utf8) {
-                evidenceText = rendered
-            } else {
-                evidenceText = "{}"
-            }
+            let foundationEvidence = payload.evidence.mapValues { $0.foundation }
+            let evidenceData = try? JSONSerialization.data(withJSONObject: foundationEvidence, options: [.prettyPrinted, .sortedKeys])
+            let evidenceText = evidenceData.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
 
             let prompt = """
             FCC READ-ONLY ANALYSIS REQUEST
@@ -150,24 +120,17 @@ final class TravisFCCBridgeServer {
             PROCESS EVIDENCE:
             \(evidenceText)
             """
-
             do {
                 let answer = try await AIExecutionScope.$context.withValue(
-                    AIInvocationContext(workload: .analysis, capabilityId: "fcc_assistant", operation: "fcc.bridge.analysis")
-                ) {
-                    try await AIService.shared.generateText(prompt: prompt, maxTokens: 1800)
-                }
-                return .json(status: 200, object: [
-                    "answer": answer,
-                    "provider": "TRAVIS",
-                    "read_only": true
-                ])
+                    AIInvocationContext(workload: .complex, capabilityId: "fcc_assistant", operation: "fcc.bridge.analysis")
+                ) { try await AIService.shared.generateText(prompt: prompt, maxTokens: 1800) }
+                return .json(status: 200, object: ["answer":answer,"provider":"TRAVIS","read_only":true])
             } catch {
-                return .json(status: 503, object: ["error": error.localizedDescription])
+                return .json(status: 503, object: ["error":error.localizedDescription])
             }
         }
 
-        return .json(status: 404, object: ["error": "not found"])
+        return .json(status: 404, object: ["error":"not found"])
     }
 
     private func send(_ response: HTTPResponse, on connection: NWConnection) {
@@ -180,16 +143,11 @@ final class TravisFCCBridgeServer {
         let question: String
         let systemPrompt: String?
         let evidence: [String: JSONValue]
-
-        enum CodingKeys: String, CodingKey {
-            case source, mode, question, evidence
-            case systemPrompt = "system_prompt"
-        }
+        enum CodingKeys: String, CodingKey { case source, mode, question, evidence; case systemPrompt = "system_prompt" }
     }
 
     private enum JSONValue: Codable {
         case string(String), number(Double), bool(Bool), object([String: JSONValue]), array([JSONValue]), null
-
         init(from decoder: Decoder) throws {
             let c = try decoder.singleValueContainer()
             if c.decodeNil() { self = .null }
@@ -200,39 +158,23 @@ final class TravisFCCBridgeServer {
             else if let v = try? c.decode([JSONValue].self) { self = .array(v) }
             else { throw DecodingError.dataCorruptedError(in: c, debugDescription: "Unsupported JSON value") }
         }
-
         func encode(to encoder: Encoder) throws {
             var c = encoder.singleValueContainer()
-            switch self {
-            case .string(let v): try c.encode(v)
-            case .number(let v): try c.encode(v)
-            case .bool(let v): try c.encode(v)
-            case .object(let v): try c.encode(v)
-            case .array(let v): try c.encode(v)
-            case .null: try c.encodeNil()
-            }
+            switch self { case .string(let v): try c.encode(v); case .number(let v): try c.encode(v); case .bool(let v): try c.encode(v); case .object(let v): try c.encode(v); case .array(let v): try c.encode(v); case .null: try c.encodeNil() }
         }
-
         var foundation: Any {
-            switch self {
-            case .string(let v): return v
-            case .number(let v): return v
-            case .bool(let v): return v
-            case .object(let v): return v.mapValues(\.foundation)
-            case .array(let v): return v.map(\.foundation)
-            case .null: return NSNull()
-            }
+            switch self { case .string(let v): return v; case .number(let v): return v; case .bool(let v): return v; case .object(let v): return v.mapValues(\.foundation); case .array(let v): return v.map(\.foundation); case .null: return NSNull() }
         }
     }
 
     private struct HTTPResponse {
         let data: Data
         static func json(status: Int, object: [String: Any]) -> HTTPResponse {
-            let body = (try? JSONSerialization.data(withJSONObject: object, options: [])) ?? Data("{}".utf8)
+            let body = (try? JSONSerialization.data(withJSONObject: object)) ?? Data("{}".utf8)
             let reason: String
-            switch status { case 200: reason = "OK"; case 400: reason = "Bad Request"; case 404: reason = "Not Found"; case 422: reason = "Unprocessable Entity"; default: reason = "Service Unavailable" }
-            let header = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
-            var data = Data(header.utf8); data.append(body); return HTTPResponse(data: data)
+            switch status { case 200: reason="OK"; case 400: reason="Bad Request"; case 404: reason="Not Found"; case 422: reason="Unprocessable Entity"; default: reason="Service Unavailable" }
+            let header="HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
+            var data=Data(header.utf8); data.append(body); return HTTPResponse(data:data)
         }
     }
     #endif
