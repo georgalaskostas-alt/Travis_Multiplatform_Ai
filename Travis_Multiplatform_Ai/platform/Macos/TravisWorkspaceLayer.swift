@@ -68,23 +68,31 @@ struct TravisWorkspaceLayer<Base: View>: View {
 
         VStack(spacing: 0) {
             windowBar(window)
-            Divider().overlay(.cyan.opacity(0.25))
+            Rectangle().fill(LinearGradient(colors: [.clear, .cyan.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)).frame(height: 1)
             windowContent(window.kind).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(width: width, height: height)
         .background(LinearGradient(colors: [Color(red: 0.006, green: 0.035, blue: 0.095), Color(red: 0.002, green: 0.012, blue: 0.045)], startPoint: .topLeading, endPoint: .bottomTrailing))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(LinearGradient(colors: [.white.opacity(0.24), .cyan.opacity(0.72), .blue.opacity(0.22)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.6))
-        .shadow(color: .black.opacity(0.85), radius: 32, y: 18)
-        .shadow(color: .cyan.opacity(0.15), radius: 20)
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(LinearGradient(colors: [.white.opacity(0.28), .cyan.opacity(0.82), .blue.opacity(0.24)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.8))
+        .overlay(RoundedRectangle(cornerRadius: 15).stroke(.white.opacity(0.07), lineWidth: 0.6).padding(3))
+        .shadow(color: .black.opacity(0.88), radius: 32, y: 18)
+        .shadow(color: .cyan.opacity(0.17), radius: 22)
         .zIndex(window.z)
         .onTapGesture { bringToFront(window.id) }
     }
 
     private func windowBar(_ window: WorkspaceWindow) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: window.kind.icon).foregroundStyle(.cyan)
-            Text(window.kind.title).font(.system(size: 12, weight: .bold, design: .rounded)).tracking(1.1)
+            ZStack {
+                RoundedRectangle(cornerRadius: 7).fill(.cyan.opacity(0.07)).frame(width: 28, height: 28)
+                RoundedRectangle(cornerRadius: 7).stroke(.cyan.opacity(0.34), lineWidth: 1).frame(width: 28, height: 28)
+                Image(systemName: window.kind.icon).font(.system(size: 11, weight: .bold)).foregroundStyle(.cyan)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(window.kind.title).font(.system(size: 11, weight: .heavy, design: .rounded)).tracking(1.1)
+                Text("TRAVIS WORKSPACE").font(.system(size: 6, weight: .bold, design: .rounded)).tracking(0.7).foregroundStyle(.cyan.opacity(0.72))
+            }
             Spacer()
             circleControl("minus") { setMode(window.id, .minimized) }
             circleControl(window.mode == .maximized ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") {
@@ -93,43 +101,32 @@ struct TravisWorkspaceLayer<Base: View>: View {
             circleControl("xmark") { close(window.id) }
         }
         .padding(.horizontal, 14)
-        .frame(height: 46)
-        .background(.white.opacity(0.025))
+        .frame(height: 48)
+        .background(LinearGradient(colors: [.white.opacity(0.055), Color(red:0.003,green:0.025,blue:0.082).opacity(0.96), .black.opacity(0.74)], startPoint: .top, endPoint: .bottom))
     }
 
     private func circleControl(_ icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon).font(.system(size: 10, weight: .bold)).frame(width: 25, height: 25)
-                .background(Circle().fill(.white.opacity(0.05)))
-                .overlay(Circle().stroke(.cyan.opacity(0.28), lineWidth: 0.8))
+            Image(systemName: icon).font(.system(size: 9, weight: .bold)).foregroundStyle(.cyan).frame(width: 25, height: 25)
+                .background(Circle().fill(.cyan.opacity(0.055)))
+                .overlay(Circle().stroke(.cyan.opacity(0.30), lineWidth: 0.9))
+                .shadow(color: .cyan.opacity(0.08), radius: 4)
         }.buttonStyle(.plain)
     }
 
     @ViewBuilder
     private func windowContent(_ kind: WorkspaceKind) -> some View {
         switch kind {
-        case .chat: ChatView(appState: appState)
-        case .history: ChatHistoryView(appState: appState)
+        case .chat:
+            TravisPremiumWorkspaceChatView(appState: appState)
+        case .history:
+            TravisPremiumHistoryView(appState: appState)
         case .tasks:
-            VStack(alignment: .leading, spacing: 12) {
-                Text("AUTONOMOUS TASKS").font(.headline).foregroundStyle(.cyan)
-                List(appState.activeTasks) { task in
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(task.title).font(.headline)
-                        Text(task.details).font(.caption).foregroundStyle(.secondary)
-                        Text("\(task.status.rawValue) • \(task.priority.rawValue)").font(.caption2).foregroundStyle(.cyan)
-                    }.padding(.vertical, 4)
-                }.scrollContentBackground(.hidden)
-            }.padding(16)
-        case .fcc: FCCWorkspaceView(appState: appState)
+            TravisPremiumTasksView(appState: appState)
+        case .fcc:
+            TravisPremiumFCCView(appState: appState)
         case .memory:
-            ScrollView {
-                Text(LocalIntelligenceMetrics.shared.diagnosticReport())
-                    .font(.system(size: 12, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(18)
-            }
+            TravisPremiumMemoryView()
         }
     }
 
@@ -141,11 +138,12 @@ struct TravisWorkspaceLayer<Base: View>: View {
                     bringToFront(window.id)
                 } label: {
                     Label(window.kind.title, systemImage: window.kind.icon)
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
                         .foregroundStyle(.cyan)
-                        .padding(.horizontal, 11).padding(.vertical, 7)
-                        .background(Capsule().fill(.black.opacity(0.72)))
-                        .overlay(Capsule().stroke(.cyan.opacity(0.42), lineWidth: 1))
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(Capsule().fill(LinearGradient(colors: [.white.opacity(0.04), .black.opacity(0.84)], startPoint: .top, endPoint: .bottom)))
+                        .overlay(Capsule().stroke(.cyan.opacity(0.46), lineWidth: 1))
+                        .shadow(color: .cyan.opacity(0.12), radius: 8)
                 }.buttonStyle(.plain)
             }
         }
@@ -176,58 +174,5 @@ private struct WorkspaceWindow: Identifiable {
     let kind: WorkspaceKind
     var mode: Mode = .normal
     var z: Double
-}
-
-private struct FCCWorkspaceView: View {
-    @Bindable var appState: TRAVISAppState
-    @State private var status = "Not checked"
-    @State private var response = ""
-    @State private var loading = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("FCC ASSISTANT").font(.system(size: 20, weight: .heavy, design: .rounded))
-                    Text("Read-only FCC module • AI powered by TRAVIS").font(.caption).foregroundStyle(.cyan)
-                }
-                Spacer()
-                Text(status).font(.caption.bold()).foregroundStyle(status.contains("ONLINE") ? .green : .orange)
-            }
-            HStack(spacing: 10) {
-                Button("CHECK FCC") { checkStatus() }
-                Button("DEMO SHIFT") { runCommand("FCC demo shift") }
-                Button("ASK TRAVIS ABOUT FCC") { openChatWith("FCC: ") }
-                Button("SHIFT REPORT") { openChatWith("FCC shift report: ") }
-            }.buttonStyle(.bordered)
-            ScrollView {
-                Text(response.isEmpty ? "FCC output will appear here." : response)
-                    .font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-            }
-            .background(.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(.cyan.opacity(0.20)))
-            if loading { ProgressView().controlSize(.small) }
-        }.padding(18)
-    }
-
-    private func checkStatus() {
-        loading = true
-        Task { @MainActor in
-            do {
-                let capability = appState.orchestrator.capabilities.first { $0.id == "fcc_assistant" }
-                guard let capability else { status = "FCC MODULE MISSING"; loading = false; return }
-                let result = try await capability.handle(command: "FCC status", recentHistory: [])
-                switch result {
-                case .reply(let text): response = text; status = "FCC ONLINE"
-                case .proposal: response = "FCC returned an unexpected proposal."; status = "CHECK FCC"
-                case .none: response = "No FCC response."; status = "CHECK FCC"
-                }
-            } catch { response = error.localizedDescription; status = "FCC OFFLINE" }
-            loading = false
-        }
-    }
-    private func runCommand(_ command: String) { appState.chatInput = command; appState.sendChat() }
-    private func openChatWith(_ text: String) { appState.chatInput = text }
 }
 #endif
