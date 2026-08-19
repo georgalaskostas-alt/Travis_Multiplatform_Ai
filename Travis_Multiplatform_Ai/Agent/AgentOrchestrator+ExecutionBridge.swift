@@ -55,6 +55,7 @@ extension AgentOrchestrator {
                     invocation: localInvocation,
                     taskId: taskId
                 )
+                LocalIntelligenceMetrics.shared.record(.modelFreeAutonomousExecution)
                 return try await UniversalCapabilityRunner.shared.run(
                     capability: capability,
                     invocation: invocation,
