@@ -1,18 +1,11 @@
 import Foundation
 
 /// Reuses mature verified workflow structure before invoking a cloud planner.
-/// Deterministic candidates are fully local planning reuse. Local-AI candidates
-/// also reuse the plan skeleton locally, while their semantic capability calls
-/// may still use the configured local model and escalate through AIService when
-/// necessary. Runtime policy, approval and verification always remain active.
 @MainActor
 final class SkillExecutionEngine {
     static let shared = SkillExecutionEngine()
 
-    enum PlanningMode: String, Hashable {
-        case deterministic
-        case localAI
-    }
+    enum PlanningMode: String, Hashable { case deterministic, localAI }
 
     struct Match {
         let skill: ReusableSkillStore.Skill
@@ -20,23 +13,20 @@ final class SkillExecutionEngine {
         let distilled: SkillDistillationService.DistilledSkill
         let planningMode: PlanningMode
         let plan: TaskPlan
+        let effectiveConfidence: Double
     }
 
     private let skills: ReusableSkillStore
     private let distillation: SkillDistillationService
+    private let confidence: SkillConfidenceStore
 
-    init(
-        skills: ReusableSkillStore = .shared,
-        distillation: SkillDistillationService = .shared
-    ) {
+    init(skills: ReusableSkillStore = .shared, distillation: SkillDistillationService = .shared, confidence: SkillConfidenceStore = .shared) {
         self.skills = skills
         self.distillation = distillation
+        self.confidence = confidence
     }
 
-    func optimizedPlan(
-        for goal: String,
-        capabilities: [AgentCapability]
-    ) -> Match? {
+    func optimizedPlan(for goal: String, capabilities: [AgentCapability]) -> Match? {
         let available = Dictionary(uniqueKeysWithValues: capabilities.map { ($0.id, $0.descriptor) })
         let candidates = skills.matchingSkills(for: goal, limit: 5)
 
@@ -45,64 +35,37 @@ final class SkillExecutionEngine {
                   candidate.similarity >= 0.88,
                   let distilled = distillation.item(for: candidate.skill.id),
                   distilled.confidence >= 0.82,
-                  candidate.skill.steps.allSatisfy({ available[$0.capabilityId] != nil }) else {
-                continue
-            }
+                  candidate.skill.steps.allSatisfy({ available[$0.capabilityId] != nil }) else { continue }
+
+            let effective = confidence.effectiveConfidence(base: distilled.confidence, skill: candidate.skill)
+            guard effective >= 0.80 else { continue }
 
             let mode: PlanningMode
             switch distilled.executionClass {
-            case .deterministicCandidate:
-                mode = .deterministic
-            case .localAICandidate:
-                mode = .localAI
-            case .cloudReasoningRequired:
-                continue
+            case .deterministicCandidate: mode = .deterministic
+            case .localAICandidate: mode = .localAI
+            case .cloudReasoningRequired: continue
             }
 
             let plan = materialize(skill: candidate.skill, descriptors: available, mode: mode)
-            if mode == .deterministic {
-                LocalIntelligenceMetrics.shared.record(.deterministicSkillPlan)
-            } else {
-                LocalIntelligenceMetrics.shared.record(.learnedCapabilityRoute)
-            }
+            if mode == .deterministic { LocalIntelligenceMetrics.shared.record(.deterministicSkillPlan) }
+            else { LocalIntelligenceMetrics.shared.record(.learnedCapabilityRoute) }
 
-            return Match(
-                skill: candidate.skill,
-                similarity: candidate.similarity,
-                distilled: distilled,
-                planningMode: mode,
-                plan: plan
-            )
+            return Match(skill: candidate.skill, similarity: candidate.similarity, distilled: distilled, planningMode: mode, plan: plan, effectiveConfidence: effective)
         }
-
         return nil
     }
 
-    /// Kept for source compatibility with the current task-creation path.
-    /// It now returns either a deterministic or local-AI eligible verified skill
-    /// plan; both avoid a fresh cloud-planner call.
-    func deterministicPlan(
-        for goal: String,
-        capabilities: [AgentCapability]
-    ) -> Match? {
-        optimizedPlan(for: goal, capabilities: capabilities)
-    }
+    func deterministicPlan(for goal: String, capabilities: [AgentCapability]) -> Match? { optimizedPlan(for: goal, capabilities: capabilities) }
 
-    private func materialize(
-        skill: ReusableSkillStore.Skill,
-        descriptors: [String: CapabilityDescriptor],
-        mode: PlanningMode
-    ) -> TaskPlan {
+    private func materialize(skill: ReusableSkillStore.Skill, descriptors: [String: CapabilityDescriptor], mode: PlanningMode) -> TaskPlan {
         var previousStepId: UUID?
         var freshSteps: [PlanStep] = []
-        freshSteps.reserveCapacity(skill.steps.count)
-
         for historical in skill.steps.sorted(by: { $0.order < $1.order }) {
             let stepId = UUID()
             let descriptor = descriptors[historical.capabilityId]
             let localMutation = descriptor?.policy.declares(.localMutation) == true
             let descriptorApproval = descriptor?.policy.requiresExplicitApproval == true
-
             let step = PlanStep(
                 id: stepId,
                 order: freshSteps.count + 1,
@@ -111,9 +74,7 @@ final class SkillExecutionEngine {
                 status: .pending,
                 capabilityId: historical.capabilityId,
                 dependencyStepIds: previousStepId.map { [$0] } ?? [],
-                successCriteria: historical.successCriteria.isEmpty
-                    ? ["The capability returns a non-empty result that can be verified."]
-                    : historical.successCriteria,
+                successCriteria: historical.successCriteria.isEmpty ? ["The capability returns a non-empty result that can be verified."] : historical.successCriteria,
                 riskLevel: historical.riskLevel,
                 requiresApproval: localMutation || descriptorApproval,
                 canRunInBackground: descriptor?.policy.supportsBackgroundExecution ?? false,
@@ -123,12 +84,7 @@ final class SkillExecutionEngine {
             freshSteps.append(step)
             previousStepId = stepId
         }
-
         let source = mode == .deterministic ? "deterministic" : "local-AI eligible"
-        return TaskPlan(
-            version: 1,
-            summary: "Reused mature verified \(source) skill without cloud planning: \(skill.title)",
-            steps: freshSteps
-        )
+        return TaskPlan(version: 1, summary: "Reused mature verified \(source) skill without cloud planning: \(skill.title)", steps: freshSteps)
     }
 }
