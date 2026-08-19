@@ -3,7 +3,7 @@ import Foundation
 @MainActor
 extension AgentOrchestrator {
     /// Shared execution entry point for autonomous runtime calls.
-    /// It now tries the safe structured/local path before the normal semantic path.
+    /// It tries safe structured/local paths before the normal semantic path.
     func executeCapability(
         id capabilityId: String,
         command: String,
@@ -36,15 +36,21 @@ extension AgentOrchestrator {
             )
         }
 
-        // 2. Autonomous steps contain a lot of context around the real instruction.
-        // Extract ONLY the current instruction, so old learned examples can never
-        // accidentally provide stale paths/arguments to deterministic execution.
+        // 2. Autonomous steps contain context around the real instruction.
+        // Read only the current instruction so learned history can never inject
+        // stale paths or arguments into local execution.
         if capability is any DeterministicInvocableCapability {
             let currentInstruction = autonomousCurrentInstruction(from: command) ?? command
-            if let localInvocation = DeterministicCommandRouter.shared.invocation(
+
+            let localInvocation = DeterministicCommandRouter.shared.invocation(
                 for: currentInstruction,
                 capabilities: capabilities
-            ), localInvocation.capabilityId == capabilityId {
+            ) ?? ExpandedDeterministicCommandRouter.shared.invocation(
+                for: currentInstruction,
+                capabilities: capabilities
+            )
+
+            if let localInvocation, localInvocation.capabilityId == capabilityId {
                 let invocation = try StructuredWorkflowBindingResolver.resolve(
                     invocation: localInvocation,
                     taskId: taskId
@@ -63,7 +69,7 @@ extension AgentOrchestrator {
         }
 
         // 3. If the step cannot be represented safely and exactly, keep the
-        // existing path. This is the fallback that may use AI when required.
+        // existing path. This fallback may use AI only when it is actually needed.
         return try await UniversalCapabilityRunner.shared.run(
             capability: capability,
             command: command,
@@ -103,7 +109,7 @@ extension AgentOrchestrator {
         )
     }
 
-    /// The executor wraps the real instruction between these two labels.
+    /// The executor wraps the real instruction between these labels.
     /// Reading only this slice keeps model-free execution tied to CURRENT data.
     private func autonomousCurrentInstruction(from command: String) -> String? {
         let startMarker = "ΟΔΗΓΙΕΣ:"
