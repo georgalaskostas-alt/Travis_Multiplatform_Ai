@@ -12,6 +12,7 @@ final class LocalIntelligenceMetrics {
         case deterministicFilesystemParse
         case deterministicSkillPlan
         case structuredCapabilityExecution
+        case modelFreeAutonomousExecution
         case learnedCapabilityRoute
         case learnedExecutionGuidance
         case learnedVerification
@@ -40,7 +41,11 @@ final class LocalIntelligenceMetrics {
     func count(_ event:EventKind)->Int{counters.values[event.rawValue,default:0]}
 
     var provenAICallsAvoided:Int{
-        count(.learnedVerification)+count(.learnedMissionPlan)+count(.deterministicSkillPlan)+count(.learnedCapabilityRoute)
+        count(.learnedVerification)
+        + count(.learnedMissionPlan)
+        + count(.deterministicSkillPlan)
+        + count(.learnedCapabilityRoute)
+        + count(.modelFreeAutonomousExecution)
     }
 
     func diagnosticReport()->String{
