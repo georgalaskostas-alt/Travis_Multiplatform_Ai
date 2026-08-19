@@ -39,7 +39,6 @@ final class LocalIntelligenceMetrics {
     func record(_ event:EventKind,count:Int=1){guard count>0 else{return};counters.values[event.rawValue,default:0]+=count;persist()}
     func count(_ event:EventKind)->Int{counters.values[event.rawValue,default:0]}
 
-    /// Conservative count: only events that clearly replaced a reasoning/verification call.
     var provenAICallsAvoided:Int{
         count(.learnedVerification)+count(.learnedMissionPlan)+count(.deterministicSkillPlan)+count(.learnedCapabilityRoute)
     }
@@ -57,6 +56,10 @@ final class LocalIntelligenceMetrics {
 
         BY TYPE
         \(rows)
+
+        \(LearnedSkillStore.shared.report)
+
+        \(SkillConfidenceStore.shared.diagnosticReport())
 
         Only clear local replacements are counted as avoided AI calls. Guidance and failure warnings are tracked separately and are not falsely counted as provider savings.
         """
