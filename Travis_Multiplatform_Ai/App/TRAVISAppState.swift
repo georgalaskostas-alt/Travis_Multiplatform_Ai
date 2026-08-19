@@ -4,8 +4,6 @@ import Observation
 @MainActor
 @Observable
 final class TRAVISAppState {
-    // MARK: - UI State
-
     var selectedSidebarItem: SidebarItem = .chat
     var chatInput: String = ""
     var chatMessages: [ChatMessage] = []
@@ -22,8 +20,6 @@ final class TRAVISAppState {
     var isBusy: Bool = false
     var lastResponseSummary: String = "Ready"
 
-    // MARK: - API Keys
-
     var anthropicAPIKey: String = "" {
         didSet { anthropicAPIKey.isEmpty ? KeychainService.shared.deleteAnthropicAPIKey() : KeychainService.shared.saveAnthropicAPIKey(anthropicAPIKey) }
     }
@@ -34,19 +30,13 @@ final class TRAVISAppState {
         didSet { binanceTestnetAPISecret.isEmpty ? KeychainService.shared.deleteBinanceTestnetAPISecret() : KeychainService.shared.saveBinanceTestnetAPISecret(binanceTestnetAPISecret) }
     }
 
-    // MARK: - Agent Infrastructure
-
     let approvalGate: ApprovalGateService
     let orchestrator: AgentOrchestrator
     let taskRuntime: AgentTaskRuntime
     let taskExecutor: AgentTaskExecutor
 
-    // MARK: - Sessions
-
     private(set) var currentSessionId: UUID = UUID()
     private(set) var viewedSessionId: UUID = UUID()
-
-    // MARK: - Init
 
     init() {
         let approvalGate = ApprovalGateService()
@@ -76,6 +66,7 @@ final class TRAVISAppState {
         let localDeliveryBundleCapability = LocalDeliveryBundleCapability()
         let localProjectScaffoldCapability = LocalProjectScaffoldCapability()
         let localProjectWorkspaceCapability = LocalProjectWorkspaceCapability()
+        let fccAssistantCapability = FCCAssistantCapability()
 
         orchestrator.register(TextTaskCapability())
         orchestrator.register(cryptoTradingCapability)
@@ -96,15 +87,14 @@ final class TRAVISAppState {
         orchestrator.register(localDeliveryBundleCapability)
         orchestrator.register(localProjectScaffoldCapability)
         orchestrator.register(localProjectWorkspaceCapability)
+        orchestrator.register(fccAssistantCapability)
 
         orchestrator.onAssistantMessage = { [weak self] text in self?.addAssistantMessage(text) }
         orchestrator.onSessionRecall = { [weak self] sessionId in self?.viewSession(sessionId) }
         taskExecutor.onProgress = { [weak self] text in
             self?.addAssistantMessage(text)
             guard let self else { return }
-            Task { @MainActor [weak self] in
-                await self?.synchronizeCompletedKnowledge()
-            }
+            Task { @MainActor [weak self] in await self?.synchronizeCompletedKnowledge() }
         }
         cryptoTradingCapability.onTestnetExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
         filesystemOperationsCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
@@ -118,6 +108,7 @@ final class TRAVISAppState {
         localDeliveryBundleCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
         localProjectScaffoldCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
         localProjectWorkspaceCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
+        fccAssistantCapability.onExecutionUpdate = { [weak self] text in self?.addAssistantMessage(text) }
 
         SpeechRecognitionService.shared.onFinalTranscript = { [weak self] text in self?.sendCommand(text, source: .voice) }
 
@@ -126,8 +117,6 @@ final class TRAVISAppState {
         if let savedTestnetSecret = KeychainService.shared.binanceTestnetAPISecret { self.binanceTestnetAPISecret = savedTestnetSecret }
         bootstrap()
     }
-
-    // MARK: - Bootstrap
 
     func bootstrap() {
         if permissions.isEmpty { permissions = TravisPermission.defaultPermissions }
@@ -141,9 +130,8 @@ final class TRAVISAppState {
         let restoredActions = PersistenceService.shared.loadProposedActions()
         approvalGate.restore(pending: restoredActions.pending, history: restoredActions.history)
         refreshTradingMandates()
-        Task { @MainActor [weak self] in
-            await self?.synchronizeCompletedKnowledge()
-        }
+        TravisFCCBridgeServer.shared.start()
+        Task { @MainActor [weak self] in await self?.synchronizeCompletedKnowledge() }
     }
 
     private func synchronizeCompletedKnowledge() async {
@@ -153,8 +141,6 @@ final class TRAVISAppState {
         }
         TravisLearningService.shared.refresh()
     }
-
-    // MARK: - Sessions
 
     func startNewSession() { currentSessionId = UUID(); viewedSessionId = currentSessionId; chatMessages = [] }
     var pastSessions: [ChatSession] { PersistenceService.shared.loadChatSessions().filter { $0.id != currentSessionId } }
@@ -168,8 +154,6 @@ final class TRAVISAppState {
         viewedSessionId = currentSessionId
         chatMessages = PersistenceService.shared.loadChatMessages().filter { $0.sessionId == currentSessionId }
     }
-
-    // MARK: - Messages
 
     @discardableResult
     func appendMessage(role: ChatRole, text: String) -> ChatMessage {
@@ -200,17 +184,11 @@ final class TRAVISAppState {
         }
     }
 
-    // MARK: - Command Approval
-
     func approveCommand(at index: Int) { guard pendingCommands.indices.contains(index) else { return }; pendingCommands[index].status = .approved; lastResponseSummary = "Command approved" }
     func denyCommand(at index: Int) { guard pendingCommands.indices.contains(index) else { return }; pendingCommands[index].status = .cancelled; lastResponseSummary = "Command denied" }
 
-    // MARK: - Permissions
-
     func togglePermissionEnabled(_ permission: TravisPermission) { guard let index = permissions.firstIndex(where: { $0.id == permission.id }) else { return }; permissions[index].isEnabled.toggle() }
     func updatePermission(_ permission: TravisPermission, to policy: PermissionPolicy) { guard let index = permissions.firstIndex(where: { $0.id == permission.id }) else { return }; permissions[index].policy = policy }
-
-    // MARK: - Voice
 
     func toggleListening() {
         isListening.toggle(); currentDeviceState = isListening ? .listening : .idle
@@ -219,7 +197,24 @@ final class TRAVISAppState {
     }
     func updateDeviceState(_ newState: DeviceState) { currentDeviceState = newState }
 
-    // MARK: - Trading Mandates
+    var tradingMandates: [StandingPermission] = []
+    func refreshTradingMandates() { tradingMandates = PersistenceService.shared.standingPermissions(withKeyPrefix: "trading_").filter { $0.granted } }
+    func revokeTradingMandate(_ mandate: StandingPermission) { PersistenceService.shared.setPermission(mandate.key, granted: false); refreshTradingMandates() }
 
-    func refreshTradingMandates() { }
+    func saveGeneratedText(_ text: String, filename: String? = nil, location: String? = nil, capabilityId: String) {
+        guard let resolved = FileLocationService.shared.resolveSaveDirectory(for: location) else {
+            let message = "Δεν ήταν δυνατή η αποθήκευση του αρχείου — δεν δόθηκε πρόσβαση στον φάκελο."
+            addAssistantMessage(message); lastResponseSummary = message; return
+        }
+        defer { resolved.stopAccessing() }
+        let resolvedFilename = filename ?? "travis-text-\(Int(Date().timeIntervalSince1970)).txt"
+        let fileURL = resolved.url.appendingPathComponent(resolvedFilename)
+        do {
+            try text.write(to: fileURL, atomically: true, encoding: .utf8)
+            PersistenceService.shared.saveFile(filename: resolvedFilename, path: fileURL.path, capabilityId: capabilityId)
+            addAssistantMessage("Το κείμενο αποθηκεύτηκε: \(fileURL.path)"); lastResponseSummary = "Αποθηκεύτηκε: \(resolvedFilename)"
+        } catch {
+            let message = "Αποτυχία αποθήκευσης: \(error.localizedDescription)"; addAssistantMessage(message); lastResponseSummary = message
+        }
+    }
 }
