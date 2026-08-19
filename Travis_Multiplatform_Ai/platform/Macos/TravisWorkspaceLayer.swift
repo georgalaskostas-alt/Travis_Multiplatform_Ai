@@ -48,9 +48,7 @@ struct TravisWorkspaceLayer<Base: View>: View {
     }
 
     private func launchButton(_ kind: WorkspaceKind, _ icon: String) -> some View {
-        Button {
-            open(kind)
-        } label: {
+        Button { open(kind) } label: {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(.cyan)
@@ -71,13 +69,10 @@ struct TravisWorkspaceLayer<Base: View>: View {
         VStack(spacing: 0) {
             windowBar(window)
             Divider().overlay(.cyan.opacity(0.25))
-            windowContent(window.kind)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            windowContent(window.kind).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(width: width, height: height)
-        .background(
-            LinearGradient(colors: [Color(red: 0.006, green: 0.035, blue: 0.095), Color(red: 0.002, green: 0.012, blue: 0.045)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        )
+        .background(LinearGradient(colors: [Color(red: 0.006, green: 0.035, blue: 0.095), Color(red: 0.002, green: 0.012, blue: 0.045)], startPoint: .topLeading, endPoint: .bottomTrailing))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(LinearGradient(colors: [.white.opacity(0.24), .cyan.opacity(0.72), .blue.opacity(0.22)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.6))
         .shadow(color: .black.opacity(0.85), radius: 32, y: 18)
@@ -89,9 +84,7 @@ struct TravisWorkspaceLayer<Base: View>: View {
     private func windowBar(_ window: WorkspaceWindow) -> some View {
         HStack(spacing: 10) {
             Image(systemName: window.kind.icon).foregroundStyle(.cyan)
-            Text(window.kind.title)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .tracking(1.1)
+            Text(window.kind.title).font(.system(size: 12, weight: .bold, design: .rounded)).tracking(1.1)
             Spacer()
             circleControl("minus") { setMode(window.id, .minimized) }
             circleControl(window.mode == .maximized ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") {
@@ -115,10 +108,8 @@ struct TravisWorkspaceLayer<Base: View>: View {
     @ViewBuilder
     private func windowContent(_ kind: WorkspaceKind) -> some View {
         switch kind {
-        case .chat:
-            ChatView(appState: appState)
-        case .history:
-            ChatHistoryView(appState: appState)
+        case .chat: ChatView(appState: appState)
+        case .history: ChatHistoryView(appState: appState)
         case .tasks:
             VStack(alignment: .leading, spacing: 12) {
                 Text("AUTONOMOUS TASKS").font(.headline).foregroundStyle(.cyan)
@@ -130,8 +121,7 @@ struct TravisWorkspaceLayer<Base: View>: View {
                     }.padding(.vertical, 4)
                 }.scrollContentBackground(.hidden)
             }.padding(16)
-        case .fcc:
-            FCCWorkspaceView(appState: appState)
+        case .fcc: FCCWorkspaceView(appState: appState)
         case .memory:
             ScrollView {
                 Text(LocalIntelligenceMetrics.shared.diagnosticReport())
@@ -163,38 +153,25 @@ struct TravisWorkspaceLayer<Base: View>: View {
 
     private func open(_ kind: WorkspaceKind) {
         if let existing = windows.first(where: { $0.kind == kind }) {
-            setMode(existing.id, .normal)
-            bringToFront(existing.id)
-            return
+            setMode(existing.id, .normal); bringToFront(existing.id); return
         }
         nextZ += 1
         windows.append(WorkspaceWindow(kind: kind, z: nextZ))
     }
-
     private func close(_ id: UUID) { windows.removeAll { $0.id == id } }
-    private func setMode(_ id: UUID, _ mode: WorkspaceWindow.Mode) {
-        guard let index = windows.firstIndex(where: { $0.id == id }) else { return }
-        windows[index].mode = mode
-    }
-    private func bringToFront(_ id: UUID) {
-        guard let index = windows.firstIndex(where: { $0.id == id }) else { return }
-        nextZ += 1; windows[index].z = nextZ
-    }
+    private func setMode(_ id: UUID, _ mode: WorkspaceWindow.Mode) { guard let index = windows.firstIndex(where: { $0.id == id }) else { return }; windows[index].mode = mode }
+    private func bringToFront(_ id: UUID) { guard let index = windows.firstIndex(where: { $0.id == id }) else { return }; nextZ += 1; windows[index].z = nextZ }
 }
 
 private enum WorkspaceKind: String, Identifiable, CaseIterable {
     case chat, history, tasks, fcc, memory
     var id: String { rawValue }
-    var title: String {
-        switch self { case .chat: return "TRAVIS CHAT"; case .history: return "CONVERSATION HISTORY"; case .tasks: return "TASK CONTROL"; case .fcc: return "FCC SYSTEM"; case .memory: return "LEARNING & MEMORY" }
-    }
-    var icon: String {
-        switch self { case .chat: return "message.fill"; case .history: return "clock.arrow.circlepath"; case .tasks: return "checklist"; case .fcc: return "waveform.path.ecg"; case .memory: return "memorychip.fill" }
-    }
+    var title: String { switch self { case .chat: return "TRAVIS CHAT"; case .history: return "CONVERSATION HISTORY"; case .tasks: return "TASK CONTROL"; case .fcc: return "FCC SYSTEM"; case .memory: return "LEARNING & MEMORY" } }
+    var icon: String { switch self { case .chat: return "message.fill"; case .history: return "clock.arrow.circlepath"; case .tasks: return "checklist"; case .fcc: return "waveform.path.ecg"; case .memory: return "memorychip.fill" } }
 }
 
 private struct WorkspaceWindow: Identifiable {
-    enum Mode { case normal, maximized, minimized }
+    enum Mode: Equatable { case normal, maximized, minimized }
     let id = UUID()
     let kind: WorkspaceKind
     var mode: Mode = .normal
@@ -217,31 +194,21 @@ private struct FCCWorkspaceView: View {
                 Spacer()
                 Text(status).font(.caption.bold()).foregroundStyle(status.contains("ONLINE") ? .green : .orange)
             }
-
             HStack(spacing: 10) {
                 Button("CHECK FCC") { checkStatus() }
                 Button("DEMO SHIFT") { runCommand("FCC demo shift") }
-                Button("ASK TRAVIS ABOUT FCC") {
-                    openChatWith("FCC: ")
-                }
-                Button("SHIFT REPORT") {
-                    openChatWith("FCC shift report: ")
-                }
+                Button("ASK TRAVIS ABOUT FCC") { openChatWith("FCC: ") }
+                Button("SHIFT REPORT") { openChatWith("FCC shift report: ") }
             }.buttonStyle(.bordered)
-
             ScrollView {
                 Text(response.isEmpty ? "FCC output will appear here." : response)
-                    .font(.system(size: 12, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
+                    .font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(14)
             }
             .background(.black.opacity(0.28), in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(.cyan.opacity(0.20)))
-
             if loading { ProgressView().controlSize(.small) }
-        }
-        .padding(18)
+        }.padding(18)
     }
 
     private func checkStatus() {
@@ -256,20 +223,11 @@ private struct FCCWorkspaceView: View {
                 case .proposal: response = "FCC returned an unexpected proposal."; status = "CHECK FCC"
                 case .none: response = "No FCC response."; status = "CHECK FCC"
                 }
-            } catch {
-                response = error.localizedDescription; status = "FCC OFFLINE"
-            }
+            } catch { response = error.localizedDescription; status = "FCC OFFLINE" }
             loading = false
         }
     }
-
-    private func runCommand(_ command: String) {
-        appState.chatInput = command
-        appState.sendChat()
-    }
-
-    private func openChatWith(_ text: String) {
-        appState.chatInput = text
-    }
+    private func runCommand(_ command: String) { appState.chatInput = command; appState.sendChat() }
+    private func openChatWith(_ text: String) { appState.chatInput = text }
 }
 #endif
