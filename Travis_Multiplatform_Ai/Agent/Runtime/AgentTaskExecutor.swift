@@ -12,7 +12,7 @@ enum AutonomousRunStopReason:String,Codable,Hashable{case completed,waitingForAp
 struct AutonomousRunReport:Codable,Hashable{let taskId:UUID;let stopReason:AutonomousRunStopReason;let stepsAttempted:Int;let progress:Double;let lastCheckpoint:String?;let nextStepTitle:String?;let failureReason:String?;let nextStepAttemptCount:Int?;let nextStepMaxAttempts:Int?;let nextStepLastError:String?}
 
 @MainActor @Observable final class AgentTaskExecutor{
-    static let runtimeFingerprint="runtime-v1.15-failure-learning"
+    static let runtimeFingerprint="runtime-v1.16-learned-skills"
     private let runtime:AgentTaskRuntime;private let orchestrator:AgentOrchestrator;private let approvalGate:ApprovalGateService;private let verifier:AgentStepVerifier
     private var leasedTaskIds:Set<UUID>=[];private var activeCapabilityTasks:[UUID:Task<CapabilityOutcome,Error>]=[:];private var cancellationRequestedTaskIds:Set<UUID>=[]
     private(set)var isExecuting=false;private(set)var lastExecutionSummary:String?;var onProgress:((String)->Void)?
@@ -33,11 +33,13 @@ struct AutonomousRunReport:Codable,Hashable{let taskId:UUID;let stopReason:Auton
         do{
             try throwIfCancellationRequested(taskId)
             let instruction=step.title+" "+step.instructions
+            let skillMatch=LearnedSkillStore.shared.bestMatch(instruction:instruction,capabilityId:capabilityId,projectId:projectId)
+            if let skillMatch{LearnedSkillStore.shared.markUsed(skillMatch.skill.id);LocalIntelligenceMetrics.shared.record(.learnedExecutionGuidance);onProgress?("⚡ Ενεργοποιώ μαθημένη δεξιότητα από \(skillMatch.skill.provenExamples) επιβεβαιωμένες επιτυχίες (\(Int(skillMatch.confidence*100))%).")}
             let guidance=LearnedExecutionRegistry.shared.guidance(instruction:instruction,capabilityId:capabilityId,projectId:projectId)
-            if let guidance{LocalIntelligenceMetrics.shared.record(.learnedExecutionGuidance);onProgress?("🧠 Χρησιμοποιώ επιβεβαιωμένη προηγούμενη εμπειρία (\(Int(guidance.confidence*100))% ομοιότητα).")}
+            if skillMatch == nil,let guidance{LocalIntelligenceMetrics.shared.record(.learnedExecutionGuidance);onProgress?("🧠 Χρησιμοποιώ επιβεβαιωμένη προηγούμενη εμπειρία (\(Int(guidance.confidence*100))% ομοιότητα).")}
             let failureWarning=FailureLearningStore.shared.warning(capabilityId:capabilityId,instruction:instruction,projectId:projectId)
             if failureWarning != nil{LocalIntelligenceMetrics.shared.record(.knownFailureAvoided);onProgress?("🛡️ Θυμάμαι παρόμοια προηγούμενη αποτυχία και ζητώ διαφορετική προσέγγιση.")}
-            let command=executionCommand(task:task,step:step,learnedGuidance:guidance,failureWarning:failureWarning)
+            let command=executionCommand(task:task,step:step,learnedGuidance:guidance,learnedSkill:skillMatch,failureWarning:failureWarning)
             let capabilityTask=Task<CapabilityOutcome,Error>{@MainActor [orchestrator] in try Task.checkCancellation();return try await orchestrator.executeCapability(id:capabilityId,command:command,taskId:taskId,stepId:step.id,projectId:projectId,recentHistory:recentHistory)}
             activeCapabilityTasks[taskId]=capabilityTask;defer{activeCapabilityTasks[taskId]=nil};let outcome=try await capabilityTask.value;try throwIfCancellationRequested(taskId)
             switch outcome{
@@ -62,16 +64,17 @@ struct AutonomousRunReport:Codable,Hashable{let taskId:UUID;let stopReason:Auton
     private func releaseExecutionLease(taskId:UUID){activeCapabilityTasks[taskId]?.cancel();activeCapabilityTasks[taskId]=nil;cancellationRequestedTaskIds.remove(taskId);leasedTaskIds.remove(taskId);isExecuting = !leasedTaskIds.isEmpty}
     private func makeRunReport(task:AgentTask,reason:AutonomousRunStopReason,stepsAttempted:Int)->AutonomousRunReport{let n=runtime.nextRunnableStep(taskId:task.id);return AutonomousRunReport(taskId:task.id,stopReason:reason,stepsAttempted:stepsAttempted,progress:runtime.progress(taskId:task.id),lastCheckpoint:task.executionState.lastCheckpoint?.summary,nextStepTitle:n?.title,failureReason:task.failureReason,nextStepAttemptCount:n?.attemptCount,nextStepMaxAttempts:n?.maxAttempts,nextStepLastError:n?.lastError)}
 
-    private func executionCommand(task:AgentTask,step:PlanStep,learnedGuidance:LearnedExecutionRegistry.Guidance?,failureWarning:String?)->String{let criteria=step.successCriteria.enumerated().map{"\($0.offset+1). \($0.element)"}.joined(separator:"\n");let deps=dependencyEvidenceBlock(task:task,step:step);let learned:String;if let g=learnedGuidance{learned="VERIFIED PRIOR EXPERIENCE (guidance only):\nconfidence: \(Int(g.confidence*100))%\nprior instruction: \(g.priorInstruction)\nprior verified result: \(g.priorVerifiedResult)\nRe-run against current evidence; never copy blindly."}else{learned="No sufficiently similar verified prior experience."};let failures=failureWarning ?? "No strongly similar known failure.";return """
+    private func executionCommand(task:AgentTask,step:PlanStep,learnedGuidance:LearnedExecutionRegistry.Guidance?,learnedSkill:LearnedSkillStore.Match?,failureWarning:String?)->String{let criteria=step.successCriteria.enumerated().map{"\($0.offset+1). \($0.element)"}.joined(separator:"\n");let deps=dependencyEvidenceBlock(task:task,step:step);let learned:String;if let g=learnedGuidance{learned="VERIFIED PRIOR EXPERIENCE (guidance only):\nconfidence: \(Int(g.confidence*100))%\nprior instruction: \(g.priorInstruction)\nprior verified result: \(g.priorVerifiedResult)\nRe-run against current evidence; never copy blindly."}else{learned="No sufficiently similar verified prior experience."};let skill=learnedSkill.map{LearnedSkillStore.shared.guidance($0)} ?? "No sufficiently proven learned skill.";let failures=failureWarning ?? "No strongly similar known failure.";return """
     RUNTIME FINGERPRINT: \(Self.runtimeFingerprint)
     ΣΥΝΟΛΙΚΟΣ ΣΤΟΧΟΣ: \(task.goal)
     ΤΡΕΧΟΝ STEP: #\(step.order) — \(step.title)
     ΟΔΗΓΙΕΣ: \(step.instructions)
     VERIFIED DEPENDENCY EVIDENCE: \(deps)
+    \(skill)
     \(learned)
     \(failures)
     SUCCESS CRITERIA: \(criteria)
-    Παρήγαγε μόνο το πραγματικό αποτέλεσμα αυτού του step. Μην επαναλάβεις γνωστή αποτυχημένη προσέγγιση όταν ισχύουν ακόμη οι ίδιες συνθήκες.
+    Αν υπάρχει LEARNED LOCAL SKILL, ακολούθησε πρώτα το μαθημένο μοτίβο αλλά έλεγξε ξανά τα σημερινά δεδομένα. Παρήγαγε μόνο το πραγματικό αποτέλεσμα αυτού του step. Μην επαναλάβεις γνωστή αποτυχημένη προσέγγιση όταν ισχύουν ακόμη οι ίδιες συνθήκες.
     """}
     private func dependencyEvidenceBlock(task:AgentTask,step:PlanStep)->String{guard !step.dependencyStepIds.isEmpty else{return "None — this step has no dependencies."};let ids=Set(step.dependencyStepIds);let dependencies=task.plan.steps.filter{ids.contains($0.id)}.sorted{$0.order<$1.order};var sections:[String]=[];var total=0;for d in dependencies{guard total<80_000 else{break};guard d.status == .completed,let r=d.resultSummary,!r.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else{sections.append("--- DEPENDENCY STEP #\(d.order): \(d.title) ---\nNo verified result is available.");continue};let allowed=min(14_000,80_000-total);let clipped=String(r.prefix(allowed));sections.append("--- DEPENDENCY STEP #\(d.order): \(d.title) ---\n\(clipped)");total+=clipped.count};return sections.isEmpty ? "No completed dependency evidence is available." : sections.joined(separator:"\n\n")}
 }
