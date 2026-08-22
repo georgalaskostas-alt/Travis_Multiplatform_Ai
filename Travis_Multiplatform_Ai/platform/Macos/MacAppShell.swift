@@ -4,24 +4,8 @@ struct MacAppShell: View {
     @Bindable var appState: TRAVISAppState
 
     var body: some View {
-        Group {
-            if appState.selectedSidebarItem == .chat {
-                TravisWorkspaceLayer(appState: appState) {
-                    TravisPremiumCommandCenterView(appState: appState)
-                }
-            } else {
-                NavigationSplitView {
-                    List(SidebarItem.allCases, selection: $appState.selectedSidebarItem) { item in
-                        Label(item.title, systemImage: icon(for: item))
-                            .tag(item)
-                            .help(tooltip(for: item))
-                    }
-                    .navigationSplitViewColumnWidth(min: 180, ideal: 220)
-                } detail: {
-                    detailView(for: appState.selectedSidebarItem)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
+        TravisWorkspaceLayer(appState: appState) {
+            TravisPremiumCommandCenterView(appState: appState)
         }
         .preferredColorScheme(.dark)
         .toolbar {
@@ -35,56 +19,36 @@ struct MacAppShell: View {
                 .accessibilityLabel("Open FCC Assistant workspace")
             }
         }
+        .onAppear {
+            routeLegacySelection(appState.selectedSidebarItem)
+        }
+        .onChange(of: appState.selectedSidebarItem) { _, item in
+            routeLegacySelection(item)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .travisOpenFCCQuickAccess)) { _ in
             appState.performUIAction(.openWorkspace(.fcc))
         }
     }
 
-    @ViewBuilder
-    private func detailView(for item: SidebarItem) -> some View {
+    /// Compatibility bridge for controls that still set the old SidebarItem.
+    /// They now open the premium workspace instead of replacing the command center
+    /// with the legacy NavigationSplitView/detail UI.
+    private func routeLegacySelection(_ item: SidebarItem) {
         switch item {
         case .chat:
-            ChatView(appState: appState)
+            break // Dashboard/command center is the base view; chat is opened explicitly by its controls.
         case .history:
-            ChatHistoryView(appState: appState)
+            appState.performUIAction(.openWorkspace(.history))
+            appState.selectedSidebarItem = .chat
         case .tasks:
-            taskPanel
+            appState.performUIAction(.openWorkspace(.tasks))
+            appState.selectedSidebarItem = .chat
         case .permissions:
-            PermissionsView(appState: appState)
+            appState.performUIAction(.openWorkspace(.permissions))
+            appState.selectedSidebarItem = .chat
         case .settings:
-            SettingsView(appState: appState)
-        }
-    }
-
-    private var taskPanel: some View {
-        List(appState.activeTasks) { task in
-            VStack(alignment: .leading, spacing: 6) {
-                Text(task.title).font(.headline)
-                Text(task.details).font(.subheadline).foregroundStyle(.secondary)
-                Text("\(task.status.rawValue) • \(task.priority.rawValue)").font(.caption).foregroundStyle(.cyan)
-            }
-            .padding(.vertical, 4)
-        }
-        .navigationTitle("Tasks")
-    }
-
-    private func tooltip(for item: SidebarItem) -> String {
-        switch item {
-        case .chat: return "Open the TRAVIS command center and chat workspace"
-        case .history: return "Review previous TRAVIS conversations and activity"
-        case .tasks: return "View active and recent autonomous tasks"
-        case .permissions: return "Review and manage TRAVIS execution permissions"
-        case .settings: return "Open TRAVIS settings"
-        }
-    }
-
-    private func icon(for item: SidebarItem) -> String {
-        switch item {
-        case .chat: return "square.grid.2x2"
-        case .history: return "clock.arrow.circlepath"
-        case .tasks: return "checklist"
-        case .permissions: return "lock.shield"
-        case .settings: return "gearshape"
+            appState.performUIAction(.openWorkspace(.settings))
+            appState.selectedSidebarItem = .chat
         }
     }
 }
