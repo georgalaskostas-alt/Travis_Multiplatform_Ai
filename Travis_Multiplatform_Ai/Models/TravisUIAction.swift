@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 enum TravisWorkspaceID: String, Codable, CaseIterable, Sendable {
     case dashboard
@@ -31,6 +32,25 @@ struct TravisUIActionRequest: Identifiable, Equatable, Sendable {
     init(action: TravisUIAction) {
         self.id = UUID()
         self.action = action
+    }
+}
+
+@MainActor
+@Observable
+final class TravisUIActionRouter {
+    static let shared = TravisUIActionRouter()
+
+    private(set) var pendingRequest: TravisUIActionRequest?
+
+    private init() {}
+
+    func route(_ action: TravisUIAction) {
+        pendingRequest = TravisUIActionRequest(action: action)
+    }
+
+    func consume(_ requestID: UUID) {
+        guard pendingRequest?.id == requestID else { return }
+        pendingRequest = nil
     }
 }
 
@@ -102,6 +122,7 @@ enum TravisNavigationIntentParser {
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             .lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "  ", with: " ")
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
     }
 }
