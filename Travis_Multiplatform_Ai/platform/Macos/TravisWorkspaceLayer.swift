@@ -8,6 +8,7 @@ struct TravisWorkspaceLayer<Base: View>: View {
 
     @State private var windows: [WorkspaceWindow] = []
     @State private var nextZ: Double = 10
+    @State private var actionRouter = TravisUIActionRouter.shared
 
     init(
         appState: TRAVISAppState,
@@ -37,10 +38,16 @@ struct TravisWorkspaceLayer<Base: View>: View {
                     .padding(.bottom, 12)
             }
         }
-        .onAppear { consumeFCCQuickAccessRequest() }
+        .onAppear {
+            consumeFCCQuickAccessRequest()
+            consumePendingUIAction()
+        }
         .onChange(of: openFCCQuickAccess) { _, requested in
             guard requested else { return }
             consumeFCCQuickAccessRequest()
+        }
+        .onChange(of: actionRouter.pendingRequest?.id) { _, _ in
+            consumePendingUIAction()
         }
     }
 
@@ -59,8 +66,8 @@ struct TravisWorkspaceLayer<Base: View>: View {
         .help("Quick access to TRAVIS workspaces")
     }
 
-    private func launchButton(_ kind: WorkspaceKind, _ icon: String, prominent: Bool = false) -> some View {
-        Button { open(kind) } label: {
+    private func launchButton(_ kind: TravisWorkspaceID, _ icon: String, prominent: Bool = false) -> some View {
+        Button { appState.performUIAction(.openWorkspace(kind)) } label: {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(prominent ? .green : .cyan)
@@ -93,7 +100,7 @@ struct TravisWorkspaceLayer<Base: View>: View {
         .shadow(color: .black.opacity(0.88), radius: 32, y: 18)
         .shadow(color: .cyan.opacity(0.17), radius: 22)
         .zIndex(window.z)
-        .onTapGesture { bringToFront(window.id) }
+        .onTapGesture { appState.performUIAction(.bringWorkspaceToFront(window.kind)) }
     }
 
     private func windowBar(_ window: WorkspaceWindow) -> some View {
@@ -109,14 +116,18 @@ struct TravisWorkspaceLayer<Base: View>: View {
                 Text("TRAVIS WORKSPACE").font(.system(size: 6, weight: .bold, design: .rounded)).tracking(0.7).foregroundStyle(.cyan.opacity(0.72))
             }
             Spacer()
-            circleControl("minus", tooltip: "Minimize \(window.kind.title)") { setMode(window.id, .minimized) }
+            circleControl("minus", tooltip: "Minimize \(window.kind.title)") {
+                appState.performUIAction(.minimizeWorkspace(window.kind))
+            }
             circleControl(
                 window.mode == .maximized ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                 tooltip: window.mode == .maximized ? "Restore \(window.kind.title)" : "Maximize \(window.kind.title)"
             ) {
-                setMode(window.id, window.mode == .maximized ? .normal : .maximized)
+                appState.performUIAction(window.mode == .maximized ? .restoreWorkspace(window.kind) : .maximizeWorkspace(window.kind))
             }
-            circleControl("xmark", tooltip: "Close \(window.kind.title)") { close(window.id) }
+            circleControl("xmark", tooltip: "Close \(window.kind.title)") {
+                appState.performUIAction(.closeWorkspace(window.kind))
+            }
         }
         .padding(.horizontal, 14)
         .frame(height: 48)
@@ -136,7 +147,7 @@ struct TravisWorkspaceLayer<Base: View>: View {
     }
 
     @ViewBuilder
-    private func windowContent(_ kind: WorkspaceKind) -> some View {
+    private func windowContent(_ kind: TravisWorkspaceID) -> some View {
         switch kind {
         case .chat:
             TravisPremiumWorkspaceChatView(appState: appState)
@@ -148,6 +159,8 @@ struct TravisWorkspaceLayer<Base: View>: View {
             TravisPremiumFCCView(appState: appState)
         case .memory:
             TravisPremiumMemoryView()
+        case .dashboard, .permissions, .settings:
+            EmptyView()
         }
     }
 
@@ -155,8 +168,7 @@ struct TravisWorkspaceLayer<Base: View>: View {
         HStack(spacing: 8) {
             ForEach(windows.filter { $0.mode == .minimized }) { window in
                 Button {
-                    setMode(window.id, .normal)
-                    bringToFront(window.id)
+                    appState.performUIAction(.restoreWorkspace(window.kind))
                 } label: {
                     Label(window.kind.title, systemImage: window.kind.icon)
                         .font(.system(size: 9, weight: .bold, design: .rounded))
@@ -174,34 +186,118 @@ struct TravisWorkspaceLayer<Base: View>: View {
 
     private func consumeFCCQuickAccessRequest() {
         guard openFCCQuickAccess else { return }
-        open(.fcc)
+        appState.performUIAction(.openWorkspace(.fcc))
         openFCCQuickAccess = false
     }
 
-    private func open(_ kind: WorkspaceKind) {
+    private func consumePendingUIAction() {
+        guard let request = actionRouter.pendingRequest else { return }
+        handle(request.action)
+        actionRouter.consume(request.id)
+    }
+
+    private func handle(_ action: TravisUIAction) {
+        switch action {
+        case .openWorkspace(let kind):
+            guard kind.isFloatingWorkspace else { return }
+            open(kind)
+        case .closeWorkspace(let kind):
+            close(kind)
+        case .minimizeWorkspace(let kind):
+            setMode(kind, .minimized)
+        case .maximizeWorkspace(let kind):
+            setMode(kind, .maximized)
+        case .restoreWorkspace(let kind):
+            setMode(kind, .normal)
+            bringToFront(kind)
+        case .bringWorkspaceToFront(let kind):
+            bringToFront(kind)
+        case .newMission, .newProject, .systemScan, .toggleVoice:
+            break
+        }
+    }
+
+    private func open(_ kind: TravisWorkspaceID) {
         if let existing = windows.first(where: { $0.kind == kind }) {
-            setMode(existing.id, .normal); bringToFront(existing.id); return
+            setMode(existing.id, .normal)
+            bringToFront(existing.id)
+            return
         }
         nextZ += 1
         windows.append(WorkspaceWindow(kind: kind, z: nextZ))
     }
-    private func close(_ id: UUID) { windows.removeAll { $0.id == id } }
-    private func setMode(_ id: UUID, _ mode: WorkspaceWindow.Mode) { guard let index = windows.firstIndex(where: { $0.id == id }) else { return }; windows[index].mode = mode }
-    private func bringToFront(_ id: UUID) { guard let index = windows.firstIndex(where: { $0.id == id }) else { return }; nextZ += 1; windows[index].z = nextZ }
+
+    private func close(_ kind: TravisWorkspaceID) {
+        windows.removeAll { $0.kind == kind }
+    }
+
+    private func setMode(_ kind: TravisWorkspaceID, _ mode: WorkspaceWindow.Mode) {
+        guard let index = windows.firstIndex(where: { $0.kind == kind }) else { return }
+        windows[index].mode = mode
+    }
+
+    private func bringToFront(_ kind: TravisWorkspaceID) {
+        guard let index = windows.firstIndex(where: { $0.kind == kind }) else { return }
+        nextZ += 1
+        windows[index].z = nextZ
+    }
+
+    private func setMode(_ id: UUID, _ mode: WorkspaceWindow.Mode) {
+        guard let index = windows.firstIndex(where: { $0.id == id }) else { return }
+        windows[index].mode = mode
+    }
+
+    private func bringToFront(_ id: UUID) {
+        guard let index = windows.firstIndex(where: { $0.id == id }) else { return }
+        nextZ += 1
+        windows[index].z = nextZ
+    }
 }
 
-private enum WorkspaceKind: String, Identifiable, CaseIterable {
-    case chat, history, tasks, fcc, memory
-    var id: String { rawValue }
-    var title: String { switch self { case .chat: return "TRAVIS CHAT"; case .history: return "CONVERSATION HISTORY"; case .tasks: return "TASK CONTROL"; case .fcc: return "FCC SYSTEM"; case .memory: return "LEARNING & MEMORY" } }
-    var icon: String { switch self { case .chat: return "message.fill"; case .history: return "clock.arrow.circlepath"; case .tasks: return "checklist"; case .fcc: return "waveform.path.ecg"; case .memory: return "memorychip.fill" } }
+private extension TravisWorkspaceID {
+    var isFloatingWorkspace: Bool {
+        switch self {
+        case .chat, .history, .tasks, .fcc, .memory: return true
+        case .dashboard, .permissions, .settings: return false
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .dashboard: return "DASHBOARD"
+        case .chat: return "TRAVIS CHAT"
+        case .history: return "CONVERSATION HISTORY"
+        case .tasks: return "TASK CONTROL"
+        case .fcc: return "FCC SYSTEM"
+        case .memory: return "LEARNING & MEMORY"
+        case .permissions: return "PERMISSIONS"
+        case .settings: return "SETTINGS"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .dashboard: return "square.grid.2x2.fill"
+        case .chat: return "message.fill"
+        case .history: return "clock.arrow.circlepath"
+        case .tasks: return "checklist"
+        case .fcc: return "waveform.path.ecg"
+        case .memory: return "memorychip.fill"
+        case .permissions: return "lock.shield.fill"
+        case .settings: return "gearshape.fill"
+        }
+    }
+
     var tooltip: String {
         switch self {
+        case .dashboard: return "Show TRAVIS command center"
         case .chat: return "Open TRAVIS chat workspace"
         case .history: return "Open conversation history"
         case .tasks: return "Open autonomous task control"
         case .fcc: return "Open FCC Assistant — local read-only process intelligence"
         case .memory: return "Open TRAVIS learning and memory"
+        case .permissions: return "Open TRAVIS permissions"
+        case .settings: return "Open TRAVIS settings"
         }
     }
 }
@@ -209,7 +305,7 @@ private enum WorkspaceKind: String, Identifiable, CaseIterable {
 private struct WorkspaceWindow: Identifiable {
     enum Mode: Equatable { case normal, maximized, minimized }
     let id = UUID()
-    let kind: WorkspaceKind
+    let kind: TravisWorkspaceID
     var mode: Mode = .normal
     var z: Double
 }
