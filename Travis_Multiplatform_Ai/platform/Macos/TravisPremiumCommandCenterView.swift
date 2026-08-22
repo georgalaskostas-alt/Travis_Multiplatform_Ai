@@ -40,7 +40,10 @@ struct TravisPremiumCommandCenterView: View {
         .preferredColorScheme(.dark)
         .onAppear { telemetry.start(); learning.refresh(); pulse = true }
         .onDisappear { telemetry.stop() }
-        .sheet(isPresented: $showingChat) { ChatView(appState: appState).frame(minWidth: 820, minHeight: 620) }
+        .sheet(isPresented: $showingChat) {
+            TravisPremiumWorkspaceChatView(appState: appState)
+                .frame(minWidth: 820, minHeight: 620)
+        }
     }
 
     private var header: some View {
@@ -67,8 +70,10 @@ struct TravisPremiumCommandCenterView: View {
                 Text(Date.now, style: .time).font(.system(size: 18, weight: .bold, design: .rounded))
                 Text("UPTIME \(telemetry.uptime)").font(.system(size: 8, weight: .medium, design: .rounded)).foregroundStyle(.secondary)
             }
-            iconButton("magnifyingglass") { appState.selectedSidebarItem = .history }
-            iconButton("gearshape.fill") { appState.selectedSidebarItem = .settings }
+            iconButton("magnifyingglass") { appState.performUIAction(.openWorkspace(.history)) }
+                .help("Open conversation history")
+            iconButton("gearshape.fill") { appState.performUIAction(.openWorkspace(.settings)) }
+                .help("Open settings")
         }
         .padding(.horizontal, 15).padding(.vertical, 10)
         .background(PremiumPanelShape(cut: 20).fill(Color.black.opacity(0.78)).offset(y: 7))
@@ -84,21 +89,21 @@ struct TravisPremiumCommandCenterView: View {
     private var navigationRail: some View {
         VStack(spacing: 12) {
             hudPanel("NAVIGATION", "dot.scope") {
-                rail("DASHBOARD", "square.grid.2x2.fill") { }
+                rail("DASHBOARD", "square.grid.2x2.fill") { appState.performUIAction(.openWorkspace(.dashboard)) }
                 rail("CHAT", "message.fill") { showingChat = true }
-                rail("TASKS", "checklist") { appState.selectedSidebarItem = .tasks }
-                rail("HISTORY", "clock.arrow.circlepath") { appState.selectedSidebarItem = .history }
-                rail("PERMISSIONS", "lock.shield.fill") { appState.selectedSidebarItem = .permissions }
-                rail("SETTINGS", "gearshape.fill") { appState.selectedSidebarItem = .settings }
+                rail("TASKS", "checklist") { appState.performUIAction(.openWorkspace(.tasks)) }
+                rail("HISTORY", "clock.arrow.circlepath") { appState.performUIAction(.openWorkspace(.history)) }
+                rail("PERMISSIONS", "lock.shield.fill") { appState.performUIAction(.openWorkspace(.permissions)) }
+                rail("SETTINGS", "gearshape.fill") { appState.performUIAction(.openWorkspace(.settings)) }
             }
             hudPanel("QUICK ACCESS", "bolt.fill") {
                 rail("NEW MISSION", "plus.circle.fill") { showingChat = true; appState.chatInput = "/plan " }
                 rail("NEW PROJECT", "folder.badge.plus") { showingChat = true; appState.chatInput = "Φτιάξε project " }
                 rail("SYSTEM SCAN", "magnifyingglass.circle") { showingChat = true; appState.chatInput = "Έλεγξε την κατάσταση του συστήματος" }
-                rail("VOICE", "mic.fill") { appState.toggleListening() }
+                rail("VOICE", "mic.fill") { appState.performUIAction(.toggleVoice) }
             }
             hudPanel("VOICE CONTROL", "waveform") {
-                Button { appState.toggleListening() } label: {
+                Button { appState.performUIAction(.toggleVoice) } label: {
                     ZStack {
                         Ellipse().fill(navy.opacity(0.92)).frame(width: 94, height: 20).blur(radius: 9).offset(y: 47)
                         Circle().stroke(cyan.opacity(0.16), lineWidth: 6).frame(width: 92, height: 92)
@@ -107,6 +112,8 @@ struct TravisPremiumCommandCenterView: View {
                         Image(systemName: appState.isListening ? "waveform" : "mic.fill").font(.system(size: 23, weight: .bold)).foregroundStyle(cyan).shadow(color: cyan, radius: 10)
                     }.frame(maxWidth: .infinity)
                 }.buttonStyle(.plain)
+                .help("Start or stop voice control")
+                .accessibilityLabel("Start or stop voice control")
                 Text(appState.isListening ? "LISTENING" : "VOICE STANDBY").font(.system(size: 8, weight: .semibold, design: .rounded)).foregroundStyle(appState.isListening ? .green : cyan).frame(maxWidth: .infinity)
             }
             Spacer(minLength: 0)
@@ -167,7 +174,7 @@ struct TravisPremiumCommandCenterView: View {
 
             ZStack {
                 CorePlatformShape().fill(Color.black.opacity(0.72)).frame(width: 500, height: 88).offset(y: 7)
-                CorePlatformShape().fill(LinearGradient(colors: [.white.opacity(0.07), panel.opacity(0.82), navy.opacity(0.99)], startPoint: .top, endPoint: .bottom)).frame(width: 500, height: 88)
+                CorePlatformShape().fill(LinearGradient(colors: [.white.opacity(0.07), panel.opacity(0.82), navy.opacity(0.99)], startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 500, height: 88)
                     .overlay(CorePlatformShape().stroke(LinearGradient(colors: [.white.opacity(0.34), cyan.opacity(0.48), electric.opacity(0.18)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.5))
                     .overlay(CorePlatformShape().stroke(.white.opacity(0.08), lineWidth: 0.55).padding(3))
                     .shadow(color: .black.opacity(0.98), radius: 18, y: 13)
@@ -209,7 +216,7 @@ struct TravisPremiumCommandCenterView: View {
 
     private var taskPipeline: some View { hudPanel("MISSION FLOW","arrow.triangle.branch") { HStack(spacing:2){flow("RECEIVE",true);connector;flow("PLAN",appState.isProcessing);connector;flow("EXECUTE",appState.isBusy);connector;flow("VERIFY",appState.isBusy);connector;flow("DONE",!appState.isBusy,.green)} } }
     private var missionActivity: some View { let events=appState.taskRuntime.tasks.flatMap(\.events).sorted{$0.createdAt>$1.createdAt}.prefix(6); return hudPanel("LIVE ACTIVITY","list.bullet.rectangle") { if events.isEmpty { Text("No activity yet").font(.caption).foregroundStyle(.secondary) } else { ForEach(Array(events),id:\.id){e in HStack(spacing:8){Circle().fill(e.type == .failed ? Color.red:cyan).frame(width:6,height:6).shadow(color:e.type == .failed ? .red:cyan,radius:4);Text(e.type.rawValue.uppercased()).font(.system(size:8,weight:.semibold,design:.rounded)).foregroundStyle(e.type == .failed ? .red:cyan).frame(width:78,alignment:.leading);Text(e.message).font(.system(size:9,weight:.regular,design:.rounded)).foregroundStyle(.secondary).lineLimit(1);Spacer()}} } } }
-    private var quickActions: some View { hudPanel("QUICK ACTIONS","bolt.circle") { HStack(spacing:7){compact("NEW TASK","plus.circle"){showingChat=true;appState.chatInput="/plan "};compact("PROJECT","folder.badge.plus"){showingChat=true;appState.chatInput="Φτιάξε project "};compact("VOICE","mic"){appState.toggleListening()}} } }
+    private var quickActions: some View { hudPanel("QUICK ACTIONS","bolt.circle") { HStack(spacing:7){compact("NEW TASK","plus.circle"){showingChat=true;appState.chatInput="/plan "};compact("PROJECT","folder.badge.plus"){showingChat=true;appState.chatInput="Φτιάξε project "};compact("VOICE","mic"){appState.performUIAction(.toggleVoice)}} } }
     private var taskFlowBottom: some View { hudPanel("TASK FLOW","point.3.filled.connected.trianglepath.dotted") { HStack(spacing:3){flow("RECEIVED",true);connector;flow("PLAN",appState.isProcessing);connector;flow("RUN",appState.isBusy);connector;flow("VERIFY",appState.isBusy);connector;flow("DONE",!appState.isBusy,.green)} }.frame(maxWidth:.infinity) }
     private var learningPanel: some View { hudPanel("TRAVIS LEARNING","brain.fill") { data("AI REQUESTS","\(learning.totalAIRequests)",cyan);data("SUCCESS",String(format:"%.0f%%",learning.successRate*100),.green);data("LEARNED ROUTES","\(learning.learnedRoutes)",.purple);data("TOKENS","\(learning.totalTokens)",cyan);data("EST. COST",String(format:"$%.4f",learning.estimatedSpendUSD),.orange);Text(learning.bestKnownRoute).font(.system(size:8,weight:.medium,design:.rounded)).foregroundStyle(.secondary).lineLimit(1);HStack{Text("CONFIDENCE").font(.system(size:8,weight:.medium,design:.rounded));ProgressView(value:learning.confidence).tint(cyan);Text("\(Int(learning.confidence*100))%").font(.system(size:9,weight:.bold,design:.rounded)).foregroundStyle(cyan)} }.frame(width:335) }
     private var systemWave: some View { hudPanel("SYSTEM SIGNAL","waveform") { signalWave.frame(height:86);HStack{data("CPU","\(Int(telemetry.cpuPercent))%",cyan);data("RAM","\(Int(telemetry.memoryPercent))%",.purple);data("DISK","\(Int(telemetry.diskPercent))%",.orange)} }.frame(width:395) }
@@ -285,8 +292,13 @@ struct TravisPremiumCommandCenterView: View {
         }.frame(width:110,height:165)
     }
 
-    private func rail(_ title:String,_ icon:String,action:@escaping()->Void)->some View { Button(action:action){HStack{Image(systemName:icon).frame(width:21).foregroundStyle(cyan);Text(title);Spacer();Image(systemName:"chevron.right").font(.system(size:7)).foregroundStyle(cyan)}.font(.system(size:9,weight:.medium,design:.rounded)).padding(.vertical,6)}.buttonStyle(PremiumButton(cyan:cyan)) }
-    private func compact(_ title:String,_ icon:String,action:@escaping()->Void)->some View { Button(action:action){HStack(spacing:4){Image(systemName:icon);Text(title)}.font(.system(size:8,weight:.semibold,design:.rounded)).frame(maxWidth:.infinity).padding(.vertical,6)}.buttonStyle(PremiumButton(cyan:cyan)) }
+    private func rail(_ title:String,_ icon:String,action:@escaping()->Void)->some View {
+        Button(action:action){HStack{Image(systemName:icon).frame(width:21).foregroundStyle(cyan);Text(title);Spacer();Image(systemName:"chevron.right").font(.system(size:7)).foregroundStyle(cyan)}.font(.system(size:9,weight:.medium,design:.rounded)).padding(.vertical,6)}
+            .buttonStyle(PremiumButton(cyan:cyan))
+            .help(title.capitalized)
+            .accessibilityLabel(title.capitalized)
+    }
+    private func compact(_ title:String,_ icon:String,action:@escaping()->Void)->some View { Button(action:action){HStack(spacing:4){Image(systemName:icon);Text(title)}.font(.system(size:8,weight:.semibold,design:.rounded)).frame(maxWidth:.infinity).padding(.vertical,6)}.buttonStyle(PremiumButton(cyan:cyan)).help(title.capitalized) }
     private func iconButton(_ icon:String,action:@escaping()->Void)->some View { Button(action:action){Image(systemName:icon).frame(width:31,height:31).foregroundStyle(cyan)}.buttonStyle(PremiumButton(cyan:cyan)) }
     private func statusPill(_ text:String,_ color:Color)->some View { HStack(spacing:6){Circle().fill(color).frame(width:6,height:6).shadow(color:color,radius:5);Text(text)}.font(.system(size:8,weight:.semibold,design:.rounded)).foregroundStyle(color).padding(.horizontal,9).padding(.vertical,6).background(Capsule().fill(LinearGradient(colors:[.white.opacity(0.04),color.opacity(0.08),navy.opacity(0.55)],startPoint:.top,endPoint:.bottom))).overlay(Capsule().stroke(color.opacity(0.38),lineWidth:1)).shadow(color:.black.opacity(0.72),radius:5,y:4) }
     private func headerMetric(_ label:String,_ value:Double,_ tint:Color)->some View { VStack(alignment:.leading,spacing:2){Text(label).font(.system(size:7,weight:.medium,design:.rounded)).foregroundStyle(.secondary);Text("\(Int(value))%").font(.system(size:12,weight:.bold,design:.rounded)).foregroundStyle(.white);ProgressView(value:value,total:100).tint(tint)}.frame(width:72) }
