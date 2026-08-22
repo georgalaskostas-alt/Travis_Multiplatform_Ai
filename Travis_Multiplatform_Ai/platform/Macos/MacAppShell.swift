@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MacAppShell: View {
     @Bindable var appState: TRAVISAppState
+    @State private var showingFCCQuickChat = false
 
     var body: some View {
         Group {
@@ -14,6 +15,7 @@ struct MacAppShell: View {
                     List(SidebarItem.allCases, selection: $appState.selectedSidebarItem) { item in
                         Label(item.title, systemImage: icon(for: item))
                             .tag(item)
+                            .help(tooltip(for: item))
                     }
                     .navigationSplitViewColumnWidth(min: 180, ideal: 220)
                 } detail: {
@@ -23,6 +25,21 @@ struct MacAppShell: View {
             }
         }
         .preferredColorScheme(.dark)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    openFCCQuickAccess()
+                } label: {
+                    Label("FCC", systemImage: "waveform.path.ecg")
+                }
+                .help("Open FCC Assistant quick access")
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+            }
+        }
+        .sheet(isPresented: $showingFCCQuickChat) {
+            ChatView(appState: appState)
+                .frame(minWidth: 820, minHeight: 620)
+        }
     }
 
     @ViewBuilder
@@ -51,6 +68,21 @@ struct MacAppShell: View {
             .padding(.vertical, 4)
         }
         .navigationTitle("Tasks")
+    }
+
+    private func openFCCQuickAccess() {
+        appState.chatInput = "FCC: "
+        showingFCCQuickChat = true
+    }
+
+    private func tooltip(for item: SidebarItem) -> String {
+        switch item {
+        case .chat: return "Open the TRAVIS command center and chat workspace"
+        case .history: return "Review previous TRAVIS conversations and activity"
+        case .tasks: return "View active and recent autonomous tasks"
+        case .permissions: return "Review and manage TRAVIS execution permissions"
+        case .settings: return "Open TRAVIS settings"
+        }
     }
 
     private func icon(for item: SidebarItem) -> String {
