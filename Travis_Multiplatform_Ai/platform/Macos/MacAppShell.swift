@@ -33,8 +33,10 @@ struct MacAppShell: View {
                     Label("FCC", systemImage: "waveform.path.ecg")
                 }
                 .help("Open FCC Assistant workspace")
-                .keyboardShortcut("f", modifiers: [.command, .shift])
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .travisOpenFCCQuickAccess)) { _ in
+            showFCCWorkspace()
         }
     }
 
@@ -67,8 +69,10 @@ struct MacAppShell: View {
     }
 
     private func showFCCWorkspace() {
-        openFCCQuickAccess = true
         appState.selectedSidebarItem = .chat
+        DispatchQueue.main.async {
+            openFCCQuickAccess = true
+        }
     }
 
     private func tooltip(for item: SidebarItem) -> String {
