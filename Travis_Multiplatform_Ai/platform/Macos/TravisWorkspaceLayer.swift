@@ -9,6 +9,7 @@ struct TravisWorkspaceLayer<Base: View>: View {
     @State private var windows: [WorkspaceWindow] = []
     @State private var nextZ: Double = 10
     @State private var actionRouter = TravisUIActionRouter.shared
+    @State private var hoveredLauncher: TravisWorkspaceID?
 
     init(
         appState: TRAVISAppState,
@@ -52,7 +53,7 @@ struct TravisWorkspaceLayer<Base: View>: View {
     }
 
     private var launcher: some View {
-        VStack(spacing: 7) {
+        VStack(alignment: .trailing, spacing: 7) {
             launchButton(.chat, "message.fill")
             launchButton(.history, "clock.arrow.circlepath")
             launchButton(.tasks, "checklist")
@@ -67,18 +68,37 @@ struct TravisWorkspaceLayer<Base: View>: View {
     }
 
     private func launchButton(_ kind: TravisWorkspaceID, _ icon: String, prominent: Bool = false) -> some View {
-        Button { appState.performUIAction(.openWorkspace(kind)) } label: {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(prominent ? .green : .cyan)
-                .frame(width: 32, height: 32)
-                .background(Circle().fill((prominent ? Color.green : Color.cyan).opacity(prominent ? 0.12 : 0.08)))
-                .overlay(Circle().stroke((prominent ? Color.green : Color.cyan).opacity(prominent ? 0.62 : 0.35), lineWidth: prominent ? 1.4 : 1))
-                .shadow(color: prominent ? .green.opacity(0.22) : .clear, radius: 7)
+        HStack(spacing: 8) {
+            if hoveredLauncher == kind {
+                Text(kind.launcherLabel)
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(prominent ? .green : .cyan)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.90), in: RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke((prominent ? Color.green : Color.cyan).opacity(0.55), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.8), radius: 8)
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+            }
+
+            Button { appState.performUIAction(.openWorkspace(kind)) } label: {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(prominent ? .green : .cyan)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill((prominent ? Color.green : Color.cyan).opacity(prominent ? 0.12 : 0.08)))
+                    .overlay(Circle().stroke((prominent ? Color.green : Color.cyan).opacity(prominent ? 0.62 : 0.35), lineWidth: prominent ? 1.4 : 1))
+                    .shadow(color: prominent ? .green.opacity(0.22) : .clear, radius: 7)
+            }
+            .buttonStyle(.plain)
+            .help(kind.tooltip)
+            .accessibilityLabel(kind.title)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    hoveredLauncher = hovering ? kind : (hoveredLauncher == kind ? nil : hoveredLauncher)
+                }
+            }
         }
-        .buttonStyle(.plain)
-        .help(kind.tooltip)
-        .accessibilityLabel(kind.title)
     }
 
     @ViewBuilder
@@ -272,6 +292,19 @@ private extension TravisWorkspaceID {
         case .memory: return "LEARNING & MEMORY"
         case .permissions: return "PERMISSIONS"
         case .settings: return "SETTINGS"
+        }
+    }
+
+    var launcherLabel: String {
+        switch self {
+        case .dashboard: return "Dashboard"
+        case .chat: return "Chat"
+        case .history: return "History"
+        case .tasks: return "Mission Control"
+        case .fcc: return "FCC Assistant"
+        case .memory: return "Memory"
+        case .permissions: return "Permissions"
+        case .settings: return "Settings"
         }
     }
 
