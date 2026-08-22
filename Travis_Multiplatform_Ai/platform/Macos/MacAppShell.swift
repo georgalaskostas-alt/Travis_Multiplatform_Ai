@@ -2,12 +2,11 @@ import SwiftUI
 
 struct MacAppShell: View {
     @Bindable var appState: TRAVISAppState
-    @State private var openFCCQuickAccess = false
 
     var body: some View {
         Group {
             if appState.selectedSidebarItem == .chat {
-                TravisWorkspaceLayer(appState: appState, openFCCQuickAccess: $openFCCQuickAccess) {
+                TravisWorkspaceLayer(appState: appState) {
                     TravisPremiumCommandCenterView(appState: appState)
                 }
             } else {
@@ -28,15 +27,16 @@ struct MacAppShell: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    showFCCWorkspace()
+                    appState.performUIAction(.openWorkspace(.fcc))
                 } label: {
                     Label("FCC", systemImage: "waveform.path.ecg")
                 }
                 .help("Open FCC Assistant workspace")
+                .accessibilityLabel("Open FCC Assistant workspace")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .travisOpenFCCQuickAccess)) { _ in
-            showFCCWorkspace()
+            appState.performUIAction(.openWorkspace(.fcc))
         }
     }
 
@@ -66,13 +66,6 @@ struct MacAppShell: View {
             .padding(.vertical, 4)
         }
         .navigationTitle("Tasks")
-    }
-
-    private func showFCCWorkspace() {
-        appState.selectedSidebarItem = .chat
-        DispatchQueue.main.async {
-            openFCCQuickAccess = true
-        }
     }
 
     private func tooltip(for item: SidebarItem) -> String {
