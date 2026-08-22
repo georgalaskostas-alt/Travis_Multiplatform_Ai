@@ -38,26 +38,29 @@ struct TravisWorkspaceLayer<Base: View>: View {
             launchButton(.chat, "message.fill")
             launchButton(.history, "clock.arrow.circlepath")
             launchButton(.tasks, "checklist")
-            launchButton(.fcc, "waveform.path.ecg")
+            launchButton(.fcc, "waveform.path.ecg", prominent: true)
             launchButton(.memory, "memorychip.fill")
         }
         .padding(8)
         .background(.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 13))
         .overlay(RoundedRectangle(cornerRadius: 13).stroke(.cyan.opacity(0.48), lineWidth: 1.2))
         .shadow(color: .cyan.opacity(0.18), radius: 14)
+        .help("Quick access to TRAVIS workspaces")
     }
 
-    private func launchButton(_ kind: WorkspaceKind, _ icon: String) -> some View {
+    private func launchButton(_ kind: WorkspaceKind, _ icon: String, prominent: Bool = false) -> some View {
         Button { open(kind) } label: {
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(.cyan)
+                .foregroundStyle(prominent ? .green : .cyan)
                 .frame(width: 32, height: 32)
-                .background(Circle().fill(.cyan.opacity(0.08)))
-                .overlay(Circle().stroke(.cyan.opacity(0.35), lineWidth: 1))
+                .background(Circle().fill((prominent ? Color.green : Color.cyan).opacity(prominent ? 0.12 : 0.08)))
+                .overlay(Circle().stroke((prominent ? Color.green : Color.cyan).opacity(prominent ? 0.62 : 0.35), lineWidth: prominent ? 1.4 : 1))
+                .shadow(color: prominent ? .green.opacity(0.22) : .clear, radius: 7)
         }
         .buttonStyle(.plain)
-        .help(kind.title)
+        .help(kind.tooltip)
+        .accessibilityLabel(kind.title)
     }
 
     @ViewBuilder
@@ -89,29 +92,36 @@ struct TravisWorkspaceLayer<Base: View>: View {
                 RoundedRectangle(cornerRadius: 7).stroke(.cyan.opacity(0.34), lineWidth: 1).frame(width: 28, height: 28)
                 Image(systemName: window.kind.icon).font(.system(size: 11, weight: .bold)).foregroundStyle(.cyan)
             }
+            .help(window.kind.tooltip)
             VStack(alignment: .leading, spacing: 1) {
                 Text(window.kind.title).font(.system(size: 11, weight: .heavy, design: .rounded)).tracking(1.1)
                 Text("TRAVIS WORKSPACE").font(.system(size: 6, weight: .bold, design: .rounded)).tracking(0.7).foregroundStyle(.cyan.opacity(0.72))
             }
             Spacer()
-            circleControl("minus") { setMode(window.id, .minimized) }
-            circleControl(window.mode == .maximized ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") {
+            circleControl("minus", tooltip: "Minimize \(window.kind.title)") { setMode(window.id, .minimized) }
+            circleControl(
+                window.mode == .maximized ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                tooltip: window.mode == .maximized ? "Restore \(window.kind.title)" : "Maximize \(window.kind.title)"
+            ) {
                 setMode(window.id, window.mode == .maximized ? .normal : .maximized)
             }
-            circleControl("xmark") { close(window.id) }
+            circleControl("xmark", tooltip: "Close \(window.kind.title)") { close(window.id) }
         }
         .padding(.horizontal, 14)
         .frame(height: 48)
         .background(LinearGradient(colors: [.white.opacity(0.055), Color(red:0.003,green:0.025,blue:0.082).opacity(0.96), .black.opacity(0.74)], startPoint: .top, endPoint: .bottom))
     }
 
-    private func circleControl(_ icon: String, action: @escaping () -> Void) -> some View {
+    private func circleControl(_ icon: String, tooltip: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon).font(.system(size: 9, weight: .bold)).foregroundStyle(.cyan).frame(width: 25, height: 25)
                 .background(Circle().fill(.cyan.opacity(0.055)))
                 .overlay(Circle().stroke(.cyan.opacity(0.30), lineWidth: 0.9))
                 .shadow(color: .cyan.opacity(0.08), radius: 4)
-        }.buttonStyle(.plain)
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
+        .accessibilityLabel(tooltip)
     }
 
     @ViewBuilder
@@ -144,7 +154,9 @@ struct TravisWorkspaceLayer<Base: View>: View {
                         .background(Capsule().fill(LinearGradient(colors: [.white.opacity(0.04), .black.opacity(0.84)], startPoint: .top, endPoint: .bottom)))
                         .overlay(Capsule().stroke(.cyan.opacity(0.46), lineWidth: 1))
                         .shadow(color: .cyan.opacity(0.12), radius: 8)
-                }.buttonStyle(.plain)
+                }
+                .buttonStyle(.plain)
+                .help("Restore \(window.kind.title)")
             }
         }
     }
@@ -166,6 +178,15 @@ private enum WorkspaceKind: String, Identifiable, CaseIterable {
     var id: String { rawValue }
     var title: String { switch self { case .chat: return "TRAVIS CHAT"; case .history: return "CONVERSATION HISTORY"; case .tasks: return "TASK CONTROL"; case .fcc: return "FCC SYSTEM"; case .memory: return "LEARNING & MEMORY" } }
     var icon: String { switch self { case .chat: return "message.fill"; case .history: return "clock.arrow.circlepath"; case .tasks: return "checklist"; case .fcc: return "waveform.path.ecg"; case .memory: return "memorychip.fill" } }
+    var tooltip: String {
+        switch self {
+        case .chat: return "Open TRAVIS chat workspace"
+        case .history: return "Open conversation history"
+        case .tasks: return "Open autonomous task control"
+        case .fcc: return "Open FCC Assistant — local read-only process intelligence"
+        case .memory: return "Open TRAVIS learning and memory"
+        }
+    }
 }
 
 private struct WorkspaceWindow: Identifiable {
