@@ -3,13 +3,19 @@ import SwiftUI
 
 struct TravisWorkspaceLayer<Base: View>: View {
     @Bindable var appState: TRAVISAppState
+    @Binding private var openFCCQuickAccess: Bool
     let base: Base
 
     @State private var windows: [WorkspaceWindow] = []
     @State private var nextZ: Double = 10
 
-    init(appState: TRAVISAppState, @ViewBuilder base: () -> Base) {
+    init(
+        appState: TRAVISAppState,
+        openFCCQuickAccess: Binding<Bool> = .constant(false),
+        @ViewBuilder base: () -> Base
+    ) {
         self.appState = appState
+        self._openFCCQuickAccess = openFCCQuickAccess
         self.base = base()
     }
 
@@ -30,6 +36,11 @@ struct TravisWorkspaceLayer<Base: View>: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                     .padding(.bottom, 12)
             }
+        }
+        .onAppear { consumeFCCQuickAccessRequest() }
+        .onChange(of: openFCCQuickAccess) { _, requested in
+            guard requested else { return }
+            consumeFCCQuickAccessRequest()
         }
     }
 
@@ -159,6 +170,12 @@ struct TravisWorkspaceLayer<Base: View>: View {
                 .help("Restore \(window.kind.title)")
             }
         }
+    }
+
+    private func consumeFCCQuickAccessRequest() {
+        guard openFCCQuickAccess else { return }
+        open(.fcc)
+        openFCCQuickAccess = false
     }
 
     private func open(_ kind: WorkspaceKind) {
