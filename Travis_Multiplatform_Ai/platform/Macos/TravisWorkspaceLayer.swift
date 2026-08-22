@@ -154,7 +154,7 @@ struct TravisWorkspaceLayer<Base: View>: View {
         case .history:
             TravisPremiumHistoryView(appState: appState)
         case .tasks:
-            TravisPremiumTasksView(appState: appState)
+            TravisPremiumMissionControlV2(appState: appState)
         case .fcc:
             TravisPremiumFCCView(appState: appState)
         case .memory:
