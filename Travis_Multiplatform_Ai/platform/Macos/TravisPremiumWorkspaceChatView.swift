@@ -27,7 +27,10 @@ struct TravisPremiumWorkspaceChatView: View {
                     Text(appState.isBusy ? "TRAVIS WORKING" : "TRAVIS READY").font(.system(size: 8, weight: .bold, design: .rounded)).foregroundStyle(.secondary)
                 }
                 if appState.viewedSessionId != appState.currentSessionId {
-                    Button("RETURN LIVE") { appState.returnToCurrentSession() }.buttonStyle(PremiumWorkspaceButton(tint: cyan))
+                    Button("RETURN LIVE") { appState.returnToCurrentSession() }
+                        .buttonStyle(PremiumWorkspaceButton(tint: cyan))
+                        .help("Return to the current live TRAVIS conversation")
+                        .accessibilityLabel("Return to live conversation")
                 }
             }
             .padding(.horizontal, 18).padding(.vertical, 12)
@@ -72,13 +75,19 @@ struct TravisPremiumWorkspaceChatView: View {
                         .onSubmit { send() }
                 }.frame(height: 42)
 
-                Button { appState.toggleListening() } label: {
+                Button { appState.performUIAction(.toggleVoice) } label: {
                     Image(systemName: appState.isListening ? "waveform" : "mic.fill").frame(width: 38, height: 38)
-                }.buttonStyle(PremiumWorkspaceIconButton(tint: appState.isListening ? .green : cyan))
+                }
+                .buttonStyle(PremiumWorkspaceIconButton(tint: appState.isListening ? .green : cyan))
+                .help(appState.isListening ? "Stop voice input" : "Start voice input")
+                .accessibilityLabel(appState.isListening ? "Stop voice input" : "Start voice input")
 
                 Button { send() } label: {
                     Image(systemName: "arrow.up").font(.system(size: 14, weight: .heavy)).frame(width: 38, height: 38)
-                }.buttonStyle(PremiumWorkspaceIconButton(tint: cyan))
+                }
+                .buttonStyle(PremiumWorkspaceIconButton(tint: cyan))
+                .help("Send command to TRAVIS")
+                .accessibilityLabel("Send command")
             }
             .padding(14)
             .background(LinearGradient(colors: [navy.opacity(0.82), panel.opacity(0.52)], startPoint: .top, endPoint: .bottom))
@@ -124,8 +133,9 @@ struct TravisPremiumWorkspaceChatView: View {
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        appState.sendCommand(text, source: .manual)
         draft = ""
+        if appState.handleDeterministicNavigationIntent(text) { return }
+        appState.sendCommand(text, source: .manual)
     }
 }
 
