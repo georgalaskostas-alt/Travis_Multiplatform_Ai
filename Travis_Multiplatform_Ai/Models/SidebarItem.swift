@@ -154,8 +154,11 @@ extension TRAVISAppState {
         case .openWorkspace(.dashboard):
             selectedSidebarItem = .chat
             TravisUIActionRouter.shared.route(action)
-        case .openWorkspace(.permissions), .openWorkspace(.settings):
-            selectedSidebarItem = .chat
+        case .openWorkspace(.permissions):
+            selectedSidebarItem = .permissions
+            TravisUIActionRouter.shared.route(action)
+        case .openWorkspace(.settings):
+            selectedSidebarItem = .settings
             TravisUIActionRouter.shared.route(action)
         case .openWorkspace(.history):
             selectedSidebarItem = .chat
