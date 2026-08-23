@@ -4,12 +4,6 @@ import AVFoundation
 import AppKit
 #endif
 
-/// Text-to-speech half of voice mode — reads TRAVIS's replies aloud via
-/// `AVSpeechSynthesizer` when voice mode is on. Speech *recognition*
-/// (listening) is the companion `SpeechRecognitionService`; the two
-/// coordinate through `speak(_:language:completion:)`'s completion
-/// handler so they never capture/play audio at the same time — see
-/// `TRAVISAppState.addAssistantMessage`.
 @MainActor
 @Observable
 final class SpeechService: NSObject {
@@ -32,9 +26,7 @@ final class SpeechService: NSObject {
             completion?()
             return
         }
-
         onFinishedSpeaking = completion
-
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = Self.bestAvailableVoice(for: language.speechLanguageCode)
         utterance.pitchMultiplier = Self.pitchMultiplier
@@ -47,27 +39,10 @@ final class SpeechService: NSObject {
     }
 
     private static func bestAvailableVoice(for languageCode: String) -> AVSpeechSynthesisVoice? {
-        let matchingVoices = AVSpeechSynthesisVoice.speechVoices()
-            .filter { $0.language == languageCode }
-
-        let chosen: AVSpeechSynthesisVoice?
-        if let premium = matchingVoices.first(where: { $0.quality == .premium }) {
-            chosen = premium
-        } else if let enhanced = matchingVoices.first(where: { $0.quality == .enhanced }) {
-            chosen = enhanced
-        } else {
-            chosen = AVSpeechSynthesisVoice(language: languageCode)
-        }
-
-        print("[SpeechService] \(matchingVoices.count) voice(s) installed for \(languageCode): "
-            + matchingVoices.map { "\($0.name) [\($0.identifier)] quality=\($0.quality.rawValue)" }.joined(separator: ", "))
-        if let chosen {
-            print("[SpeechService] chosen voice: \(chosen.name) [\(chosen.identifier)] quality=\(chosen.quality.rawValue)")
-        } else {
-            print("[SpeechService] chosen voice: nil (no voice resolved for \(languageCode))")
-        }
-
-        return chosen
+        let matchingVoices = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == languageCode }
+        if let premium = matchingVoices.first(where: { $0.quality == .premium }) { return premium }
+        if let enhanced = matchingVoices.first(where: { $0.quality == .enhanced }) { return enhanced }
+        return AVSpeechSynthesisVoice(language: languageCode)
     }
 }
 
@@ -110,18 +85,13 @@ final class PrivateAudioProfileService: NSObject, AVAudioPlayerDelegate {
     }
 
     private var startupPlayer: AVAudioPlayer?
+    private var startupSequenceTask: Task<Void, Never>?
 
-    private override init() {
-        super.init()
-    }
+    private override init() { super.init() }
 
     var privateDirectoryURL: URL? {
-        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-        return appSupport
-            .appendingPathComponent("TRAVIS", isDirectory: true)
-            .appendingPathComponent("PrivateAudio", isDirectory: true)
+        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        return appSupport.appendingPathComponent("TRAVIS", isDirectory: true).appendingPathComponent("PrivateAudio", isDirectory: true)
     }
 
     func storedURL(for kind: PrivateAudioKind) -> URL? {
@@ -142,7 +112,6 @@ final class PrivateAudioProfileService: NSObject, AVAudioPlayerDelegate {
         panel.allowedContentTypes = [.mp3, .mpeg4Audio, .wav, .aiff]
         panel.title = kind == .startup ? "Choose TRAVIS startup sound" : "Choose private TRAVIS voice reference"
         panel.prompt = "Use File"
-
         guard panel.runModal() == .OK, let sourceURL = panel.url else { return false }
         return store(sourceURL: sourceURL, as: kind)
     }
@@ -150,16 +119,13 @@ final class PrivateAudioProfileService: NSObject, AVAudioPlayerDelegate {
     @discardableResult
     func store(sourceURL: URL, as kind: PrivateAudioKind) -> Bool {
         guard let directory = privateDirectoryURL, let destination = storedURL(for: kind) else { return false }
-
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            if FileManager.default.fileExists(atPath: destination.path) {
-                try FileManager.default.removeItem(at: destination)
-            }
+            if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
             try FileManager.default.copyItem(at: sourceURL, to: destination)
             return true
         } catch {
-            print("[PrivateAudioProfileService] Failed to store \(kind): \(error)")
+            print("[PrivateAudioProfileService] Failed to store private audio: \(error)")
             return false
         }
     }
@@ -181,24 +147,67 @@ final class PrivateAudioProfileService: NSObject, AVAudioPlayerDelegate {
         }
     }
 
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        if player === startupPlayer {
-            startupPlayer = nil
+    func playStartupSequence(greeting: String, language: AppLanguage) {
+        startupSequenceTask?.cancel()
+        startupSequenceTask = Task { @MainActor in
+            let trimmed = greeting.trimmingCharacters(in: .whitespacesAndNewlines)
+            let hasMusic = startLoopingStartupMusic()
+
+            if hasMusic {
+                try? await Task.sleep(for: .milliseconds(900))
+                guard !Task.isCancelled else { return }
+                startupPlayer?.setVolume(0.22, fadeDuration: 0.55)
+            }
+
+            guard !trimmed.isEmpty else {
+                fadeOutStartupMusic()
+                return
+            }
+
+            SpeechService.shared.speak(trimmed, language: language) { [weak self] in
+                self?.fadeOutStartupMusic()
+            }
         }
+    }
+
+    private func startLoopingStartupMusic() -> Bool {
+        guard let url = storedURL(for: .startup), FileManager.default.fileExists(atPath: url.path) else { return false }
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            startupPlayer = player
+            player.delegate = self
+            player.numberOfLoops = -1
+            player.volume = 0.72
+            player.prepareToPlay()
+            return player.play()
+        } catch {
+            print("[PrivateAudioProfileService] Startup sequence playback failed: \(error)")
+            return false
+        }
+    }
+
+    private func fadeOutStartupMusic() {
+        guard let player = startupPlayer else { return }
+        player.setVolume(0.0, fadeDuration: 1.6)
+        Task { @MainActor [weak self, weak player] in
+            try? await Task.sleep(for: .milliseconds(1700))
+            player?.stop()
+            if self?.startupPlayer === player { self?.startupPlayer = nil }
+        }
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        if player === startupPlayer { startupPlayer = nil }
     }
 }
 #else
 @MainActor
 final class PrivateAudioProfileService {
     static let shared = PrivateAudioProfileService()
-
-    enum PrivateAudioKind {
-        case startup
-        case voiceReference
-    }
-
+    enum PrivateAudioKind { case startup, voiceReference }
     private init() {}
     func isConfigured(_ kind: PrivateAudioKind) -> Bool { false }
     func playStartupSoundIfConfigured() {}
+    func playStartupSequence(greeting: String, language: AppLanguage) {}
 }
 #endif
