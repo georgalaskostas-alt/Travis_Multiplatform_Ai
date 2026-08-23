@@ -1,5 +1,6 @@
 #if os(macOS)
 import SwiftUI
+import AppKit
 
 struct TravisWorkspaceLayer<Base: View>: View {
     @Bindable var appState: TRAVISAppState
@@ -175,11 +176,13 @@ struct TravisWorkspaceLayer<Base: View>: View {
             TravisPremiumHistoryView(appState: appState)
         case .tasks:
             TravisPremiumMissionControlV2(appState: appState)
-        case .fcc:
-            TravisPremiumFCCView(appState: appState)
         case .memory:
             TravisPremiumMemoryView()
-        case .dashboard, .permissions, .settings:
+        case .permissions:
+            PermissionsView(appState: appState)
+        case .settings:
+            SettingsView(appState: appState)
+        case .fcc, .dashboard:
             EmptyView()
         }
     }
@@ -218,6 +221,8 @@ struct TravisWorkspaceLayer<Base: View>: View {
 
     private func handle(_ action: TravisUIAction) {
         switch action {
+        case .openWorkspace(.fcc):
+            launchStandaloneFCCAssistant()
         case .openWorkspace(let kind):
             guard kind.isFloatingWorkspace else { return }
             open(kind)
@@ -234,6 +239,24 @@ struct TravisWorkspaceLayer<Base: View>: View {
             bringToFront(kind)
         case .newMission, .newProject, .systemScan, .toggleVoice:
             break
+        }
+    }
+
+    private func launchStandaloneFCCAssistant() {
+        let bundleIdentifier = "com.fccassistant.desktop"
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            appState.addAssistantMessage("Δεν βρήκα εγκατεστημένο το FCC Assistant. Άνοιξε πρώτα μία φορά την standalone FCC Assistant εφαρμογή στο Mac και ξαναπάτησε FCC Assistant.")
+            return
+        }
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
+            if let error {
+                Task { @MainActor in
+                    appState.addAssistantMessage("Δεν μπόρεσα να ανοίξω το FCC Assistant: \(error.localizedDescription)")
+                }
+            }
         }
     }
 
@@ -277,8 +300,8 @@ struct TravisWorkspaceLayer<Base: View>: View {
 private extension TravisWorkspaceID {
     var isFloatingWorkspace: Bool {
         switch self {
-        case .chat, .history, .tasks, .fcc, .memory: return true
-        case .dashboard, .permissions, .settings: return false
+        case .chat, .history, .tasks, .memory, .permissions, .settings: return true
+        case .dashboard, .fcc: return false
         }
     }
 
@@ -288,7 +311,7 @@ private extension TravisWorkspaceID {
         case .chat: return "TRAVIS CHAT"
         case .history: return "CONVERSATION HISTORY"
         case .tasks: return "TASK CONTROL"
-        case .fcc: return "FCC SYSTEM"
+        case .fcc: return "FCC ASSISTANT"
         case .memory: return "LEARNING & MEMORY"
         case .permissions: return "PERMISSIONS"
         case .settings: return "SETTINGS"
@@ -327,7 +350,7 @@ private extension TravisWorkspaceID {
         case .chat: return "Open TRAVIS chat workspace"
         case .history: return "Open conversation history"
         case .tasks: return "Open autonomous task control"
-        case .fcc: return "Open FCC Assistant — local read-only process intelligence"
+        case .fcc: return "Open the standalone FCC Assistant application"
         case .memory: return "Open TRAVIS learning and memory"
         case .permissions: return "Open TRAVIS permissions"
         case .settings: return "Open TRAVIS settings"
