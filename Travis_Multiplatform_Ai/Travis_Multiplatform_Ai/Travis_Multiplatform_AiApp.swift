@@ -4,10 +4,18 @@ import SwiftUI
 struct Travis_Multi_AIApp: App {
     @State private var appState = TRAVISAppState()
     @Environment(\.scenePhase) private var scenePhase
+    @State private var didPlayColdLaunchSound = false
 
     var body: some Scene {
         WindowGroup {
             TRAVISRootView(appState: appState)
+                .onAppear {
+                    #if os(macOS)
+                    guard !didPlayColdLaunchSound else { return }
+                    didPlayColdLaunchSound = true
+                    PrivateAudioProfileService.shared.playStartupSoundIfConfigured()
+                    #endif
+                }
         }
         #if os(macOS)
         .commands {
