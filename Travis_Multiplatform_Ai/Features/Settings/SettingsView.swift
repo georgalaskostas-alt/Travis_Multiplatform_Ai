@@ -19,6 +19,7 @@ struct SettingsView: View {
     @AppStorage("ai.budget.dailyCostUSD") private var dailyCostBudgetUSD = 0.0
     @AppStorage("ai.budget.monthlyCostUSD") private var monthlyCostBudgetUSD = 0.0
     @AppStorage("training.local.baseURL") private var localTrainerBaseURL = "http://127.0.0.1:8765"
+    @AppStorage("voice.startupGreetingText") private var startupGreetingText = "Καλώς ήρθες. Όλα τα συστήματα είναι έτοιμα. TRAVIS online."
 
     private static let mandateDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -143,6 +144,21 @@ struct SettingsView: View {
                             "Γεια σου, είμαι ο \(appState.assistantName). Έτοιμος να βοηθήσω.",
                             language: appState.preferredLanguage
                         )
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Startup greeting")
+                            .font(.headline)
+                        Text("Το κείμενο που θα λέει ο TRAVIS στην εκκίνηση.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextEditor(text: $startupGreetingText)
+                            .frame(minHeight: 90)
+                            .padding(6)
+                            .background(.black.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.25), lineWidth: 1))
                     }
 
                     #if os(macOS)
