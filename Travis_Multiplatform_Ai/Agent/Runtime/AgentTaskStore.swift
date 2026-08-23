@@ -52,6 +52,13 @@ final class AgentTaskStore {
         return snapshot.tasks
     }
 
+    /// Best-effort read-only snapshot for UI/voice status surfaces.
+    /// A missing or unreadable snapshot is treated as no known tasks rather
+    /// than allowing a startup briefing to interfere with runtime launch.
+    func loadForStatusBriefing() -> [AgentTask] {
+        (try? load()) ?? []
+    }
+
     func save(_ tasks: [AgentTask]) throws {
         let snapshot = Snapshot(
             schemaVersion: schemaVersion,
