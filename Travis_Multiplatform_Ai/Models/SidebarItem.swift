@@ -154,10 +154,9 @@ extension TRAVISAppState {
         case .openWorkspace(.dashboard):
             selectedSidebarItem = .chat
             TravisUIActionRouter.shared.route(action)
-        case .openWorkspace(.permissions):
-            selectedSidebarItem = .permissions
-        case .openWorkspace(.settings):
-            selectedSidebarItem = .settings
+        case .openWorkspace(.permissions), .openWorkspace(.settings):
+            selectedSidebarItem = .chat
+            TravisUIActionRouter.shared.route(action)
         case .openWorkspace(.history):
             selectedSidebarItem = .chat
             TravisUIActionRouter.shared.route(action)
@@ -177,7 +176,7 @@ extension TRAVISAppState {
             TravisUIActionRouter.shared.route(.openWorkspace(.chat))
         case .systemScan:
             selectedSidebarItem = .chat
-            chatInput = "Έλεγξε την κατάσταση του συστήματος"
+            runLocalSystemScan()
             TravisUIActionRouter.shared.route(.openWorkspace(.chat))
         case .toggleVoice:
             toggleListening()
@@ -216,7 +215,7 @@ extension TRAVISAppState {
         case .bringWorkspaceToFront(let workspace): return "Έφερα μπροστά το \(workspace.rawValue) workspace."
         case .newMission: return "Άνοιξα νέα αποστολή."
         case .newProject: return "Άνοιξα νέο project."
-        case .systemScan: return "Ετοίμασα System Scan."
+        case .systemScan: return "Ολοκλήρωσα το τοπικό System Check."
         case .toggleVoice: return isListening ? "Voice control ενεργό." : "Voice control ανενεργό."
         }
     }
