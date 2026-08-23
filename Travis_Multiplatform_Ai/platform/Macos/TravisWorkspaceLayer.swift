@@ -110,8 +110,21 @@ struct TravisWorkspaceLayer<Base: View>: View {
 
         VStack(spacing: 0) {
             windowBar(window)
-            Rectangle().fill(LinearGradient(colors: [.clear, .cyan.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)).frame(height: 1)
-            windowContent(window.kind).frame(maxWidth: .infinity, maxHeight: .infinity)
+                .fixedSize(horizontal: false, vertical: true)
+                .zIndex(10)
+
+            Rectangle()
+                .fill(LinearGradient(colors: [.clear, .cyan.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing))
+                .frame(height: 1)
+                .zIndex(9)
+
+            ZStack {
+                windowContent(window.kind)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            .zIndex(1)
         }
         .frame(width: width, height: height)
         .background(LinearGradient(colors: [Color(red: 0.006, green: 0.035, blue: 0.095), Color(red: 0.002, green: 0.012, blue: 0.045)], startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -132,11 +145,19 @@ struct TravisWorkspaceLayer<Base: View>: View {
                 Image(systemName: window.kind.icon).font(.system(size: 11, weight: .bold)).foregroundStyle(.cyan)
             }
             .help(window.kind.tooltip)
+
             VStack(alignment: .leading, spacing: 1) {
-                Text(window.kind.title).font(.system(size: 11, weight: .heavy, design: .rounded)).tracking(1.1)
-                Text("TRAVIS WORKSPACE").font(.system(size: 6, weight: .bold, design: .rounded)).tracking(0.7).foregroundStyle(.cyan.opacity(0.72))
+                Text(window.kind.title)
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .tracking(1.1)
+                Text("TRAVIS WORKSPACE")
+                    .font(.system(size: 6, weight: .bold, design: .rounded))
+                    .tracking(0.7)
+                    .foregroundStyle(.cyan.opacity(0.72))
             }
+
             Spacer()
+
             circleControl("minus", tooltip: "Minimize \(window.kind.title)") {
                 appState.performUIAction(.minimizeWorkspace(window.kind))
             }
@@ -146,21 +167,33 @@ struct TravisWorkspaceLayer<Base: View>: View {
             ) {
                 appState.performUIAction(window.mode == .maximized ? .restoreWorkspace(window.kind) : .maximizeWorkspace(window.kind))
             }
-            circleControl("xmark", tooltip: "Close \(window.kind.title)") {
+            circleControl("xmark", tooltip: "Close \(window.kind.title)", destructive: true) {
                 appState.performUIAction(.closeWorkspace(window.kind))
             }
         }
         .padding(.horizontal, 14)
-        .frame(height: 48)
-        .background(LinearGradient(colors: [.white.opacity(0.055), Color(red:0.003,green:0.025,blue:0.082).opacity(0.96), .black.opacity(0.74)], startPoint: .top, endPoint: .bottom))
+        .frame(height: 50)
+        .background(
+            LinearGradient(
+                colors: [Color(red: 0.018, green: 0.082, blue: 0.155), Color(red: 0.003, green: 0.025, blue: 0.082), .black.opacity(0.96)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(.cyan.opacity(0.22)).frame(height: 1)
+        }
     }
 
-    private func circleControl(_ icon: String, tooltip: String, action: @escaping () -> Void) -> some View {
+    private func circleControl(_ icon: String, tooltip: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon).font(.system(size: 9, weight: .bold)).foregroundStyle(.cyan).frame(width: 25, height: 25)
-                .background(Circle().fill(.cyan.opacity(0.055)))
-                .overlay(Circle().stroke(.cyan.opacity(0.30), lineWidth: 0.9))
-                .shadow(color: .cyan.opacity(0.08), radius: 4)
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(destructive ? .red : .cyan)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill((destructive ? Color.red : Color.cyan).opacity(0.08)))
+                .overlay(Circle().stroke((destructive ? Color.red : Color.cyan).opacity(0.42), lineWidth: 1))
+                .shadow(color: (destructive ? Color.red : Color.cyan).opacity(0.10), radius: 4)
         }
         .buttonStyle(.plain)
         .help(tooltip)
