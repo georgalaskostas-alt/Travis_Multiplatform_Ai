@@ -5,6 +5,8 @@ struct SettingsView: View {
     @State private var openAIAPIKey: String = KeychainService.shared.openAIAPIKey ?? ""
     @State private var openRouterAPIKey: String = KeychainService.shared.openRouterAPIKey ?? ""
     @State private var githubToken: String = KeychainService.shared.githubToken ?? ""
+    @State private var startupAudioConfigured = false
+    @State private var voiceReferenceConfigured = false
 
     @AppStorage("ai.openrouter.economyModel") private var openRouterEconomyModel = ""
     @AppStorage("ai.openrouter.standardModel") private var openRouterStandardModel = ""
@@ -142,6 +144,50 @@ struct SettingsView: View {
                             language: appState.preferredLanguage
                         )
                     }
+
+                    #if os(macOS)
+                    Divider()
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Private startup sound")
+                            Text(startupAudioConfigured ? "Configured on this Mac" : "Not configured")
+                                .font(.caption)
+                                .foregroundStyle(startupAudioConfigured ? .green : .secondary)
+                        }
+                        Spacer()
+                        Button("Choose Audio…") {
+                            if PrivateAudioProfileService.shared.importPrivateAudio(kind: .startup) {
+                                startupAudioConfigured = true
+                            }
+                        }
+                    }
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Private voice reference")
+                            Text(voiceReferenceConfigured ? "Configured on this Mac" : "Not configured")
+                                .font(.caption)
+                                .foregroundStyle(voiceReferenceConfigured ? .green : .secondary)
+                        }
+                        Spacer()
+                        Button("Choose Voice…") {
+                            if PrivateAudioProfileService.shared.importPrivateAudio(kind: .voiceReference) {
+                                voiceReferenceConfigured = true
+                            }
+                        }
+                    }
+
+                    Text("These audio files stay inside this Mac's sandboxed TRAVIS data and are not included in GitHub or app releases.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    #endif
+                }
+                .onAppear {
+                    #if os(macOS)
+                    startupAudioConfigured = PrivateAudioProfileService.shared.isConfigured(.startup)
+                    voiceReferenceConfigured = PrivateAudioProfileService.shared.isConfigured(.voiceReference)
+                    #endif
                 }
 
                 Section("Binance Testnet API") {
