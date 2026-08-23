@@ -5,6 +5,7 @@ struct Travis_Multi_AIApp: App {
     @State private var appState = TRAVISAppState()
     @Environment(\.scenePhase) private var scenePhase
     @State private var didPlayColdLaunchSound = false
+    @AppStorage("voice.startupGreeting") private var startupGreeting = "Καλώς ήρθες. TRAVIS online."
 
     var body: some Scene {
         WindowGroup {
@@ -13,7 +14,10 @@ struct Travis_Multi_AIApp: App {
                     #if os(macOS)
                     guard !didPlayColdLaunchSound else { return }
                     didPlayColdLaunchSound = true
-                    PrivateAudioProfileService.shared.playStartupSoundIfConfigured()
+                    PrivateAudioProfileService.shared.playStartupSequence(
+                        greeting: startupGreeting,
+                        language: appState.preferredLanguage
+                    )
                     #endif
                 }
         }
@@ -27,11 +31,6 @@ struct Travis_Multi_AIApp: App {
             }
         }
         #endif
-        // Cold launch already starts on a fresh session via
-        // TRAVISAppState.bootstrap(); `onChange` doesn't fire for that
-        // initial value, only for actual transitions, so this covers
-        // exactly "returned from background/inactivity" without double-
-        // starting a session on launch.
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 appState.startNewSession()
