@@ -30,25 +30,26 @@ struct MacAppShell: View {
         }
     }
 
-    /// Compatibility bridge for controls that still set the old SidebarItem.
-    /// They now open the premium workspace instead of replacing the command center
-    /// with the legacy NavigationSplitView/detail UI.
+    /// Compatibility bridge for any control that still changes SidebarItem.
+    /// Route directly into the premium workspace layer and immediately restore
+    /// the command center as the base screen. This avoids reopening legacy UI.
     private func routeLegacySelection(_ item: SidebarItem) {
+        let action: TravisUIAction?
         switch item {
         case .chat:
-            break // Dashboard/command center is the base view; chat is opened explicitly by its controls.
+            action = nil
         case .history:
-            appState.performUIAction(.openWorkspace(.history))
-            appState.selectedSidebarItem = .chat
+            action = .openWorkspace(.history)
         case .tasks:
-            appState.performUIAction(.openWorkspace(.tasks))
-            appState.selectedSidebarItem = .chat
+            action = .openWorkspace(.tasks)
         case .permissions:
-            appState.performUIAction(.openWorkspace(.permissions))
-            appState.selectedSidebarItem = .chat
+            action = .openWorkspace(.permissions)
         case .settings:
-            appState.performUIAction(.openWorkspace(.settings))
-            appState.selectedSidebarItem = .chat
+            action = .openWorkspace(.settings)
         }
+
+        guard let action else { return }
+        TravisUIActionRouter.shared.route(action)
+        appState.selectedSidebarItem = .chat
     }
 }
