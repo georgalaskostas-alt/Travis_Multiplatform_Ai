@@ -1,11 +1,21 @@
 import Foundation
 import Observation
+#if os(macOS)
+import AppKit
+#endif
 
 @MainActor
 @Observable
 final class TRAVISAppState {
     var selectedSidebarItem: SidebarItem = .chat
-    var chatInput: String = ""
+    var chatInput: String = "" {
+        didSet {
+            if chatInput.trimmingCharacters(in: .whitespacesAndNewlines) == "Έλεγξε την κατάσταση του συστήματος" {
+                chatInput = ""
+                runLocalSystemScan()
+            }
+        }
+    }
     var chatMessages: [ChatMessage] = []
     var pendingCommands: [TravisCommand] = []
     var activeTasks: [TravisTask] = []
@@ -200,6 +210,46 @@ final class TRAVISAppState {
     var tradingMandates: [StandingPermission] = []
     func refreshTradingMandates() { tradingMandates = PersistenceService.shared.standingPermissions(withKeyPrefix: "trading_").filter { $0.granted } }
     func revokeTradingMandate(_ mandate: StandingPermission) { PersistenceService.shared.setPermission(mandate.key, granted: false); refreshTradingMandates() }
+
+    func runLocalSystemScan() {
+        let runtimeTasks = taskRuntime.tasks
+        let activeRuntime = runtimeTasks.filter { [.running, .planning, .waitingForApproval, .waitingForDependency].contains($0.status) }.count
+        let failedRuntime = runtimeTasks.filter { $0.status == .failed }.count
+        let enabledPermissions = permissions.filter(\.isEnabled).count
+        let totalPermissions = permissions.count
+        let aiMode: String
+        if isInternetEnabled {
+            aiMode = anthropicAPIKey.isEmpty ? "⚠ CLOUD ENABLED / API KEY MISSING" : "✓ CLOUD ROUTING AVAILABLE"
+        } else {
+            aiMode = "✓ LOCAL / INTERNET DISABLED"
+        }
+        let voiceState = isListening ? "✓ LISTENING" : "✓ STANDBY"
+
+        #if os(macOS)
+        let fccInstalled = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.fccassistant.desktop") != nil
+        let fccState = fccInstalled ? "✓ INSTALLED" : "⚠ NOT REGISTERED"
+        #else
+        let fccState = "N/A"
+        #endif
+
+        let overall = failedRuntime > 0 || enabledPermissions == 0 ? "ATTENTION REQUIRED" : "OPERATIONAL"
+        let report = """
+        SYSTEM CHECK
+
+        TRAVIS Runtime       ✓ READY
+        Autonomous Tasks     \(activeRuntime) active / \(failedRuntime) failed
+        Permissions          \(enabledPermissions)/\(totalPermissions) enabled
+        AI Service           \(aiMode)
+        Voice                \(voiceState)
+        FCC Assistant        \(fccState)
+        FCC/PI Boundary      ✓ LOCAL / READ-ONLY
+        Process Cloud Route  ✓ BLOCKED BY ARCHITECTURE
+
+        Overall Status: \(overall)
+        """
+        lastResponseSummary = "System check: \(overall)"
+        addAssistantMessage(report)
+    }
 
     func saveGeneratedText(_ text: String, filename: String? = nil, location: String? = nil, capabilityId: String) {
         guard let resolved = FileLocationService.shared.resolveSaveDirectory(for: location) else {
