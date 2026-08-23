@@ -3,9 +3,10 @@ import AVFoundation
 
 #if os(macOS)
 import AppKit
+import UniformTypeIdentifiers
 
 @MainActor
-final class PrivateAudioProfileService: NSObject, AVAudioPlayerDelegate {
+final class PrivateAudioProfileService {
     static let shared = PrivateAudioProfileService()
 
     enum PrivateAudioKind {
@@ -22,9 +23,7 @@ final class PrivateAudioProfileService: NSObject, AVAudioPlayerDelegate {
 
     private var startupPlayer: AVAudioPlayer?
 
-    private override init() {
-        super.init()
-    }
+    private init() {}
 
     var privateDirectoryURL: URL? {
         guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
@@ -84,17 +83,10 @@ final class PrivateAudioProfileService: NSObject, AVAudioPlayerDelegate {
         guard let url = storedURL(for: .startup), FileManager.default.fileExists(atPath: url.path) else { return }
         do {
             startupPlayer = try AVAudioPlayer(contentsOf: url)
-            startupPlayer?.delegate = self
             startupPlayer?.prepareToPlay()
             startupPlayer?.play()
         } catch {
             print("[PrivateAudioProfileService] Startup playback failed: \(error)")
-        }
-    }
-
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        if player === startupPlayer {
-            startupPlayer = nil
         }
     }
 }
