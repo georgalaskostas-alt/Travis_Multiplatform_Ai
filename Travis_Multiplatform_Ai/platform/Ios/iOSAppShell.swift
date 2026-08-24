@@ -5,7 +5,6 @@ struct iOSAppShell: View {
 
     @State private var activeSheet: MobileSheet?
     @State private var pulse = false
-    @State private var orbitAngle: Double = 0
 
     private let cyan = Color(red: 0.04, green: 0.82, blue: 1)
     private let electric = Color(red: 0.16, green: 0.48, blue: 1)
@@ -38,7 +37,6 @@ struct iOSAppShell: View {
         .preferredColorScheme(.dark)
         .onAppear {
             pulse = true
-            orbitAngle = 360
         }
         .sheet(item: $activeSheet) { sheet in
             NavigationStack {
@@ -126,7 +124,6 @@ struct iOSAppShell: View {
     private var aiCore: some View {
         VStack(spacing: 12) {
             ZStack {
-                // Fixed-size stage: every ring uses the same immutable center.
                 Color.clear
                     .frame(width: 258, height: 258)
 
@@ -142,19 +139,36 @@ struct iOSAppShell: View {
                         )
                 }
 
-                Circle()
-                    .trim(from: 0.02, to: 0.56)
-                    .stroke(
-                        AngularGradient(colors: [.clear, cyan, .white], center: .center),
-                        style: StrokeStyle(lineWidth: 7, lineCap: .round)
-                    )
-                    .frame(width: 226, height: 226)
-                    .rotationEffect(.degrees(orbitAngle), anchor: .center)
-                    .animation(
-                        .linear(duration: 7).repeatForever(autoreverses: false),
-                        value: orbitAngle
-                    )
+                // Draw the moving arc directly from the stage centre instead of
+                // rotating a trimmed SwiftUI Circle. This guarantees that the
+                // orbit stays perfectly concentric on every animation frame.
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                    Canvas { context, size in
+                        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                        let radius: CGFloat = 113
+                        let t = timeline.date.timeIntervalSinceReferenceDate
+                        let phase = (t.truncatingRemainder(dividingBy: 7.0) / 7.0) * 360.0
+                        let start = Angle.degrees(phase - 90)
+                        let end = Angle.degrees(phase - 90 + 194.4)
+
+                        var arc = Path()
+                        arc.addArc(
+                            center: center,
+                            radius: radius,
+                            startAngle: start,
+                            endAngle: end,
+                            clockwise: false
+                        )
+
+                        context.stroke(
+                            arc,
+                            with: .color(cyan),
+                            style: StrokeStyle(lineWidth: 7, lineCap: .round)
+                        )
+                    }
+                    .frame(width: 258, height: 258)
                     .allowsHitTesting(false)
+                }
 
                 Circle()
                     .fill(
