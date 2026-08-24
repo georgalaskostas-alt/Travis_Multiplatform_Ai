@@ -47,27 +47,27 @@ final class TravisDeviceBridgeService: NSObject {
     var onSpeak: ((String) -> Void)?
 
     #if os(iOS) || os(macOS)
-    private let serviceType = "travis-link"
-    private lazy var peerID = MCPeerID(displayName: Self.makePeerName())
-    private lazy var session: MCSession = {
+    @ObservationIgnored private let serviceType = "travis-link"
+    @ObservationIgnored private lazy var peerID = MCPeerID(displayName: Self.makePeerName())
+    @ObservationIgnored private lazy var session: MCSession = {
         let session = MCSession(peer: peerID, securityIdentity: nil, encryptionPreference: .required)
         session.delegate = self
         return session
     }()
 
     #if os(macOS)
-    private lazy var advertiser: MCNearbyServiceAdvertiser = {
+    @ObservationIgnored private lazy var advertiser: MCNearbyServiceAdvertiser = {
         let advertiser = MCNearbyServiceAdvertiser(peer: peerID, discoveryInfo: ["role": "mac"], serviceType: serviceType)
         advertiser.delegate = self
         return advertiser
     }()
     #else
-    private lazy var browser: MCNearbyServiceBrowser = {
+    @ObservationIgnored private lazy var browser: MCNearbyServiceBrowser = {
         let browser = MCNearbyServiceBrowser(peer: peerID, serviceType: serviceType)
         browser.delegate = self
         return browser
     }()
-    private var invitedPeers = Set<MCPeerID>()
+    @ObservationIgnored private var invitedPeers = Set<MCPeerID>()
     #endif
     #endif
 
