@@ -5,6 +5,7 @@ struct iOSAppShell: View {
 
     @State private var activeSheet: MobileSheet?
     @State private var pulse = false
+    @State private var orbitAngle: Double = 0
 
     private let cyan = Color(red: 0.04, green: 0.82, blue: 1)
     private let electric = Color(red: 0.16, green: 0.48, blue: 1)
@@ -32,12 +33,13 @@ struct iOSAppShell: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .safeAreaInset(edge: .bottom) {
-                bottomDock
-            }
+            .safeAreaInset(edge: .bottom) { bottomDock }
         }
         .preferredColorScheme(.dark)
-        .onAppear { pulse = true }
+        .onAppear {
+            pulse = true
+            orbitAngle = 360
+        }
         .sheet(item: $activeSheet) { sheet in
             NavigationStack {
                 sheetContent(sheet)
@@ -60,14 +62,8 @@ struct iOSAppShell: View {
     private var premiumBackground: some View {
         ZStack {
             navy.ignoresSafeArea()
-
             LinearGradient(
-                colors: [
-                    Color.black,
-                    navy,
-                    panel.opacity(0.84),
-                    navy
-                ],
+                colors: [Color.black, navy, panel.opacity(0.84), navy],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -110,12 +106,9 @@ struct iOSAppShell: View {
             }
 
             Spacer()
-
             statusPill(appState.isBusy ? "BUSY" : "ONLINE", appState.isBusy ? .orange : .green)
 
-            Button {
-                activeSheet = .settings
-            } label: {
+            Button { activeSheet = .settings } label: {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(cyan)
@@ -133,10 +126,20 @@ struct iOSAppShell: View {
     private var aiCore: some View {
         VStack(spacing: 12) {
             ZStack {
+                // Fixed-size stage: every ring uses the same immutable center.
+                Color.clear
+                    .frame(width: 258, height: 258)
+
                 ForEach(0..<4, id: \.self) { i in
                     Circle()
-                        .stroke(i == 0 ? cyan.opacity(0.55) : electric.opacity(0.18), lineWidth: i == 0 ? 2 : 1)
-                        .frame(width: CGFloat(238 - i * 32), height: CGFloat(238 - i * 32))
+                        .stroke(
+                            i == 0 ? cyan.opacity(0.55) : electric.opacity(0.18),
+                            lineWidth: i == 0 ? 2 : 1
+                        )
+                        .frame(
+                            width: CGFloat(238 - i * 32),
+                            height: CGFloat(238 - i * 32)
+                        )
                 }
 
                 Circle()
@@ -146,8 +149,12 @@ struct iOSAppShell: View {
                         style: StrokeStyle(lineWidth: 7, lineCap: .round)
                     )
                     .frame(width: 226, height: 226)
-                    .rotationEffect(.degrees(pulse ? 360 : 0))
-                    .animation(.linear(duration: 7).repeatForever(autoreverses: false), value: pulse)
+                    .rotationEffect(.degrees(orbitAngle), anchor: .center)
+                    .animation(
+                        .linear(duration: 7).repeatForever(autoreverses: false),
+                        value: orbitAngle
+                    )
+                    .allowsHitTesting(false)
 
                 Circle()
                     .fill(
@@ -161,7 +168,10 @@ struct iOSAppShell: View {
                     .frame(width: 154, height: 154)
                     .overlay(Circle().stroke(cyan, lineWidth: 3))
                     .shadow(color: cyan.opacity(pulse ? 0.72 : 0.28), radius: pulse ? 28 : 12)
-                    .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: pulse)
+                    .animation(
+                        .easeInOut(duration: 1.5).repeatForever(autoreverses: true),
+                        value: pulse
+                    )
 
                 VStack(spacing: 4) {
                     Text("TRAVIS")
@@ -178,7 +188,9 @@ struct iOSAppShell: View {
                         .shadow(color: cyan, radius: 6)
                 }
             }
+            .frame(maxWidth: .infinity)
             .frame(height: 258)
+            .clipped()
 
             HStack(spacing: 8) {
                 coreMini("PLAN", "scope", appState.isProcessing ? "ACTIVE" : "READY", cyan)
@@ -194,12 +206,10 @@ struct iOSAppShell: View {
     private var systemOverview: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("SYSTEM OVERVIEW", "server.rack")
-
             HStack(spacing: 8) {
                 statusTile("AI ENGINE", appState.isInternetEnabled ? "ONLINE" : "LOCAL", .green)
                 statusTile("VOICE", appState.isListening ? "LISTENING" : "STANDBY", appState.isListening ? .green : cyan)
             }
-
             HStack(spacing: 8) {
                 statusTile("RUNTIME", appState.isBusy ? "RUNNING" : "READY", appState.isBusy ? .orange : .green)
                 statusTile("MEMORY", "ACTIVE", .green)
@@ -212,21 +222,14 @@ struct iOSAppShell: View {
     private var quickAccess: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("QUICK ACCESS", "bolt.fill")
-
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 9) {
-                quickButton("CHAT", "message.fill") {
-                    activeSheet = .chat
-                }
+                quickButton("CHAT", "message.fill") { activeSheet = .chat }
                 quickButton("TASKS", "checklist") {
                     appState.chatInput = "/tasks"
                     activeSheet = .chat
                 }
-                quickButton("HISTORY", "clock.arrow.circlepath") {
-                    activeSheet = .history
-                }
-                quickButton("PERMISSIONS", "lock.shield.fill") {
-                    activeSheet = .permissions
-                }
+                quickButton("HISTORY", "clock.arrow.circlepath") { activeSheet = .history }
+                quickButton("PERMISSIONS", "lock.shield.fill") { activeSheet = .permissions }
                 quickButton("NEW MISSION", "plus.circle.fill") {
                     appState.chatInput = "/plan "
                     activeSheet = .chat
@@ -300,21 +303,13 @@ struct iOSAppShell: View {
 
     private var bottomDock: some View {
         HStack(spacing: 6) {
-            dockButton("HOME", "square.grid.2x2.fill") {
-                activeSheet = nil
-            }
-            dockButton("CHAT", "message.fill") {
-                activeSheet = .chat
-            }
+            dockButton("HOME", "square.grid.2x2.fill") { activeSheet = nil }
+            dockButton("CHAT", "message.fill") { activeSheet = .chat }
             dockButton("VOICE", appState.isListening ? "waveform" : "mic.fill") {
                 appState.isListening.toggle()
             }
-            dockButton("HISTORY", "clock.arrow.circlepath") {
-                activeSheet = .history
-            }
-            dockButton("SETTINGS", "gearshape.fill") {
-                activeSheet = .settings
-            }
+            dockButton("HISTORY", "clock.arrow.circlepath") { activeSheet = .history }
+            dockButton("SETTINGS", "gearshape.fill") { activeSheet = .settings }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
@@ -345,8 +340,7 @@ struct iOSAppShell: View {
 
     private func sectionTitle(_ title: String, _ icon: String) -> some View {
         HStack(spacing: 7) {
-            Image(systemName: icon)
-                .foregroundStyle(cyan)
+            Image(systemName: icon).foregroundStyle(cyan)
             Text(title)
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .tracking(0.8)
@@ -357,8 +351,7 @@ struct iOSAppShell: View {
     private func statusPill(_ text: String, _ color: Color) -> some View {
         HStack(spacing: 5) {
             Circle().fill(color).frame(width: 6, height: 6)
-            Text(text)
-                .font(.system(size: 8, weight: .bold, design: .rounded))
+            Text(text).font(.system(size: 8, weight: .bold, design: .rounded))
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -371,8 +364,7 @@ struct iOSAppShell: View {
             Image(systemName: icon)
                 .foregroundStyle(color)
                 .font(.system(size: 14, weight: .bold))
-            Text(title)
-                .font(.system(size: 8, weight: .bold, design: .rounded))
+            Text(title).font(.system(size: 8, weight: .bold, design: .rounded))
             Text(status)
                 .font(.system(size: 7, weight: .semibold, design: .rounded))
                 .foregroundStyle(color)
@@ -401,8 +393,7 @@ struct iOSAppShell: View {
     private func quickButton(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .foregroundStyle(cyan)
+                Image(systemName: icon).foregroundStyle(cyan)
                 Text(title)
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
