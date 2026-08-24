@@ -4,6 +4,7 @@ struct iOSAppShell: View {
     @Bindable var appState: TRAVISAppState
 
     @State private var activeSheet: MobileSheet?
+    @State private var bridge = TravisDeviceBridgeService.shared
 
     private let cyan = Color(red: 0.04, green: 0.82, blue: 1)
     private let electric = Color(red: 0.16, green: 0.48, blue: 1)
@@ -34,6 +35,15 @@ struct iOSAppShell: View {
             .safeAreaInset(edge: .bottom) { bottomDock }
         }
         .preferredColorScheme(.dark)
+        .task {
+            bridge.start()
+            while !Task.isCancelled {
+                if bridge.isConnected {
+                    bridge.requestStatus()
+                }
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
         .sheet(item: $activeSheet) { sheet in
             NavigationStack {
                 sheetContent(sheet)
@@ -216,7 +226,7 @@ struct iOSAppShell: View {
             }
             HStack(spacing: 8) {
                 statusTile("RUNTIME", appState.isBusy ? "RUNNING" : "READY", appState.isBusy ? .orange : .green)
-                statusTile("MEMORY", "ACTIVE", .green)
+                statusTile("MAC LINK", bridge.isConnected ? "CONNECTED" : "SEARCHING", bridge.isConnected ? .green : .orange)
             }
         }
         .padding(12)
@@ -239,15 +249,23 @@ struct iOSAppShell: View {
                     activeSheet = .chat
                 }
                 quickButton("SYSTEM SCAN", "magnifyingglass.circle") {
-                    appState.chatInput = "Έλεγξε την κατάσταση του συστήματος"
-                    activeSheet = .chat
+                    if bridge.isConnected {
+                        bridge.runSystemScanOnMac()
+                        bridge.requestStatus()
+                    } else {
+                        appState.runLocalSystemScan()
+                    }
                 }
                 quickButton("VOICE", appState.isListening ? "waveform" : "mic.fill") {
-                    appState.isListening.toggle()
+                    appState.toggleListening()
                 }
                 quickButton("FCC", "waveform.path.ecg") {
-                    appState.chatInput = "Άνοιξε το FCC Assistant μέσω του συνδεδεμένου Mac"
-                    activeSheet = .chat
+                    if bridge.isConnected {
+                        bridge.openFCCOnMac()
+                    } else {
+                        appState.addAssistantMessage("Δεν υπάρχει ενεργή σύνδεση με τον Mac TRAVIS.")
+                        activeSheet = .chat
+                    }
                 }
             }
         }
@@ -289,17 +307,49 @@ struct iOSAppShell: View {
     private var statusPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("DEVICE LINK", "iphone.and.arrow.forward")
+
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("IPHONE TRAVIS")
+                    Text(bridge.isConnected ? "MAC TRAVIS CONNECTED" : "SEARCHING FOR MAC TRAVIS")
                         .font(.system(size: 12, weight: .bold, design: .rounded))
-                    Text("Mobile command interface")
+                    Text(bridge.connectedPeerName ?? "Same local network required")
                         .font(.system(size: 10, design: .rounded))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                statusPill("ACTIVE", .green)
+                statusPill(bridge.isConnected ? "CONNECTED" : "SEARCHING", bridge.isConnected ? .green : .orange)
             }
+
+            if let status = bridge.lastStatus {
+                HStack(spacing: 8) {
+                    statusTile("MAC RUNTIME", status.isBusy ? "BUSY" : "READY", status.isBusy ? .orange : .green)
+                    statusTile("ACTIVE TASKS", "\(status.activeRuntimeTasks)", cyan)
+                }
+                Text(status.lastSummary)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+
+            if let error = bridge.lastError, !error.isEmpty {
+                Text(error)
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(.orange)
+            }
+
+            Button {
+                bridge.start()
+                bridge.requestStatus()
+            } label: {
+                Label("REFRESH MAC LINK", systemImage: "arrow.clockwise")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(cyan)
+            .background(RoundedRectangle(cornerRadius: 9).fill(Color.black.opacity(0.28)))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(cyan.opacity(0.28), lineWidth: 0.8))
         }
         .padding(12)
         .hudSurface(cyan: cyan, panel: panel)
@@ -310,7 +360,7 @@ struct iOSAppShell: View {
             dockButton("HOME", "square.grid.2x2.fill") { activeSheet = nil }
             dockButton("CHAT", "message.fill") { activeSheet = .chat }
             dockButton("VOICE", appState.isListening ? "waveform" : "mic.fill") {
-                appState.isListening.toggle()
+                appState.toggleListening()
             }
             dockButton("HISTORY", "clock.arrow.circlepath") { activeSheet = .history }
             dockButton("SETTINGS", "gearshape.fill") { activeSheet = .settings }
