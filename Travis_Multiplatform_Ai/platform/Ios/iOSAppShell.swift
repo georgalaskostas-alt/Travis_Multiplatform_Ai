@@ -4,7 +4,6 @@ struct iOSAppShell: View {
     @Bindable var appState: TRAVISAppState
 
     @State private var activeSheet: MobileSheet?
-    @State private var pulse = false
 
     private let cyan = Color(red: 0.04, green: 0.82, blue: 1)
     private let electric = Color(red: 0.16, green: 0.48, blue: 1)
@@ -35,9 +34,6 @@ struct iOSAppShell: View {
             .safeAreaInset(edge: .bottom) { bottomDock }
         }
         .preferredColorScheme(.dark)
-        .onAppear {
-            pulse = true
-        }
         .sheet(item: $activeSheet) { sheet in
             NavigationStack {
                 sheetContent(sheet)
@@ -139,9 +135,6 @@ struct iOSAppShell: View {
                         )
                 }
 
-                // Draw the moving arc directly from the stage centre instead of
-                // rotating a trimmed SwiftUI Circle. This guarantees that the
-                // orbit stays perfectly concentric on every animation frame.
                 TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
                     Canvas { context, size in
                         let center = CGPoint(x: size.width / 2, y: size.height / 2)
@@ -181,11 +174,8 @@ struct iOSAppShell: View {
                     )
                     .frame(width: 154, height: 154)
                     .overlay(Circle().stroke(cyan, lineWidth: 3))
-                    .shadow(color: cyan.opacity(pulse ? 0.72 : 0.28), radius: pulse ? 28 : 12)
-                    .animation(
-                        .easeInOut(duration: 1.5).repeatForever(autoreverses: true),
-                        value: pulse
-                    )
+                    .shadow(color: cyan.opacity(0.46), radius: 18)
+                    .allowsHitTesting(false)
 
                 VStack(spacing: 4) {
                     Text("TRAVIS")
