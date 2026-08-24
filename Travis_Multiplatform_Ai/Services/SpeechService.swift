@@ -19,7 +19,9 @@ final class SpeechService: NSObject {
     private static let rate: Float = AVSpeechUtteranceDefaultSpeechRate * 0.85
 
     #if os(macOS)
-    private let localS2URL = URL(string: "http://127.0.0.1:3030/generate")!
+    // Lightweight localhost broker. It starts the heavy S2 server only when
+    // speech is requested and unloads it again after a short idle period.
+    private let localS2URL = URL(string: "http://127.0.0.1:3031/generate")!
     private let localS2VoiceID = "travis-private"
     #endif
 
@@ -84,7 +86,7 @@ final class SpeechService: NSObject {
     private func requestLocalS2Speech(text: String) async throws -> Data {
         var request = URLRequest(url: localS2URL)
         request.httpMethod = "POST"
-        request.timeoutInterval = 180
+        request.timeoutInterval = 300
 
         let boundary = "TRAVIS-S2-\(UUID().uuidString)"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
