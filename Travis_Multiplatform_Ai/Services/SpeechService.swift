@@ -11,10 +11,17 @@ final class SpeechService: NSObject {
 
     private(set) var isSpeaking = false
     private let synthesizer = AVSpeechSynthesizer()
+    private var localVoicePlayer: AVAudioPlayer?
     private var onFinishedSpeaking: (() -> Void)?
+    private var localSpeechTask: Task<Void, Never>?
 
     private static let pitchMultiplier: Float = 0.75
     private static let rate: Float = AVSpeechUtteranceDefaultSpeechRate * 0.85
+
+    #if os(macOS)
+    private let localS2URL = URL(string: "http://127.0.0.1:3030/generate")!
+    private let localS2VoiceID = "travis-private"
+    #endif
 
     private override init() {
         super.init()
@@ -22,8 +29,43 @@ final class SpeechService: NSObject {
     }
 
     func speak(_ text: String, language: AppLanguage, completion: (() -> Void)? = nil) {
-        guard !text.isEmpty else { completion?(); return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            completion?()
+            return
+        }
+
+        stopSpeaking()
         onFinishedSpeaking = completion
+
+        #if os(macOS)
+        localSpeechTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let audioData = try await self.requestLocalS2Speech(text: trimmed)
+                guard !Task.isCancelled else { return }
+                try self.playLocalVoice(audioData)
+            } catch {
+                guard !Task.isCancelled else { return }
+                print("[SpeechService] Local S2 unavailable; falling back to macOS TTS: \(error.localizedDescription)")
+                self.speakWithSystemVoice(trimmed, language: language)
+            }
+        }
+        #else
+        speakWithSystemVoice(trimmed, language: language)
+        #endif
+    }
+
+    func stopSpeaking() {
+        localSpeechTask?.cancel()
+        localSpeechTask = nil
+        localVoicePlayer?.stop()
+        localVoicePlayer = nil
+        synthesizer.stopSpeaking(at: .immediate)
+        isSpeaking = false
+    }
+
+    private func speakWithSystemVoice(_ text: String, language: AppLanguage) {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = Self.bestAvailableVoice(for: language.speechLanguageCode)
         utterance.pitchMultiplier = Self.pitchMultiplier
@@ -31,13 +73,64 @@ final class SpeechService: NSObject {
         synthesizer.speak(utterance)
     }
 
-    func stopSpeaking() { synthesizer.stopSpeaking(at: .immediate) }
-
     private static func bestAvailableVoice(for languageCode: String) -> AVSpeechSynthesisVoice? {
         let matchingVoices = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == languageCode }
         if let premium = matchingVoices.first(where: { $0.quality == .premium }) { return premium }
         if let enhanced = matchingVoices.first(where: { $0.quality == .enhanced }) { return enhanced }
         return AVSpeechSynthesisVoice(language: languageCode)
+    }
+
+    #if os(macOS)
+    private func requestLocalS2Speech(text: String) async throws -> Data {
+        var request = URLRequest(url: localS2URL)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 180
+
+        let boundary = "TRAVIS-S2-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        let params = "{\"stream\":false,\"codec_auto_backend\":false,\"codec_follow_backend\":false}"
+        var body = Data()
+        body.appendMultipartField(name: "text", value: text, boundary: boundary)
+        body.appendMultipartField(name: "voice", value: localS2VoiceID, boundary: boundary)
+        body.appendMultipartField(name: "params", value: params, boundary: boundary)
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw LocalS2Error.invalidResponse
+        }
+        guard (200...299).contains(http.statusCode) else {
+            let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            throw LocalS2Error.server(message)
+        }
+        guard data.count > 44 else {
+            throw LocalS2Error.emptyAudio
+        }
+        return data
+    }
+
+    private func playLocalVoice(_ data: Data) throws {
+        let player = try AVAudioPlayer(data: data)
+        localVoicePlayer = player
+        player.delegate = self
+        player.prepareToPlay()
+        guard player.play() else {
+            localVoicePlayer = nil
+            throw LocalS2Error.playbackFailed
+        }
+        isSpeaking = true
+    }
+    #endif
+
+    private func finishedSpeaking() {
+        isSpeaking = false
+        localSpeechTask = nil
+        localVoicePlayer = nil
+        let completion = onFinishedSpeaking
+        onFinishedSpeaking = nil
+        completion?()
     }
 }
 
@@ -45,19 +138,51 @@ extension SpeechService: AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
         Task { @MainActor in self.isSpeaking = true }
     }
+
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor in self.finishedSpeaking() }
     }
+
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         Task { @MainActor in self.finishedSpeaking() }
     }
-    private func finishedSpeaking() {
-        isSpeaking = false
-        let completion = onFinishedSpeaking
-        onFinishedSpeaking = nil
-        completion?()
+}
+
+#if os(macOS)
+extension SpeechService: AVAudioPlayerDelegate {
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor in
+            guard player === self.localVoicePlayer else { return }
+            self.finishedSpeaking()
+        }
     }
 }
+
+private enum LocalS2Error: LocalizedError {
+    case invalidResponse
+    case server(String)
+    case emptyAudio
+    case playbackFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidResponse: return "Invalid local S2 response"
+        case .server(let message): return "S2 server error: \(message)"
+        case .emptyAudio: return "S2 returned no audio"
+        case .playbackFailed: return "Unable to play S2 audio"
+        }
+    }
+}
+
+private extension Data {
+    mutating func appendMultipartField(name: String, value: String, boundary: String) {
+        append("--\(boundary)\r\n".data(using: .utf8)!)
+        append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+        append(value.data(using: .utf8)!)
+        append("\r\n".data(using: .utf8)!)
+    }
+}
+#endif
 
 #if os(macOS)
 @MainActor
