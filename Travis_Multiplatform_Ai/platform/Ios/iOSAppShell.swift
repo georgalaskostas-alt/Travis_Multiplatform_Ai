@@ -1,3 +1,5 @@
+#if os(iOS)
+
 import SwiftUI
 
 struct iOSAppShell: View {
@@ -532,3 +534,5 @@ private extension View {
             .shadow(color: cyan.opacity(0.07), radius: 9)
     }
 }
+
+#endif

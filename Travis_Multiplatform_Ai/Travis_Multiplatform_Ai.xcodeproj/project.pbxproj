@@ -14,10 +14,11 @@
 		893F1500C5EA890AFF209370 /* PersistedFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 649AB93329903D4F8F4A3477 /* PersistedFile.swift */; };
 		8B49A644F5700CCEA73B5E7B /* SpeechService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCB1DAF452075101C5ACDEC /* SpeechService.swift */; };
 		9F4A7A48ED9AC92FBFEF22C7 /* BinanceMarketDataService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */; };
-		E78A0768C174CFCA897B1B06 /* BinanceTestnetTradingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3269621D0FB51D907F9F824 /* BinanceTestnetTradingService.swift */; };
 		A1637D2306AEDD20E59287F6 /* PersistenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D26CE687E215F445D4CC99D /* PersistenceService.swift */; };
 		BCB07EF7ECD6F3D5D3376542 /* StandingPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = B644373748CB262FB7E7B6BF /* StandingPermission.swift */; };
+		CEF8E2DC99224BD3FCF91515 /* TradingMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 284B3761775A6B546AB734F2 /* TradingMode.swift */; };
 		E438AC5CAB39E69A957D22FD /* PersistedPaperPosition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */; };
+		E78A0768C174CFCA897B1B06 /* BinanceTestnetTradingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3269621D0FB51D907F9F824 /* BinanceTestnetTradingService.swift */; };
 		E7FF4041F8088D0BD73BE9C5 /* ChatSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8A4BC751EBB945A37C536C8 /* ChatSession.swift */; };
 		EC21708D2FD0474200D1AB6D /* TRAVISAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC21708C2FD0474200D1AB6D /* TRAVISAppState.swift */; };
 		EC2170932FD047D600D1AB6D /* TravisPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170922FD047D600D1AB6D /* TravisPermission.swift */; };
@@ -37,21 +38,20 @@
 		F05AD77107CAF9DA881E8544 /* PersistedLocationBookmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */; };
 		F5EC4F0794E848C6CA141788 /* FileLocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */; };
 		F9427A0857DC2CE7C90FEDDB /* PaperTradingConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6023541AB2F4D7680CC010C6 /* PaperTradingConstants.swift */; };
-		CEF8E2DC99224BD3FCF91515 /* TradingMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 284B3761775A6B546AB734F2 /* TradingMode.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		0D26CE687E215F445D4CC99D /* PersistenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceService.swift; sourceTree = "<group>"; };
 		1CB0CA6A571176843957B003 /* PersistedPaperAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedPaperAccount.swift; sourceTree = "<group>"; };
 		1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLocationService.swift; sourceTree = "<group>"; };
-		3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinanceMarketDataService.swift; sourceTree = "<group>"; };
-		A3269621D0FB51D907F9F824 /* BinanceTestnetTradingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinanceTestnetTradingService.swift; sourceTree = "<group>"; };
-		6023541AB2F4D7680CC010C6 /* PaperTradingConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaperTradingConstants.swift; sourceTree = "<group>"; };
 		284B3761775A6B546AB734F2 /* TradingMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingMode.swift; sourceTree = "<group>"; };
+		3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinanceMarketDataService.swift; sourceTree = "<group>"; };
+		6023541AB2F4D7680CC010C6 /* PaperTradingConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaperTradingConstants.swift; sourceTree = "<group>"; };
 		649AB93329903D4F8F4A3477 /* PersistedFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedFile.swift; sourceTree = "<group>"; };
 		6FCB1DAF452075101C5ACDEC /* SpeechService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechService.swift; sourceTree = "<group>"; };
 		7A69246C40E57CB8B02C7544 /* PersistedChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedChatMessage.swift; sourceTree = "<group>"; };
 		92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedPaperPosition.swift; sourceTree = "<group>"; };
+		A3269621D0FB51D907F9F824 /* BinanceTestnetTradingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinanceTestnetTradingService.swift; sourceTree = "<group>"; };
 		ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedLocationBookmark.swift; sourceTree = "<group>"; };
 		B644373748CB262FB7E7B6BF /* StandingPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandingPermission.swift; sourceTree = "<group>"; };
 		B8A4BC751EBB945A37C536C8 /* ChatSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSession.swift; sourceTree = "<group>"; };
@@ -474,7 +474,7 @@
 				DEVELOPMENT_TEAM = 5N7C7P29DB;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
-				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
@@ -486,6 +486,8 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "$(SRCROOT)/Travis-Multiplatform-Ai-Info.plist";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "TRAVIS uses the local network to securely connect your iPhone with your Mac.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ο TRAVIS χρειάζεται πρόσβαση στο μικρόφωνο για να σε ακούει όταν του μιλάς.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Ο TRAVIS χρειάζεται αναγνώριση ομιλίας για να καταλαβαίνει τι του λες φωναχτά.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -526,7 +528,7 @@
 				DEVELOPMENT_TEAM = 5N7C7P29DB;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
-				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
@@ -538,6 +540,8 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "$(SRCROOT)/Travis-Multiplatform-Ai-Info.plist";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "TRAVIS uses the local network to securely connect your iPhone with your Mac.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ο TRAVIS χρειάζεται πρόσβαση στο μικρόφωνο για να σε ακούει όταν του μιλάς.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Ο TRAVIS χρειάζεται αναγνώριση ομιλίας για να καταλαβαίνει τι του λες φωναχτά.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
