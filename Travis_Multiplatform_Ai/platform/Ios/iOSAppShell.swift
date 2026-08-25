@@ -40,9 +40,7 @@ struct iOSAppShell: View {
         .task {
             bridge.start()
             while !Task.isCancelled {
-                if bridge.isConnected {
-                    bridge.requestStatus()
-                }
+                if bridge.isConnected { bridge.requestStatus() }
                 try? await Task.sleep(for: .seconds(3))
             }
         }
@@ -51,11 +49,10 @@ struct iOSAppShell: View {
                 sheetContent(sheet)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button {
-                                activeSheet = nil
-                            } label: {
+                            Button { activeSheet = nil } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.title3)
+                                    .foregroundStyle(cyan)
                             }
                             .accessibilityLabel("Close")
                         }
@@ -74,7 +71,6 @@ struct iOSAppShell: View {
                 endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
-
             RadialGradient(
                 colors: [cyan.opacity(0.12), .clear],
                 center: .top,
@@ -132,19 +128,12 @@ struct iOSAppShell: View {
     private var aiCore: some View {
         VStack(spacing: 12) {
             ZStack {
-                Color.clear
-                    .frame(width: 258, height: 258)
+                Color.clear.frame(width: 258, height: 258)
 
                 ForEach(0..<4, id: \.self) { i in
                     Circle()
-                        .stroke(
-                            i == 0 ? cyan.opacity(0.55) : electric.opacity(0.18),
-                            lineWidth: i == 0 ? 2 : 1
-                        )
-                        .frame(
-                            width: CGFloat(238 - i * 32),
-                            height: CGFloat(238 - i * 32)
-                        )
+                        .stroke(i == 0 ? cyan.opacity(0.55) : electric.opacity(0.18), lineWidth: i == 0 ? 2 : 1)
+                        .frame(width: CGFloat(238 - i * 32), height: CGFloat(238 - i * 32))
                 }
 
                 TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
@@ -153,23 +142,15 @@ struct iOSAppShell: View {
                         let radius: CGFloat = 113
                         let t = timeline.date.timeIntervalSinceReferenceDate
                         let phase = (t.truncatingRemainder(dividingBy: 7.0) / 7.0) * 360.0
-                        let start = Angle.degrees(phase - 90)
-                        let end = Angle.degrees(phase - 90 + 194.4)
-
                         var arc = Path()
                         arc.addArc(
                             center: center,
                             radius: radius,
-                            startAngle: start,
-                            endAngle: end,
+                            startAngle: .degrees(phase - 90),
+                            endAngle: .degrees(phase - 90 + 194.4),
                             clockwise: false
                         )
-
-                        context.stroke(
-                            arc,
-                            with: .color(cyan),
-                            style: StrokeStyle(lineWidth: 7, lineCap: .round)
-                        )
+                        context.stroke(arc, with: .color(cyan), style: StrokeStyle(lineWidth: 7, lineCap: .round))
                     }
                     .frame(width: 258, height: 258)
                     .allowsHitTesting(false)
@@ -240,16 +221,10 @@ struct iOSAppShell: View {
             sectionTitle("QUICK ACCESS", "bolt.fill")
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 9) {
                 quickButton("CHAT", "message.fill") { activeSheet = .chat }
-                quickButton("TASKS", "checklist") {
-                    appState.chatInput = "/tasks"
-                    activeSheet = .chat
-                }
+                quickButton("TASKS", "checklist") { activeSheet = .tasks }
                 quickButton("HISTORY", "clock.arrow.circlepath") { activeSheet = .history }
                 quickButton("PERMISSIONS", "lock.shield.fill") { activeSheet = .permissions }
-                quickButton("NEW MISSION", "plus.circle.fill") {
-                    appState.chatInput = "/plan "
-                    activeSheet = .chat
-                }
+                quickButton("NEW MISSION", "plus.circle.fill") { activeSheet = .mission }
                 quickButton("SYSTEM SCAN", "magnifyingglass.circle") {
                     if bridge.isConnected {
                         bridge.runSystemScanOnMac()
@@ -258,9 +233,7 @@ struct iOSAppShell: View {
                         appState.runLocalSystemScan()
                     }
                 }
-                quickButton("VOICE", appState.isListening ? "waveform" : "mic.fill") {
-                    appState.toggleListening()
-                }
+                quickButton("VOICE", appState.isListening ? "waveform" : "mic.fill") { appState.toggleListening() }
                 quickButton("FCC", "waveform.path.ecg") {
                     if bridge.isConnected {
                         bridge.openFCCOnMac()
@@ -361,9 +334,7 @@ struct iOSAppShell: View {
         HStack(spacing: 6) {
             dockButton("HOME", "square.grid.2x2.fill") { activeSheet = nil }
             dockButton("CHAT", "message.fill") { activeSheet = .chat }
-            dockButton("VOICE", appState.isListening ? "waveform" : "mic.fill") {
-                appState.toggleListening()
-            }
+            dockButton("VOICE", appState.isListening ? "waveform" : "mic.fill") { appState.toggleListening() }
             dockButton("HISTORY", "clock.arrow.circlepath") { activeSheet = .history }
             dockButton("SETTINGS", "gearshape.fill") { activeSheet = .settings }
         }
@@ -380,8 +351,11 @@ struct iOSAppShell: View {
     private func sheetContent(_ sheet: MobileSheet) -> some View {
         switch sheet {
         case .chat:
-            ChatView(appState: appState)
-                .navigationTitle("TRAVIS Chat")
+            iOSPremiumChatWorkspace(appState: appState)
+        case .tasks:
+            iOSPremiumTasksWorkspace(appState: appState)
+        case .mission:
+            iOSPremiumMissionWorkspace(appState: appState)
         case .history:
             ChatHistoryView(appState: appState)
                 .navigationTitle("History")
@@ -499,6 +473,8 @@ struct iOSAppShell: View {
 
 private enum MobileSheet: String, Identifiable {
     case chat
+    case tasks
+    case mission
     case history
     case permissions
     case settings
