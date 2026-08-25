@@ -68,6 +68,7 @@ final class TravisDeviceBridgeService: NSObject {
         return browser
     }()
     @ObservationIgnored private var invitedPeers = Set<MCPeerID>()
+    @ObservationIgnored private var reconnectWorkItem: DispatchWorkItem?
     #endif
     #endif
 
@@ -94,6 +95,8 @@ final class TravisDeviceBridgeService: NSObject {
         #if os(macOS)
         advertiser.stopAdvertisingPeer()
         #elseif os(iOS)
+        reconnectWorkItem?.cancel()
+        reconnectWorkItem = nil
         browser.stopBrowsingForPeers()
         invitedPeers.removeAll()
         #endif
@@ -122,19 +125,33 @@ final class TravisDeviceBridgeService: NSObject {
 
     private func send(_ command: TravisBridgeCommand) {
         #if os(iOS) || os(macOS)
-        guard !session.connectedPeers.isEmpty else {
+        let peers = session.connectedPeers
+        guard !peers.isEmpty else {
             DispatchQueue.main.async { [weak self] in
-                self?.lastError = "Mac connection unavailable"
-                self?.isConnected = false
+                guard let self else { return }
+                self.lastError = "Mac connection unavailable"
+                self.isConnected = false
+                self.connectedPeerName = nil
+                #if os(iOS)
+                self.scheduleReconnect(reason: "transport unavailable")
+                #endif
             }
             return
         }
 
         do {
             let data = try JSONEncoder().encode(command)
-            try session.send(data, toPeers: session.connectedPeers, with: .reliable)
+            try session.send(data, toPeers: peers, with: .reliable)
         } catch {
-            DispatchQueue.main.async { [weak self] in self?.lastError = error.localizedDescription }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.lastError = error.localizedDescription
+                self.isConnected = false
+                self.connectedPeerName = nil
+                #if os(iOS)
+                self.scheduleReconnect(reason: "send failed")
+                #endif
+            }
         }
         #endif
     }
@@ -165,14 +182,42 @@ final class TravisDeviceBridgeService: NSObject {
             guard let self else { return }
             self.isConnected = connected
             self.connectedPeerName = connected ? peer?.displayName : nil
+
             if connected {
                 self.lastError = nil
                 #if os(iOS)
+                self.reconnectWorkItem?.cancel()
+                self.reconnectWorkItem = nil
                 self.requestStatus()
                 #endif
             }
         }
     }
+
+    #if os(iOS)
+    private func scheduleReconnect(reason: String) {
+        guard isRunning else { return }
+
+        reconnectWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.isRunning, !self.isConnected else { return }
+
+            self.invitedPeers.removeAll()
+            self.browser.stopBrowsingForPeers()
+            self.session.disconnect()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                guard let self, self.isRunning, !self.isConnected else { return }
+                self.lastError = "Reconnecting to Mac TRAVIS…"
+                self.browser.startBrowsingForPeers()
+            }
+        }
+
+        reconnectWorkItem = workItem
+        lastError = "Connection lost (\(reason)). Reconnecting…"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75, execute: workItem)
+    }
+    #endif
 
     private static func makePeerName() -> String {
         let base = ProcessInfo.processInfo.hostName
@@ -194,13 +239,22 @@ extension TravisDeviceBridgeService: MCSessionDelegate {
         switch state {
         case .connected:
             updateConnectionState(peer: peerID, connected: true)
+
         case .notConnected:
             updateConnectionState(peer: peerID, connected: false)
             #if os(iOS)
-            DispatchQueue.main.async { [weak self] in self?.invitedPeers.remove(peerID) }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.invitedPeers.remove(peerID)
+                self.scheduleReconnect(reason: "peer disconnected")
+            }
             #endif
+
         case .connecting:
-            break
+            DispatchQueue.main.async { [weak self] in
+                self?.lastError = "Connecting to Mac TRAVIS…"
+            }
+
         @unknown default:
             break
         }
@@ -238,20 +292,26 @@ extension TravisDeviceBridgeService: MCNearbyServiceAdvertiserDelegate {
 #if os(iOS)
 extension TravisDeviceBridgeService: MCNearbyServiceBrowserDelegate {
     func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String : String]?) {
-        guard info?["role"] == "mac", !invitedPeers.contains(peerID) else { return }
+        guard info?["role"] == "mac", !isConnected, !invitedPeers.contains(peerID) else { return }
         invitedPeers.insert(peerID)
-        browser.invitePeer(peerID, to: session, withContext: nil, timeout: 15)
+        lastError = "Mac TRAVIS found. Connecting…"
+        browser.invitePeer(peerID, to: session, withContext: nil, timeout: 12)
     }
 
     func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
         invitedPeers.remove(peerID)
         if connectedPeerName == peerID.displayName {
             updateConnectionState(peer: peerID, connected: false)
+            scheduleReconnect(reason: "peer lost")
         }
     }
 
     func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
-        DispatchQueue.main.async { [weak self] in self?.lastError = error.localizedDescription }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.lastError = error.localizedDescription
+            self.scheduleReconnect(reason: "browser failed")
+        }
     }
 }
 #endif
