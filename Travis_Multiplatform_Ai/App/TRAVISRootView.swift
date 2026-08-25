@@ -11,9 +11,7 @@ struct TRAVISRootView: View {
             iOSAppShell(appState: appState)
             #endif
         }
-        .onAppear {
-            configureDeviceBridge()
-        }
+        .onAppear { configureDeviceBridge() }
     }
 
     private func configureDeviceBridge() {
@@ -21,19 +19,31 @@ struct TRAVISRootView: View {
 
         bridge.statusProvider = { [weak appState] in
             guard let appState else {
-                return TravisBridgeStatusSnapshot(
-                    deviceName: "TRAVIS",
-                    platform: platformName,
-                    isBusy: false,
-                    activeRuntimeTasks: 0,
-                    lastSummary: "Unavailable",
-                    fccAvailable: false
-                )
+                return TravisBridgeStatusSnapshot(deviceName: "TRAVIS", platform: platformName, isBusy: false, activeRuntimeTasks: 0, lastSummary: "Unavailable", fccAvailable: false)
             }
 
-            let activeRuntimeTasks = appState.taskRuntime.tasks.filter {
-                [.pending, .planning, .running, .waitingForApproval, .waitingForDependency, .paused].contains($0.status)
-            }.count
+            let allTasks = appState.taskRuntime.tasks.sorted { $0.updatedAt > $1.updatedAt }
+            let activeStatuses: Set<AgentTaskStatus> = [.pending, .planning, .running, .waitingForApproval, .waitingForDependency, .paused]
+            let activeRuntimeTasks = allTasks.filter { activeStatuses.contains($0.status) }.count
+
+            let snapshots = allTasks.prefix(30).map { task in
+                let completed = task.plan.steps.filter { $0.status == .completed || $0.status == .skipped }.count
+                let currentStep = task.executionState.currentStepId.flatMap { id in
+                    task.plan.steps.first(where: { $0.id == id })?.title
+                }
+                return TravisBridgeTaskSnapshot(
+                    id: task.id,
+                    title: task.title,
+                    goal: task.goal,
+                    status: task.status.rawValue,
+                    priority: task.priority.rawValue,
+                    completedSteps: completed,
+                    totalSteps: task.plan.steps.count,
+                    currentStep: currentStep,
+                    checkpoint: task.executionState.lastCheckpoint?.summary,
+                    updatedAt: task.updatedAt
+                )
+            }
 
             return TravisBridgeStatusSnapshot(
                 deviceName: ProcessInfo.processInfo.hostName,
@@ -41,7 +51,8 @@ struct TRAVISRootView: View {
                 isBusy: appState.isBusy,
                 activeRuntimeTasks: activeRuntimeTasks,
                 lastSummary: appState.lastResponseSummary,
-                fccAvailable: fccAvailableOnThisDevice
+                fccAvailable: fccAvailableOnThisDevice,
+                runtimeTasks: snapshots
             )
         }
 
@@ -50,22 +61,14 @@ struct TRAVISRootView: View {
             appState.chatInput = text
             appState.sendChat()
         }
-
-        bridge.onSystemScan = { [weak appState] in
-            appState?.runLocalSystemScan()
-        }
-
+        bridge.onSystemScan = { [weak appState] in appState?.runLocalSystemScan() }
         bridge.onSpeak = { [weak appState] text in
             guard let appState else { return }
             SpeechService.shared.speak(text, language: appState.preferredLanguage)
         }
-
         #if os(macOS)
-        bridge.onOpenFCC = {
-            NotificationCenter.default.post(name: .travisOpenFCCQuickAccess, object: nil)
-        }
+        bridge.onOpenFCC = { NotificationCenter.default.post(name: .travisOpenFCCQuickAccess, object: nil) }
         #endif
-
         bridge.start()
     }
 
