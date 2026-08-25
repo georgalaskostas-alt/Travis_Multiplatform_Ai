@@ -2,8 +2,6 @@
 //  SyncService.swift
 //  Travis_Multiplatform_Ai
 //
-//  Created by Κωνσταντινος Γεωργαλας on 3/6/26.
-//
 
 import Foundation
 import Observation
@@ -12,6 +10,19 @@ import Observation
 import MultipeerConnectivity
 #endif
 
+struct TravisBridgeTaskSnapshot: Codable, Equatable, Identifiable {
+    var id: UUID
+    var title: String
+    var goal: String
+    var status: String
+    var priority: String
+    var completedSteps: Int
+    var totalSteps: Int
+    var currentStep: String?
+    var checkpoint: String?
+    var updatedAt: Date
+}
+
 struct TravisBridgeStatusSnapshot: Codable, Equatable {
     var deviceName: String
     var platform: String
@@ -19,6 +30,7 @@ struct TravisBridgeStatusSnapshot: Codable, Equatable {
     var activeRuntimeTasks: Int
     var lastSummary: String
     var fccAvailable: Bool
+    var runtimeTasks: [TravisBridgeTaskSnapshot] = []
 }
 
 enum TravisBridgeCommand: Codable, Equatable {
@@ -39,6 +51,7 @@ final class TravisDeviceBridgeService: NSObject {
     private(set) var connectedPeerName: String?
     private(set) var lastStatus: TravisBridgeStatusSnapshot?
     private(set) var lastError: String?
+    private(set) var lastStatusReceivedAt: Date?
 
     var statusProvider: (() -> TravisBridgeStatusSnapshot)?
     var onRemoteCommand: ((String) -> Void)?
@@ -72,15 +85,12 @@ final class TravisDeviceBridgeService: NSObject {
     #endif
     #endif
 
-    private override init() {
-        super.init()
-    }
+    private override init() { super.init() }
 
     func start() {
         guard !isRunning else { return }
         isRunning = true
         lastError = nil
-
         #if os(macOS)
         advertiser.startAdvertisingPeer()
         #elseif os(iOS)
@@ -91,7 +101,6 @@ final class TravisDeviceBridgeService: NSObject {
     func stop() {
         guard isRunning else { return }
         isRunning = false
-
         #if os(macOS)
         advertiser.stopAdvertisingPeer()
         #elseif os(iOS)
@@ -100,7 +109,6 @@ final class TravisDeviceBridgeService: NSObject {
         browser.stopBrowsingForPeers()
         invitedPeers.removeAll()
         #endif
-
         #if os(iOS) || os(macOS)
         session.disconnect()
         #endif
@@ -138,7 +146,6 @@ final class TravisDeviceBridgeService: NSObject {
             }
             return
         }
-
         do {
             let data = try JSONEncoder().encode(command)
             try session.send(data, toPeers: peers, with: .reliable)
@@ -164,15 +171,12 @@ final class TravisDeviceBridgeService: NSObject {
                 if let snapshot = self.statusProvider?() { self.send(.status(snapshot)) }
             case .status(let snapshot):
                 self.lastStatus = snapshot
+                self.lastStatusReceivedAt = Date()
                 self.lastError = nil
-            case .openFCC:
-                self.onOpenFCC?()
-            case .systemScan:
-                self.onSystemScan?()
-            case .runCommand(let text):
-                self.onRemoteCommand?(text)
-            case .speak(let text):
-                self.onSpeak?(text)
+            case .openFCC: self.onOpenFCC?()
+            case .systemScan: self.onSystemScan?()
+            case .runCommand(let text): self.onRemoteCommand?(text)
+            case .speak(let text): self.onSpeak?(text)
             }
         }
     }
@@ -182,7 +186,6 @@ final class TravisDeviceBridgeService: NSObject {
             guard let self else { return }
             self.isConnected = connected
             self.connectedPeerName = connected ? peer?.displayName : nil
-
             if connected {
                 self.lastError = nil
                 #if os(iOS)
@@ -197,22 +200,18 @@ final class TravisDeviceBridgeService: NSObject {
     #if os(iOS)
     private func scheduleReconnect(reason: String) {
         guard isRunning else { return }
-
         reconnectWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
             guard let self, self.isRunning, !self.isConnected else { return }
-
             self.invitedPeers.removeAll()
             self.browser.stopBrowsingForPeers()
             self.session.disconnect()
-
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
                 guard let self, self.isRunning, !self.isConnected else { return }
                 self.lastError = "Reconnecting to Mac TRAVIS…"
                 self.browser.startBrowsingForPeers()
             }
         }
-
         reconnectWorkItem = workItem
         lastError = "Connection lost (\(reason)). Reconnecting…"
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.75, execute: workItem)
@@ -220,9 +219,7 @@ final class TravisDeviceBridgeService: NSObject {
     #endif
 
     private static func makePeerName() -> String {
-        let base = ProcessInfo.processInfo.hostName
-            .replacingOccurrences(of: ".local", with: "")
-            .prefix(36)
+        let base = ProcessInfo.processInfo.hostName.replacingOccurrences(of: ".local", with: "").prefix(36)
         #if os(macOS)
         return "TRAVIS-Mac-\(base)"
         #elseif os(iOS)
@@ -237,9 +234,7 @@ final class TravisDeviceBridgeService: NSObject {
 extension TravisDeviceBridgeService: MCSessionDelegate {
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
         switch state {
-        case .connected:
-            updateConnectionState(peer: peerID, connected: true)
-
+        case .connected: updateConnectionState(peer: peerID, connected: true)
         case .notConnected:
             updateConnectionState(peer: peerID, connected: false)
             #if os(iOS)
@@ -249,26 +244,15 @@ extension TravisDeviceBridgeService: MCSessionDelegate {
                 self.scheduleReconnect(reason: "peer disconnected")
             }
             #endif
-
         case .connecting:
-            DispatchQueue.main.async { [weak self] in
-                self?.lastError = "Connecting to Mac TRAVIS…"
-            }
-
-        @unknown default:
-            break
+            DispatchQueue.main.async { [weak self] in self?.lastError = "Connecting to Mac TRAVIS…" }
+        @unknown default: break
         }
     }
 
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
-        do {
-            let command = try JSONDecoder().decode(TravisBridgeCommand.self, from: data)
-            handle(command)
-        } catch {
-            DispatchQueue.main.async { [weak self] in
-                self?.lastError = "Invalid bridge payload: \(error.localizedDescription)"
-            }
-        }
+        do { handle(try JSONDecoder().decode(TravisBridgeCommand.self, from: data)) }
+        catch { DispatchQueue.main.async { [weak self] in self?.lastError = "Invalid bridge payload: \(error.localizedDescription)" } }
     }
 
     func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
@@ -279,13 +263,8 @@ extension TravisDeviceBridgeService: MCSessionDelegate {
 
 #if os(macOS)
 extension TravisDeviceBridgeService: MCNearbyServiceAdvertiserDelegate {
-    func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
-        invitationHandler(true, session)
-    }
-
-    func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
-        DispatchQueue.main.async { [weak self] in self?.lastError = error.localizedDescription }
-    }
+    func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID, withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) { invitationHandler(true, session) }
+    func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) { DispatchQueue.main.async { [weak self] in self?.lastError = error.localizedDescription } }
 }
 #endif
 
@@ -297,7 +276,6 @@ extension TravisDeviceBridgeService: MCNearbyServiceBrowserDelegate {
         lastError = "Mac TRAVIS found. Connecting…"
         browser.invitePeer(peerID, to: session, withContext: nil, timeout: 12)
     }
-
     func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
         invitedPeers.remove(peerID)
         if connectedPeerName == peerID.displayName {
@@ -305,7 +283,6 @@ extension TravisDeviceBridgeService: MCNearbyServiceBrowserDelegate {
             scheduleReconnect(reason: "peer lost")
         }
     }
-
     func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
