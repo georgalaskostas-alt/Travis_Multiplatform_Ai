@@ -12,6 +12,9 @@ struct TRAVISRootView: View {
             #endif
         }
         .onAppear { configureDeviceBridge() }
+        #if os(iOS)
+        .task { await synchronizeMacMissionState() }
+        #endif
     }
 
     private func configureDeviceBridge() {
@@ -58,7 +61,21 @@ struct TRAVISRootView: View {
 
         bridge.onRemoteCommand = { [weak appState] text in
             guard let appState else { return }
-            appState.chatInput = text
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lowered = trimmed.lowercased()
+
+            // Remote missions must enter the same durable autonomous execution
+            // path as missions started directly on the Mac. The old /plan route
+            // only created + started an AgentTask and left execution at 0% until
+            // the user manually pressed RUN/AUTO in Mission Control.
+            if lowered.hasPrefix("/plan ") {
+                let goal = String(trimmed.dropFirst("/plan ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !goal.isEmpty else { return }
+                appState.runAutonomousMissionV2(goal: goal)
+                return
+            }
+
+            appState.chatInput = trimmed
             appState.sendChat()
         }
         bridge.onSystemScan = { [weak appState] in appState?.runLocalSystemScan() }
@@ -71,6 +88,56 @@ struct TRAVISRootView: View {
         #endif
         bridge.start()
     }
+
+    #if os(iOS)
+    private func synchronizeMacMissionState() async {
+        let bridge = TravisDeviceBridgeService.shared
+        let activeStatusKeys: Set<String> = [
+            "pending", "planning", "running", "waitingforapproval",
+            "waitingfordependency", "paused"
+        ]
+
+        while !Task.isCancelled {
+            if bridge.isConnected, let status = bridge.lastStatus {
+                let activeTask = status.runtimeTasks
+                    .sorted { $0.updatedAt > $1.updatedAt }
+                    .first { snapshot in
+                        activeStatusKeys.contains(normalizedStatus(snapshot.status))
+                    }
+
+                // While connected, the Mac runtime is authoritative for the
+                // iPhone command-center mission state.
+                appState.isBusy = activeTask != nil || status.isBusy
+                appState.isProcessing = activeTask.map {
+                    let key = normalizedStatus($0.status)
+                    return key == "planning" || key == "running"
+                } ?? status.isBusy
+
+                if let activeTask {
+                    let progress: String
+                    if activeTask.totalSteps > 0 {
+                        progress = "\(activeTask.completedSteps)/\(activeTask.totalSteps) steps"
+                    } else {
+                        progress = activeTask.status.uppercased()
+                    }
+
+                    let detail = activeTask.currentStep
+                        ?? activeTask.checkpoint
+                        ?? activeTask.goal
+                    appState.lastResponseSummary = "\(activeTask.title) · \(progress) · \(detail)"
+                } else if !status.lastSummary.isEmpty {
+                    appState.lastResponseSummary = status.lastSummary
+                }
+            }
+
+            try? await Task.sleep(for: .seconds(1))
+        }
+    }
+
+    private func normalizedStatus(_ status: String) -> String {
+        status.lowercased().filter { $0.isLetter }
+    }
+    #endif
 
     private var platformName: String {
         #if os(macOS)
