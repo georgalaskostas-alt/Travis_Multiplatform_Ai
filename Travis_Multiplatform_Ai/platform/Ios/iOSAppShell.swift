@@ -353,7 +353,7 @@ struct iOSAppShell: View {
         case .chat:
             iOSPremiumChatWorkspace(appState: appState)
         case .tasks:
-            iOSPremiumTasksWorkspace(appState: appState)
+            iOSLiveMacTasksWorkspace(appState: appState)
         case .mission:
             iOSPremiumMissionWorkspace(appState: appState)
         case .history:
