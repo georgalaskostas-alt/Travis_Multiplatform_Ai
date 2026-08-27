@@ -25,6 +25,29 @@ final class AgentTaskRuntime {
 
     func task(id: UUID) -> AgentTask? { tasks.first { $0.id == id } }
 
+    func markPlanning(taskId: UUID, message: String = "Planning autonomous mission") {
+        mutate(taskId) { task in
+            guard ![.completed, .cancelled, .failed].contains(task.status) else { return }
+            task.status = .planning
+            task.failureReason = nil
+            task.executionState.lastHeartbeatAt = Date()
+            task.events.append(TaskEvent(type: .progress, message: message))
+        }
+    }
+
+    func failTask(taskId: UUID, reason: String) {
+        mutate(taskId) { task in
+            guard ![.completed, .cancelled].contains(task.status) else { return }
+            task.status = .failed
+            task.failureReason = reason
+            task.completedAt = Date()
+            task.executionState.currentStepId = nil
+            task.executionState.nextEligibleRunAt = nil
+            task.executionState.lastHeartbeatAt = Date()
+            task.events.append(TaskEvent(type: .failed, message: reason))
+        }
+    }
+
     func dispatchableTasks(backgroundOnly: Bool = false, limit: Int = 8, now: Date = Date()) -> [AgentTask] {
         let boundedLimit = max(1, min(limit, 64))
         return tasks.filter { task in
