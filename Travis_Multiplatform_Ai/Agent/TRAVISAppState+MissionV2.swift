@@ -22,6 +22,17 @@ extension TRAVISAppState {
 
         engine.onProgress = { [weak self] message in
             guard let self else { return }
+
+            // startMission creates the durable task before it asks the planner
+            // for an execution plan. Make that lifecycle visible immediately
+            // instead of leaving the remote task looking silently PENDING at 0%.
+            if let taskId = engine.activeTaskId,
+               let task = self.taskRuntime.task(id: taskId),
+               task.status == .pending,
+               task.plan.steps.isEmpty {
+                self.taskRuntime.markPlanning(taskId: taskId, message: message)
+            }
+
             self.lastResponseSummary = message
             self.addAssistantMessage(message)
         }
@@ -61,7 +72,20 @@ extension TRAVISAppState {
                 \(report.message)
                 """)
             } catch {
-                let message = "Autonomous Mission V2 failed: \(error.localizedDescription)"
+                let reason = error.localizedDescription
+
+                // Previously AutonomousMissionEngineV2 attempted runtime.pause()
+                // when planning failed. pause() intentionally ignores pending/
+                // planning tasks, so the durable task could remain stuck forever
+                // as PENDING 0%. Persist the real failure explicitly instead.
+                if let taskId = engine.activeTaskId {
+                    self.taskRuntime.failTask(
+                        taskId: taskId,
+                        reason: "Mission planning/execution failed: \(reason)"
+                    )
+                }
+
+                let message = "Autonomous Mission V2 failed: \(reason)"
                 self.lastResponseSummary = message
                 self.addAssistantMessage(message)
             }
