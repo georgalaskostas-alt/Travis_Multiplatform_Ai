@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TRAVISRootView: View {
     @Bindable var appState: TRAVISAppState
+    @State private var observedMacTaskStatuses: [UUID: String] = [:]
 
     var body: some View {
         Group {
@@ -34,6 +35,18 @@ struct TRAVISRootView: View {
                 let currentStep = task.executionState.currentStepId.flatMap { id in
                     task.plan.steps.first(where: { $0.id == id })?.title
                 }
+                let reportText = task.plan.steps
+                    .filter { $0.status == .completed }
+                    .sorted { $0.order < $1.order }
+                    .compactMap { step -> String? in
+                        guard let result = step.resultSummary?.trimmingCharacters(in: .whitespacesAndNewlines), !result.isEmpty else { return nil }
+                        return "#\(step.order) \(step.title)\n\(result)"
+                    }
+                    .joined(separator: "\n\n")
+                let finalReport: String? = task.status == .completed && !reportText.isEmpty
+                    ? String(reportText.prefix(8_000))
+                    : nil
+
                 return TravisBridgeTaskSnapshot(
                     id: task.id,
                     title: task.title,
@@ -44,6 +57,7 @@ struct TRAVISRootView: View {
                     totalSteps: task.plan.steps.count,
                     currentStep: currentStep,
                     checkpoint: task.executionState.lastCheckpoint?.summary,
+                    finalReport: finalReport,
                     updatedAt: task.updatedAt
                 )
             }
@@ -64,10 +78,6 @@ struct TRAVISRootView: View {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             let lowered = trimmed.lowercased()
 
-            // Remote missions must enter the same durable autonomous execution
-            // path as missions started directly on the Mac. The old /plan route
-            // only created + started an AgentTask and left execution at 0% until
-            // the user manually pressed RUN/AUTO in Mission Control.
             if lowered.hasPrefix("/plan ") {
                 let goal = String(trimmed.dropFirst("/plan ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !goal.isEmpty else { return }
@@ -99,14 +109,11 @@ struct TRAVISRootView: View {
 
         while !Task.isCancelled {
             if bridge.isConnected, let status = bridge.lastStatus {
-                let activeTask = status.runtimeTasks
-                    .sorted { $0.updatedAt > $1.updatedAt }
-                    .first { snapshot in
-                        activeStatusKeys.contains(normalizedStatus(snapshot.status))
-                    }
+                let sortedTasks = status.runtimeTasks.sorted { $0.updatedAt > $1.updatedAt }
+                let activeTask = sortedTasks.first { snapshot in
+                    activeStatusKeys.contains(normalizedStatus(snapshot.status))
+                }
 
-                // While connected, the Mac runtime is authoritative for the
-                // iPhone command-center mission state.
                 appState.isBusy = activeTask != nil || status.isBusy
                 appState.isProcessing = activeTask.map {
                     let key = normalizedStatus($0.status)
@@ -127,6 +134,27 @@ struct TRAVISRootView: View {
                     appState.lastResponseSummary = "\(activeTask.title) · \(progress) · \(detail)"
                 } else if !status.lastSummary.isEmpty {
                     appState.lastResponseSummary = status.lastSummary
+                }
+
+                for task in sortedTasks {
+                    let current = normalizedStatus(task.status)
+                    let previous = observedMacTaskStatuses[task.id]
+                    if current == "completed",
+                       let previous,
+                       previous != "completed",
+                       let report = task.finalReport?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !report.isEmpty {
+                        appState.addAssistantMessage("""
+                        MISSION COMPLETED
+
+                        \(task.title)
+
+                        FINAL REPORT
+                        \(report)
+                        """)
+                        appState.lastResponseSummary = "Mission completed — report received from Mac TRAVIS"
+                    }
+                    observedMacTaskStatuses[task.id] = current
                 }
             }
 
