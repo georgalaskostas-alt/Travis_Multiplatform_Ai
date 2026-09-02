@@ -20,6 +20,11 @@ extension TRAVISAppState {
             remoteResumeTask(id)
             return true
         }
+        if lower.hasPrefix("/remote-retry-task ") {
+            guard let id = remoteTaskID(from: trimmed, prefix: "/remote-retry-task ") else { return true }
+            remoteRetryTask(id)
+            return true
+        }
         if lower.hasPrefix("/remote-cancel-task ") {
             guard let id = remoteTaskID(from: trimmed, prefix: "/remote-cancel-task ") else { return true }
             remoteCancelTask(id)
@@ -68,6 +73,18 @@ extension TRAVISAppState {
         taskRuntime.resume(taskId: id)
         lastResponseSummary = "Resuming \(String(id.uuidString.prefix(8))) — \(task.title)"
         runAutonomousTask(reference: id.uuidString, continuous: true)
+    }
+
+    private func remoteRetryTask(_ id: UUID) {
+        guard let task = taskRuntime.task(id: id) else { lastResponseSummary = "Task not found"; return }
+        guard task.status == .failed else {
+            lastResponseSummary = "Task \(String(id.uuidString.prefix(8))) is not failed"
+            return
+        }
+        retryAutonomousTask(reference: id.uuidString)
+        if taskRuntime.task(id: id)?.status == .running {
+            runAutonomousTask(reference: id.uuidString, continuous: true)
+        }
     }
 
     private func remoteCancelTask(_ id: UUID) {
