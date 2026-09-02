@@ -10,6 +10,18 @@ import Observation
 import MultipeerConnectivity
 #endif
 
+struct TravisBridgeStepSnapshot: Codable, Equatable, Identifiable {
+    var id: UUID
+    var order: Int
+    var title: String
+    var status: String
+    var capability: String?
+    var attemptCount: Int
+    var maxAttempts: Int
+    var requiresApproval: Bool
+    var lastError: String?
+}
+
 struct TravisBridgeTaskSnapshot: Codable, Equatable, Identifiable {
     var id: UUID
     var title: String
@@ -21,6 +33,8 @@ struct TravisBridgeTaskSnapshot: Codable, Equatable, Identifiable {
     var currentStep: String?
     var checkpoint: String?
     var finalReport: String?
+    var failureReason: String?
+    var steps: [TravisBridgeStepSnapshot]?
     var updatedAt: Date
 }
 
