@@ -46,6 +46,19 @@ struct TRAVISRootView: View {
                 let finalReport: String? = task.status == .completed && !reportText.isEmpty
                     ? String(reportText.prefix(8_000))
                     : nil
+                let stepSnapshots = task.plan.steps.sorted { $0.order < $1.order }.map { step in
+                    TravisBridgeStepSnapshot(
+                        id: step.id,
+                        order: step.order,
+                        title: step.title,
+                        status: step.status.rawValue,
+                        capability: step.capabilityId,
+                        attemptCount: step.attemptCount,
+                        maxAttempts: step.maxAttempts,
+                        requiresApproval: step.requiresApproval,
+                        lastError: step.lastError
+                    )
+                }
 
                 return TravisBridgeTaskSnapshot(
                     id: task.id,
@@ -58,6 +71,8 @@ struct TRAVISRootView: View {
                     currentStep: currentStep,
                     checkpoint: task.executionState.lastCheckpoint?.summary,
                     finalReport: finalReport,
+                    failureReason: task.failureReason,
+                    steps: stepSnapshots,
                     updatedAt: task.updatedAt
                 )
             }
@@ -77,6 +92,8 @@ struct TRAVISRootView: View {
             guard let appState else { return }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             let lowered = trimmed.lowercased()
+
+            if appState.handleRemoteMissionControlCommand(trimmed) { return }
 
             if lowered.hasPrefix("/plan ") {
                 let goal = String(trimmed.dropFirst("/plan ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -123,7 +140,8 @@ struct TRAVISRootView: View {
                 if let activeTask {
                     let progress: String
                     if activeTask.totalSteps > 0 {
-                        progress = "\(activeTask.completedSteps)/\(activeTask.totalSteps) steps"
+                        let percent = Int((Double(activeTask.completedSteps) / Double(max(activeTask.totalSteps, 1))) * 100)
+                        progress = "\(activeTask.completedSteps)/\(activeTask.totalSteps) steps · \(percent)%"
                     } else {
                         progress = activeTask.status.uppercased()
                     }
@@ -156,6 +174,9 @@ struct TRAVISRootView: View {
                     }
                     observedMacTaskStatuses[task.id] = current
                 }
+
+                let currentIDs = Set(sortedTasks.map(\.id))
+                observedMacTaskStatuses = observedMacTaskStatuses.filter { currentIDs.contains($0.key) }
             }
 
             try? await Task.sleep(for: .seconds(1))
