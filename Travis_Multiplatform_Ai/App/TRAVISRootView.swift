@@ -123,6 +123,7 @@ struct TRAVISRootView: View {
             "pending", "planning", "running", "waitingforapproval",
             "waitingfordependency", "paused"
         ]
+        TravisMissionNotificationService.shared.prepare()
 
         while !Task.isCancelled {
             if bridge.isConnected, let status = bridge.lastStatus {
@@ -157,6 +158,12 @@ struct TRAVISRootView: View {
                 for task in sortedTasks {
                     let current = normalizedStatus(task.status)
                     let previous = observedMacTaskStatuses[task.id]
+                    let transitionedToTerminal = previous != nil && previous != current && (current == "completed" || current == "failed")
+
+                    if transitionedToTerminal {
+                        TravisMissionNotificationService.shared.notify(task: task)
+                    }
+
                     if current == "completed",
                        let previous,
                        previous != "completed",
@@ -171,7 +178,18 @@ struct TRAVISRootView: View {
                         \(report)
                         """)
                         appState.lastResponseSummary = "Mission completed — report received from Mac TRAVIS"
+                    } else if current == "failed", let previous, previous != "failed" {
+                        let reason = task.failureReason ?? task.checkpoint ?? "Mission failed without a detailed runtime reason."
+                        appState.addAssistantMessage("""
+                        MISSION NEEDS ATTENTION
+
+                        \(task.title)
+
+                        \(reason)
+                        """)
+                        appState.lastResponseSummary = "Mission needs attention — open Task Control"
                     }
+
                     observedMacTaskStatuses[task.id] = current
                 }
 
