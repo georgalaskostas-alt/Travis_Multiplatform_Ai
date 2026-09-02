@@ -20,6 +20,7 @@ struct TravisBridgeTaskSnapshot: Codable, Equatable, Identifiable {
     var totalSteps: Int
     var currentStep: String?
     var checkpoint: String?
+    var finalReport: String?
     var updatedAt: Date
 }
 
