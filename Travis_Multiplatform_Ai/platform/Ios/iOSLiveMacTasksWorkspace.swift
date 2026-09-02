@@ -130,6 +130,7 @@ struct iOSLiveMacTasksWorkspace: View {
 
             if let step = task.currentStep, !step.isEmpty { detailRow("CURRENT STEP", step, "bolt.fill") }
             if let checkpoint = task.checkpoint, !checkpoint.isEmpty { detailRow("LAST CHECKPOINT", checkpoint, "flag.checkered") }
+            if let report = task.finalReport, !report.isEmpty { finalReportBlock(report) }
         }
         .padding(13)
         .liveTaskHUD(cyan: cyan, panel: panel)
@@ -163,6 +164,22 @@ struct iOSLiveMacTasksWorkspace: View {
             Text(value).font(.system(size: 10, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.82)).lineLimit(4)
         }
         .padding(.top, 2)
+    }
+
+    private func finalReportBlock(_ report: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("FINAL REPORT", systemImage: "doc.text.fill")
+                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                .foregroundStyle(.green)
+            Text(report)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.9))
+                .textSelection(.enabled)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.green.opacity(0.22), lineWidth: 0.8))
+        .padding(.top, 3)
     }
 
     private var runtimeCard: some View {
