@@ -1,4 +1,8 @@
 import SwiftUI
+#if os(iOS)
+import UserNotifications
+import UIKit
+#endif
 
 struct TRAVISRootView: View {
     @Bindable var appState: TRAVISAppState
@@ -49,7 +53,7 @@ struct TRAVISRootView: View {
         bridge.start()
     }
 #if os(iOS)
-    private func synchronizeMacMissionState() async { let bridge=TravisDeviceBridgeService.shared;let active:Set<String>=["pending","planning","running","waitingforapproval","waitingfordependency","paused"];TravisMissionNotificationService.shared.prepare();while !Task.isCancelled{if bridge.isConnected{bridge.requestStatus()};if bridge.isConnected,let status=bridge.lastStatus{let tasks=status.runtimeTasks.sorted{$0.updatedAt>$1.updatedAt};let a=tasks.first{active.contains(normalizedStatus($0.status))};appState.isBusy=a != nil || status.isBusy;appState.isProcessing=a.map{let k=normalizedStatus($0.status);return k=="planning" || k=="running"} ?? status.isBusy;if let a{let p=a.totalSteps>0 ? "\(a.completedSteps)/\(a.totalSteps) steps · \(Int(Double(a.completedSteps)/Double(max(a.totalSteps,1))*100))%":a.status.uppercased();appState.lastResponseSummary="\(a.title) · \(p) · \(a.currentStep ?? a.checkpoint ?? a.goal)"}else if !status.lastSummary.isEmpty{appState.lastResponseSummary=status.lastSummary};for task in tasks{let current=normalizedStatus(task.status),previous=observedMacTaskStatuses[task.id];if previous != nil && previous != current && (current=="completed" || current=="failed"){TravisMissionNotificationService.shared.notify(task:task)};if current=="completed",let previous,previous != "completed",let report=task.finalReport,!report.isEmpty{appState.addAssistantMessage("MISSION COMPLETED\n\n\(task.title)\n\nFINAL REPORT\n\(report)")}else if current=="failed",let previous,previous != "failed"{appState.addAssistantMessage("MISSION NEEDS ATTENTION\n\n\(task.title)\n\n\(task.failureReason ?? task.checkpoint ?? "Mission failed.")")};observedMacTaskStatuses[task.id]=current};let ids=Set(tasks.map(\.id));observedMacTaskStatuses=observedMacTaskStatuses.filter{ids.contains($0.key)}};try? await Task.sleep(for:.seconds(1))}}
+    private func synchronizeMacMissionState() async { let bridge=TravisDeviceBridgeService.shared;let active:Set<String>=["pending","planning","running","waitingforapproval","waitingfordependency","paused"];TRAVISInlineMissionNotifier.prepare();while !Task.isCancelled{if bridge.isConnected{bridge.requestStatus()};if bridge.isConnected,let status=bridge.lastStatus{let tasks=status.runtimeTasks.sorted{$0.updatedAt>$1.updatedAt};let a=tasks.first{active.contains(normalizedStatus($0.status))};appState.isBusy=a != nil || status.isBusy;appState.isProcessing=a.map{let k=normalizedStatus($0.status);return k=="planning" || k=="running"} ?? status.isBusy;if let a{let p=a.totalSteps>0 ? "\(a.completedSteps)/\(a.totalSteps) steps · \(Int(Double(a.completedSteps)/Double(max(a.totalSteps,1))*100))%":a.status.uppercased();appState.lastResponseSummary="\(a.title) · \(p) · \(a.currentStep ?? a.checkpoint ?? a.goal)"}else if !status.lastSummary.isEmpty{appState.lastResponseSummary=status.lastSummary};for task in tasks{let current=normalizedStatus(task.status),previous=observedMacTaskStatuses[task.id];if previous != nil && previous != current && (current=="completed" || current=="failed"){TRAVISInlineMissionNotifier.notify(task:task)};if current=="completed",let previous,previous != "completed",let report=task.finalReport,!report.isEmpty{appState.addAssistantMessage("MISSION COMPLETED\n\n\(task.title)\n\nFINAL REPORT\n\(report)")}else if current=="failed",let previous,previous != "failed"{appState.addAssistantMessage("MISSION NEEDS ATTENTION\n\n\(task.title)\n\n\(task.failureReason ?? task.checkpoint ?? "Mission failed.")")};observedMacTaskStatuses[task.id]=current};let ids=Set(tasks.map(\.id));observedMacTaskStatuses=observedMacTaskStatuses.filter{ids.contains($0.key)}};try? await Task.sleep(for:.seconds(1))}}
     private func normalizedStatus(_ s:String)->String{s.lowercased().filter{$0.isLetter}}
 #endif
     private var platformName:String{
@@ -69,3 +73,15 @@ struct TRAVISRootView: View {
 #endif
     }
 }
+
+#if os(iOS)
+private enum TRAVISInlineMissionNotifier {
+    static func prepare(){UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound,.badge]){_,_ in}}
+    static func notify(task:TravisBridgeTaskSnapshot){
+        let failed=task.status.lowercased().contains("fail");let c=UNMutableNotificationContent();c.title=failed ? "TRAVIS Mission Needs Attention":"TRAVIS Mission Ready";c.subtitle=task.title
+        let detail=failed ? (task.failureReason ?? task.checkpoint ?? "Mission failed."):(task.finalReport ?? task.checkpoint ?? "Mission completed.");c.body=String(detail.prefix(180));c.sound=.default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier:"travis-mission-\(task.id)-\(task.status)",content:c,trigger:nil))
+        DispatchQueue.main.async{UINotificationFeedbackGenerator().notificationOccurred(failed ? .error:.success)}
+    }
+}
+#endif
