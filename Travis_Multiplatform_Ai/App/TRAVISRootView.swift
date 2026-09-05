@@ -76,12 +76,29 @@ struct TRAVISRootView: View {
 
 #if os(iOS)
 private enum TRAVISInlineMissionNotifier {
-    static func prepare(){UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound,.badge]){_,_ in}}
-    static func notify(task:TravisBridgeTaskSnapshot){
-        let failed=task.status.lowercased().contains("fail");let c=UNMutableNotificationContent();c.title=failed ? "TRAVIS Mission Needs Attention":"TRAVIS Mission Ready";c.subtitle=task.title
-        let detail=failed ? (task.failureReason ?? task.checkpoint ?? "Mission failed."):(task.finalReport ?? task.checkpoint ?? "Mission completed.");c.body=String(detail.prefix(180));c.sound=.default
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier:"travis-mission-\(task.id)-\(task.status)",content:c,trigger:nil))
-        DispatchQueue.main.async{UINotificationFeedbackGenerator().notificationOccurred(failed ? .error:.success)}
+    static func prepare() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+    }
+
+    static func notify(task: TravisBridgeTaskSnapshot) {
+        let failed = task.status.lowercased().contains("fail")
+        let content = UNMutableNotificationContent()
+        content.title = failed ? "TRAVIS Mission Needs Attention" : "TRAVIS Mission Ready"
+        content.subtitle = task.title
+        let detail = failed
+            ? (task.failureReason ?? task.checkpoint ?? "Mission failed.")
+            : (task.finalReport ?? task.checkpoint ?? "Mission completed.")
+        content.body = String(detail.prefix(180))
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "travis-mission-\(task.id)-\(task.status)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+        DispatchQueue.main.async {
+            UINotificationFeedbackGenerator().notificationOccurred(failed ? .error : .success)
+        }
     }
 }
 #endif
