@@ -9,22 +9,24 @@ def locked():
  with LOCK.open("a+") as f:fcntl.flock(f,fcntl.LOCK_EX);yield;fcntl.flock(f,fcntl.LOCK_UN)
 def load():
  try:
-  d=json.loads(JOBS.read_text());return d if isinstance(d,dict) and isinstance(d.get("jobs"),list) else {"version":3,"jobs":[]}
- except Exception:return {"version":3,"jobs":[]}
+  d=json.loads(JOBS.read_text());return d if isinstance(d,dict) and isinstance(d.get("jobs"),list) else {"version":4,"jobs":[]}
+ except Exception:return {"version":4,"jobs":[]}
 def save(d):
- d["version"]=3;t=JOBS.with_suffix(".json.tmp");t.write_text(json.dumps(d,sort_keys=True));os.replace(t,JOBS)
+ d["version"]=4;t=JOBS.with_suffix(".json.tmp");t.write_text(json.dumps(d,sort_keys=True));os.replace(t,JOBS)
 def find(d,key):
  m=[j for j in d["jobs"] if str(j.get("id","")).lower().startswith(key.lower())];return m[0] if len(m)==1 else None
 def new_job(title,kind,cadence,payload):
- now=time.time();return {"id":str(uuid.uuid4()),"title":title,"kind":kind,"state":"scheduled","createdAt":now,"updatedAt":now,"nextRunAt":now,"cadenceSeconds":cadence,"payload":payload,"enabled":True,"failures":0,"lastError":None,"lease":None}
+ now=time.time();return {"id":str(uuid.uuid4()),"title":title,"kind":kind,"state":"scheduled","createdAt":now,"updatedAt":now,"nextRunAt":now,"cadenceSeconds":cadence,"payload":payload,"enabled":True,"failures":0,"recoveryCount":0,"lastError":None,"lease":None,"checkpoint":None}
+def default_plan():return [{"order":1,"title":"Collect runtime identity","capability":"runtime.identity"},{"order":2,"title":"Collect system health","capability":"runtime.health"},{"order":3,"title":"Verify safety envelope","capability":"runtime.safety"},{"order":4,"title":"Synthesize final report","capability":"report.synthesize"}]
 def usage():raise SystemExit("usage: jobctl.py list|status|show <id>|journal [n]|add-probe|add-system-watcher [seconds]|add-headless-mission [goal]|pause|resume|retry|delete <id-prefix>")
 args=sys.argv[1:];cmd=args[0] if args else "list"
 if cmd=="status":
- try:print(json.dumps(json.loads(HEARTBEAT.read_text()),indent=2,sort_keys=True))
+ try:
+  h=json.loads(HEARTBEAT.read_text());h["heartbeatAgeSeconds"]=round(time.time()-float(h.get("lastBeatAt",0)),2);print(json.dumps(h,indent=2,sort_keys=True))
  except Exception:print("worker heartbeat unavailable")
  sys.exit(0)
 if cmd=="journal":
- n=int(args[1]) if len(args)>1 else 30
+ n=max(1,min(500,int(args[1]))) if len(args)>1 else 30
  try:
   for line in JOURNAL.read_text().splitlines()[-n:]:print(line)
  except FileNotFoundError:print("journal unavailable")
@@ -33,13 +35,15 @@ with locked():
  d=load()
  if cmd=="list":
   if not d["jobs"]:print("No service jobs.")
-  for j in d["jobs"]:print(j.get("id"),j.get("state"),j.get("kind"),j.get("title"),"next=",j.get("nextRunAt"),"failures=",j.get("failures",0))
+  for j in d["jobs"]:
+   done=len((j.get("missionState") or {}).get("completedSteps") or []);total=len((j.get("payload") or {}).get("plan") or []);progress=f" progress={done}/{total}" if total else ""
+   print(j.get("id"),j.get("state"),j.get("kind"),j.get("title"),"next=",j.get("nextRunAt"),"failures=",j.get("failures",0),progress)
   sys.exit(0)
  if cmd=="add-probe":j=new_job("TRAVIS Runtime Probe","heartbeatProbe",None,"runtime self-test");d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
  if cmd=="add-system-watcher":
   cadence=max(10,int(args[1])) if len(args)>1 else 60;j=new_job("TRAVIS System Health Watcher","systemWatcher",cadence,{"minDiskFreePercent":10});d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
  if cmd=="add-headless-mission":
-  goal=" ".join(args[1:]).strip() or "Generate a TRAVIS runtime health and safety report";j=new_job("Headless Runtime Mission","headlessMission",None,{"goal":goal});d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
+  goal=" ".join(args[1:]).strip() or "Generate a TRAVIS runtime health and safety report";j=new_job("Headless Runtime Mission","headlessMission",None,{"goal":goal,"plan":default_plan()});d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
  if len(args)<2:usage()
  j=find(d,args[1])
  if not j:raise SystemExit("job not found or prefix ambiguous")
