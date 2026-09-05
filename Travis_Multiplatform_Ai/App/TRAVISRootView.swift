@@ -36,8 +36,10 @@ struct TRAVISRootView: View {
             }
             var alwaysOn:TravisBridgeAlwaysOnSnapshot?=nil
 #if os(macOS)
-            let coordinator=AlwaysOnRuntimeCoordinator.shared;let status=AlwaysOnRuntimeStatus.current(engine:coordinator.engine,monitor:coordinator.worker)
-            alwaysOn=TravisBridgeAlwaysOnSnapshot(workerHealthy:status.workerHealthy,workerPID:status.workerPID,killSwitchEnabled:status.killSwitchEnabled,jobsTotal:status.jobsTotal,jobsActive:status.jobsActive,jobsFailed:status.jobsFailed,summary:status.summary,jobs:coordinator.engine.jobs.map{j in .init(id:j.id,title:j.title,kind:j.kind.rawValue,state:j.state.rawValue,nextRunAt:j.nextRunAt,consecutiveFailures:j.consecutiveFailures,lastError:j.lastError,isEnabled:j.isEnabled)})
+            let coordinator=AlwaysOnRuntimeCoordinator.shared;coordinator.worker.refresh();let status=AlwaysOnRuntimeStatus.current(engine:coordinator.engine,monitor:coordinator.worker)
+            let workerJobs=coordinator.worker.serviceJobs.map{j in TravisBridgeAlwaysOnJobSnapshot(id:j.id,title:j.title,kind:j.kind,state:j.state,nextRunAt:j.nextRunAt.map{Date(timeIntervalSince1970:$0)},consecutiveFailures:j.failures,lastError:j.lastError,isEnabled:j.enabled)}
+            let fallbackJobs=coordinator.engine.jobs.map{j in TravisBridgeAlwaysOnJobSnapshot(id:j.id,title:j.title,kind:j.kind.rawValue,state:j.state.rawValue,nextRunAt:j.nextRunAt,consecutiveFailures:j.consecutiveFailures,lastError:j.lastError,isEnabled:j.isEnabled)}
+            alwaysOn=TravisBridgeAlwaysOnSnapshot(workerHealthy:status.workerHealthy,workerPID:status.workerPID,killSwitchEnabled:status.killSwitchEnabled,jobsTotal:status.jobsTotal,jobsActive:status.jobsActive,jobsFailed:status.jobsFailed,summary:status.summary,jobs:workerJobs.isEmpty ? fallbackJobs : workerJobs)
 #endif
             return TravisBridgeStatusSnapshot(deviceName:ProcessInfo.processInfo.hostName,platform:platformName,isBusy:appState.isBusy,activeRuntimeTasks:all.filter{active.contains($0.status)}.count,lastSummary:appState.lastResponseSummary,fccAvailable:fccAvailableOnThisDevice,runtimeTasks:snapshots,alwaysOn:alwaysOn)
         }
@@ -76,29 +78,12 @@ struct TRAVISRootView: View {
 
 #if os(iOS)
 private enum TRAVISInlineMissionNotifier {
-    static func prepare() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
-    }
-
+    static func prepare() { UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in } }
     static func notify(task: TravisBridgeTaskSnapshot) {
-        let failed = task.status.lowercased().contains("fail")
-        let content = UNMutableNotificationContent()
-        content.title = failed ? "TRAVIS Mission Needs Attention" : "TRAVIS Mission Ready"
-        content.subtitle = task.title
-        let detail = failed
-            ? (task.failureReason ?? task.checkpoint ?? "Mission failed.")
-            : (task.finalReport ?? task.checkpoint ?? "Mission completed.")
-        content.body = String(detail.prefix(180))
-        content.sound = .default
-        let request = UNNotificationRequest(
-            identifier: "travis-mission-\(task.id)-\(task.status)",
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request)
-        DispatchQueue.main.async {
-            UINotificationFeedbackGenerator().notificationOccurred(failed ? .error : .success)
-        }
+        let failed = task.status.lowercased().contains("fail");let content = UNMutableNotificationContent();content.title = failed ? "TRAVIS Mission Needs Attention" : "TRAVIS Mission Ready";content.subtitle = task.title
+        let detail = failed ? (task.failureReason ?? task.checkpoint ?? "Mission failed.") : (task.finalReport ?? task.checkpoint ?? "Mission completed.");content.body = String(detail.prefix(180));content.sound = .default
+        let request = UNNotificationRequest(identifier: "travis-mission-\(task.id)-\(task.status)", content: content, trigger: nil);UNUserNotificationCenter.current().add(request)
+        DispatchQueue.main.async { UINotificationFeedbackGenerator().notificationOccurred(failed ? .error : .success) }
     }
 }
 #endif
