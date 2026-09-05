@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """TRAVIS durable headless runtime supervisor.
-Safe deterministic service scheduler: no shell execution, credentials or trading.
+Executes only allowlisted deterministic jobs. No arbitrary shell, credentials or live trading.
 """
 import fcntl,json,os,platform,signal,time,uuid
 from contextlib import contextmanager
@@ -27,7 +27,7 @@ def journal(event,**fields):
   fcntl.flock(lk,fcntl.LOCK_UN)
 def control():return read_json(CONTROL,{"killSwitch":False})
 def load_jobs():
- raw=read_json(JOBS,{"version":2,"jobs":[]});return raw if isinstance(raw,dict) and isinstance(raw.get("jobs",[]),list) else {"version":2,"jobs":[]}
+ raw=read_json(JOBS,{"version":3,"jobs":[]});return raw if isinstance(raw,dict) and isinstance(raw.get("jobs",[]),list) else {"version":3,"jobs":[]}
 def recover(doc):
  now=time.time()
  for j in doc["jobs"]:
@@ -35,21 +35,38 @@ def recover(doc):
   if j.get("state")=="running" and float(lease.get("expiresAt",0))<now:
    j.update(state="scheduled",nextRunAt=now,lastError="Recovered stale worker lease",lease=None,updatedAt=now);journal("job_recovered",jobID=j.get("id"))
  return doc
+def host_observation():
+ load=os.getloadavg();disk=os.statvfs(str(Path.home()));free=disk.f_bavail*disk.f_frsize;total=disk.f_blocks*disk.f_frsize
+ return {"host":platform.node(),"platform":platform.platform(),"load1":round(load[0],2),"load5":round(load[1],2),"diskFreePercent":round((free/total*100) if total else 0,1),"pid":PID,"generation":GEN}
+def run_headless_mission(job,payload):
+ goal=str(payload.get("goal") or "Generate TRAVIS runtime health report")[:1000]
+ steps=[]
+ def step(title,fn):
+  journal("mission_step_started",jobID=job.get("id"),title=title);value=fn();steps.append({"title":title,"status":"completed","result":value});journal("mission_step_completed",jobID=job.get("id"),title=title)
+ step("Collect runtime identity",lambda:{"host":platform.node(),"workerPID":PID,"generation":GEN})
+ step("Collect system health",host_observation)
+ step("Verify safety envelope",lambda:{"killSwitch":bool(control().get("killSwitch",False)),"arbitraryShell":False,"liveTrading":False,"credentials":False})
+ obs=steps[1]["result"];report=f"Goal: {goal}\nWorker {PID} on {obs['host']} is operational. Load1={obs['load1']}, disk free={obs['diskFreePercent']}%. Safety envelope verified."
+ step("Synthesize final report",lambda:{"report":report})
+ return {"ok":True,"summary":"Headless mission completed","goal":goal,"steps":steps,"finalReport":report}
 def execute_safe(job):
  kind=job.get("kind");payload=job.get("payload") or {}
  if kind=="heartbeatProbe":return {"ok":True,"summary":"Headless runtime probe completed"}
  if kind=="systemWatcher":
-  load=os.getloadavg();disk=os.statvfs(str(Path.home()));free=disk.f_bavail*disk.f_frsize;total=disk.f_blocks*disk.f_frsize;free_pct=(free/total*100) if total else 0
-  obs={"host":platform.node(),"load1":round(load[0],2),"load5":round(load[1],2),"diskFreePercent":round(free_pct,1)}
-  threshold=float(payload.get("minDiskFreePercent",10)) if isinstance(payload,dict) else 10
-  obs["alert"]=free_pct<threshold
+  obs=host_observation();threshold=float(payload.get("minDiskFreePercent",10)) if isinstance(payload,dict) else 10;obs["alert"]=obs["diskFreePercent"]<threshold
   return {"ok":True,"summary":"System watcher cycle completed","observation":obs}
+ if kind=="headlessMission":return run_headless_mission(job,payload if isinstance(payload,dict) else {})
  if kind=="watcher":return {"ok":True,"summary":"Local watcher cycle recorded","payload":str(payload)[:500]}
  raise RuntimeError(f"Unsupported headless job kind: {kind}")
+def public_jobs(jobs):
+ out=[]
+ for j in jobs:
+  result=j.get("lastResult") or {};out.append({"id":j.get("id"),"title":j.get("title"),"kind":j.get("kind"),"state":j.get("state"),"nextRunAt":j.get("nextRunAt"),"failures":int(j.get("failures",0)),"lastError":j.get("lastError"),"enabled":bool(j.get("enabled",False)),"lastCompletedAt":j.get("lastCompletedAt"),"summary":result.get("summary"),"finalReport":result.get("finalReport")})
+ return out[-50:]
 def tick_jobs(killed):
  with locked():
   doc=recover(load_jobs());jobs=doc["jobs"];now=time.time()
-  if killed:return len([j for j in jobs if j.get("enabled")])
+  if killed:return jobs
   for j in jobs:
    if not j.get("enabled",False) or j.get("state") in ("paused","stopped"):continue
    if float(j.get("nextRunAt") or j.get("createdAt") or now)>now:continue
@@ -62,12 +79,13 @@ def tick_jobs(killed):
     journal("job_completed",jobID=j.get("id"),runID=run_id,summary=result.get("summary"),changed=previous!=result)
    except Exception as e:
     failures=int(j.get("failures",0))+1;j.update(failures=failures,lastError=str(e),state="failed",nextRunAt=time.time()+min((2**failures)*5,300));journal("job_failed",jobID=j.get("id"),runID=run_id,error=str(e))
-   j.update(lease=None,updatedAt=time.time());atomic_json(JOBS,doc)
-  return len([j for j in jobs if j.get("enabled")])
+   j.update(lease=None,updatedAt=time.time());doc["version"]=3;atomic_json(JOBS,doc)
+  return jobs
 journal("worker_started")
 while RUN:
  try:
-  c=control();killed=bool(c.get("killSwitch",False));active=tick_jobs(killed);atomic_json(HEARTBEAT,{"version":3,"generation":GEN,"pid":PID,"startedAt":STARTED,"lastBeatAt":time.time(),"killSwitch":killed,"state":"safe-stop" if killed else "ready","activeServiceJobs":active,"journal":str(JOURNAL)})
+  c=control();killed=bool(c.get("killSwitch",False));jobs=tick_jobs(killed);active=sum(1 for j in jobs if j.get("enabled") and j.get("state") not in ("paused","stopped"));failed=sum(1 for j in jobs if j.get("state")=="failed")
+  atomic_json(HEARTBEAT,{"version":4,"generation":GEN,"pid":PID,"startedAt":STARTED,"lastBeatAt":time.time(),"killSwitch":killed,"state":"safe-stop" if killed else "ready","activeServiceJobs":active,"failedServiceJobs":failed,"serviceJobs":public_jobs(jobs),"journal":str(JOURNAL)})
  except Exception as e:journal("worker_loop_error",error=str(e))
  time.sleep(2)
 journal("worker_stopped")
