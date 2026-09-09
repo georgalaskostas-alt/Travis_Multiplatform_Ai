@@ -19,7 +19,12 @@ extension TRAVISAppState {
             do {
                 let report = try await engine.startMission(goal: trimmedGoal, recentHistory: recentHistory)
                 self.lastResponseSummary = report.message
-                let mode = report.state == .handedOff ? "ALWAYS-ON HEADLESS" : "MISSION V2"
+                let mode: String
+                switch report.state {
+                case .handedOff: mode = "ALWAYS-ON HEADLESS"
+                case .hybrid: mode = "HYBRID · GUI + ALWAYS-ON"
+                default: mode = "MISSION V2"
+                }
                 self.addAssistantMessage("""
                 AUTONOMOUS MISSION V2
 
