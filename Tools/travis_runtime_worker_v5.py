@@ -17,8 +17,10 @@ try: import travis_headless_ai as headless_ai
 except Exception: headless_ai=None
 try: import travis_binance_testnet as testnet
 except Exception: testnet=None
-RUN=True;PID=os.getpid();START=time.time();GEN=str(uuid.uuid4());LEASE_TTL=45.0;SCHEMA=11;WORKER_VERSION=11
+RUN=True;PID=os.getpid();START=time.time();GEN=str(uuid.uuid4());LEASE_TTL=45.0;SCHEMA=12;WORKER_VERSION=12
 ALLOWED={"heartbeatProbe","systemWatcher","headlessMission","watcher","repositorySnapshot","fileInventory","httpWatcher","marketScan","tradingPaper","tradingTestnet","repositoryAudit","aiAnalysis","codeAuditAI"}
+class SafeStop(RuntimeError):
+ def __init__(self,reason):super().__init__(reason);self.reason=reason
 def stop(*_):
  global RUN;RUN=False
 signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
@@ -143,10 +145,11 @@ def pulse(jid,token,checkpoint=None):
   lease=j.get("lease") if isinstance(j.get("lease"),dict) else {};now=time.time();lease.update(renewedAt=now,expiresAt=now+LEASE_TTL);j["lease"]=lease
   if checkpoint is not None:j["checkpoint"]=checkpoint
  if not mutate_owned(jid,token,update):raise RuntimeError("Execution lease lost")
- with locked():
-  current=next((x for x in load_document()["jobs"] if str(x.get("id"))==jid),None)
- if not current or current.get("cancelRequested") or not current.get("enabled",False):raise RuntimeError("Execution cancelled")
- if killed():raise RuntimeError("Emergency kill switch active")
+ with locked():current=next((x for x in load_document()["jobs"] if str(x.get("id"))==jid),None)
+ if not current:raise SafeStop("deleted")
+ if current.get("deleteAfterRun"):raise SafeStop("delete-requested")
+ if current.get("cancelRequested") or not current.get("enabled",False):raise SafeStop("paused")
+ if killed():raise SafeStop("kill-switch")
 def safe_path(raw):
  p=Path(str(raw or "")).expanduser().resolve();home=Path.home().resolve()
  if p!=home and home not in p.parents:raise RuntimeError("Path outside user home scope")
@@ -268,23 +271,29 @@ def execute(jid,token,j):
  if kind=="watcher":return {"ok":True,"summary":"Local watcher cycle recorded"}
  if kind=="headlessMission":return execute_headless(jid,token,j)
  raise RuntimeError("Unsupported kind")
-def commit(jid,token,result=None,error=None):
+def commit(jid,token,result=None,error=None,safe_stop=None):
+ now=time.time()
  def update(j):
-  if j.get("deleteAfterRun"):j["_delete"]=True;return
+  if j.get("deleteAfterRun") or safe_stop=="delete-requested":j["_delete"]=True;return
+  if safe_stop:
+   if safe_stop=="paused":j.update(state="paused",enabled=False,cancelRequested=False,lease=None,lastError=None)
+   elif safe_stop=="kill-switch":j.update(state="scheduled",enabled=True,cancelRequested=False,lease=None,lastError=None,nextRunAt=now)
+   else:j.update(state="paused",enabled=False,cancelRequested=False,lease=None,lastError=None)
+   return
   if error:
-   failures=int(j.get("failures",0))+1;j.update(state="failed",failures=failures,lastError=error,nextRunAt=time.time()+min((2**failures)*5,300),lease=None)
+   failures=int(j.get("failures",0))+1;j.update(state="failed",failures=failures,lastError=error,nextRunAt=now+min((2**failures)*5,300),lease=None)
   else:
-   cadence=float(j.get("cadenceSeconds") or 0);j.update(lastResult=result,lastError=None,failures=0,lastCompletedAt=time.time(),missionState=None,checkpoint=None,lease=None,state="sleeping" if cadence>0 else "stopped",enabled=cadence>0,nextRunAt=time.time()+cadence if cadence>0 else None)
+   cadence=float(j.get("cadenceSeconds") or 0);j.update(lastResult=result,lastError=None,failures=0,lastCompletedAt=now,missionState=None,checkpoint=None,lease=None,state="sleeping" if cadence>0 else "stopped",enabled=cadence>0,nextRunAt=now+cadence if cadence>0 else None)
  if not mutate_owned(jid,token,update):return
  with locked():
   d=load_document();before=len(d["jobs"]);d["jobs"]=[x for x in d["jobs"] if not x.get("_delete")]
   if len(d["jobs"])!=before:save_document(d)
- journal("job_failed" if error else "job_completed",jobID=jid,runID=token,error=error,summary=(result or {}).get("summary"))
+ event="job_safe_stopped" if safe_stop else "job_failed" if error else "job_completed";journal(event,jobID=jid,runID=token,error=error,safeStop=safe_stop,summary=(result or {}).get("summary"))
 def public_jobs():
  with locked():jobs=load_document()["jobs"]
  out=[]
  for j in jobs[-75:]:
-  r=j.get("lastResult") if isinstance(j.get("lastResult"),dict) else {};m=j.get("missionState") if isinstance(j.get("missionState"),dict) else {};out.append({"id":j.get("id"),"title":j.get("title"),"kind":j.get("kind"),"state":j.get("state"),"nextRunAt":j.get("nextRunAt"),"failures":int(j.get("failures",0)),"recoveryCount":int(j.get("recoveryCount",0)),"lastError":j.get("lastError"),"enabled":bool(j.get("enabled",False)),"lastCompletedAt":j.get("lastCompletedAt"),"summary":r.get("summary"),"finalReport":r.get("finalReport"),"completedSteps":int(r.get("completedSteps",len(m.get("completedSteps") or []))),"totalSteps":int(r.get("totalSteps",len((j.get("payload") or {}).get("plan") or []))),"checkpoint":j.get("checkpoint"),"portfolio":r.get("portfolio"),"market":r.get("market"),"actions":r.get("actions"),"audit":r.get("audit")})
+  r=j.get("lastResult") if isinstance(j.get("lastResult"),dict) else {};m=j.get("missionState") if isinstance(j.get("missionState"),dict) else {};p=j.get("payload") if isinstance(j.get("payload"),dict) else {};out.append({"id":j.get("id"),"sourceTaskID":p.get("sourceTaskID"),"executionMode":p.get("executionMode"),"title":j.get("title"),"kind":j.get("kind"),"state":j.get("state"),"nextRunAt":j.get("nextRunAt"),"failures":int(j.get("failures",0)),"recoveryCount":int(j.get("recoveryCount",0)),"lastError":j.get("lastError"),"enabled":bool(j.get("enabled",False)),"lastCompletedAt":j.get("lastCompletedAt"),"summary":r.get("summary"),"finalReport":r.get("finalReport"),"completedSteps":int(r.get("completedSteps",len(m.get("completedSteps") or []))),"totalSteps":int(r.get("totalSteps",len(p.get("plan") or []))),"checkpoint":j.get("checkpoint"),"portfolio":r.get("portfolio"),"market":r.get("market"),"actions":r.get("actions"),"audit":r.get("audit")})
  return out
 def heartbeat():
  jobs=public_jobs();atomic(HB,{"version":WORKER_VERSION,"generation":GEN,"pid":PID,"startedAt":START,"lastBeatAt":time.time(),"killSwitch":killed(),"state":"safe-stop" if killed() else "ready","activeServiceJobs":sum(1 for j in jobs if j["enabled"] and j["state"] not in ("paused","stopped")),"failedServiceJobs":sum(1 for j in jobs if j["state"]=="failed"),"marketEngine":market is not None,"headlessAI":headless_ai is not None,"testnetAdapter":testnet is not None,"serviceJobs":jobs})
@@ -300,6 +309,7 @@ while RUN:
   if claim_data:
    jid,token,job=claim_data
    try:result=execute(jid,token,job);commit(jid,token,result=result)
+   except SafeStop as e:commit(jid,token,safe_stop=e.reason)
    except Exception as e:commit(jid,token,error=str(e))
   heartbeat()
  except Exception as e:journal("worker_loop_error",error=str(e))
