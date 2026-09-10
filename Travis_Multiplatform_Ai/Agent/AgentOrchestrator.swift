@@ -30,7 +30,8 @@ final class AgentOrchestrator {
             WebResearchCapability(),
             PublicAPICapability(),
             ManagedFilesCapability(),
-            DocumentProcessingCapability()
+            DocumentProcessingCapability(),
+            HeadlessReasoningCapability()
         ]
         for capability in builtIns {
             capabilities.append(capability)
@@ -83,10 +84,6 @@ final class AgentOrchestrator {
             return
         }
 
-        // Local-first execution boundary. If the request can be represented as
-        // a fully structured deterministic invocation, execute it before any
-        // semantic capability-selection LLM is consulted. Ambiguous requests
-        // deliberately return nil and continue through the existing AI path.
         if let invocation = DeterministicCommandRouter.shared.invocation(for: trimmed, capabilities: capabilities),
            let capability = capabilities.first(where: { $0.id == invocation.capabilityId }) {
             do {
