@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safe administration utility for TRAVIS headless service jobs."""
+"""Safe administration utility for TRAVIS Always-On service jobs."""
 import fcntl,json,os,sys,time,uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -9,17 +9,17 @@ def locked():
  with LOCK.open("a+") as f:fcntl.flock(f,fcntl.LOCK_EX);yield;fcntl.flock(f,fcntl.LOCK_UN)
 def load():
  try:
-  d=json.loads(JOBS.read_text());return d if isinstance(d,dict) and isinstance(d.get("jobs"),list) else {"version":5,"jobs":[]}
- except Exception:return {"version":5,"jobs":[]}
+  d=json.loads(JOBS.read_text());return d if isinstance(d,dict) and isinstance(d.get("jobs"),list) else {"version":9,"jobs":[]}
+ except Exception:return {"version":9,"jobs":[]}
 def save(d):
- d["version"]=5;t=JOBS.with_suffix(".json.tmp");t.write_text(json.dumps(d,sort_keys=True));os.replace(t,JOBS)
+ d["version"]=9;t=JOBS.with_suffix(".json.tmp");t.write_text(json.dumps(d,sort_keys=True));os.replace(t,JOBS)
 def find(d,key):
  m=[j for j in d["jobs"] if str(j.get("id","")).lower().startswith(key.lower())];return m[0] if len(m)==1 else None
 def new_job(title,kind,cadence,payload):
  now=time.time();return {"id":str(uuid.uuid4()),"title":title,"kind":kind,"state":"scheduled","createdAt":now,"updatedAt":now,"nextRunAt":now,"cadenceSeconds":cadence,"payload":payload,"enabled":True,"failures":0,"recoveryCount":0,"lastError":None,"lease":None,"checkpoint":None}
 def default_plan():return [{"order":1,"title":"Collect runtime identity","capability":"runtime.identity"},{"order":2,"title":"Collect system health","capability":"runtime.health"},{"order":3,"title":"Verify safety envelope","capability":"runtime.safety"},{"order":4,"title":"Synthesize final report","capability":"report.synthesize"}]
-def repo_plan(path):return [{"order":1,"title":"Collect runtime identity","capability":"runtime.identity"},{"order":2,"title":"Inspect repository","capability":"repository.snapshot","arguments":{"path":path}},{"order":3,"title":"Verify safety envelope","capability":"runtime.safety"},{"order":4,"title":"Synthesize final report","capability":"report.synthesize"}]
-def usage():raise SystemExit("usage: jobctl.py list|status|show <id>|journal [n]|add-probe|add-system-watcher [seconds]|add-http-watcher <url> [seconds]|add-repo-snapshot <path>|add-file-inventory <path>|add-headless-mission [goal]|add-repo-mission <path> [goal]|pause|resume|retry|delete <id-prefix>")
+def repo_plan(path):return [{"order":1,"title":"Collect runtime identity","capability":"runtime.identity"},{"order":2,"title":"Inspect repository","capability":"repository.snapshot","arguments":{"path":path}},{"order":3,"title":"Audit repository","capability":"repository.audit","arguments":{"path":path}},{"order":4,"title":"Verify safety envelope","capability":"runtime.safety"},{"order":5,"title":"Synthesize final report","capability":"report.synthesize"}]
+def usage():raise SystemExit("usage: jobctl.py list|status|show <id>|journal [n]|add-probe|add-system-watcher [seconds]|add-http-watcher <url> [seconds]|add-repo-snapshot <path>|add-repo-audit <path> [seconds]|add-file-inventory <path>|add-market-scan [seconds] [assetsCSV]|add-paper-trader [seconds] [assetsCSV]|add-headless-mission [goal]|add-repo-mission <path> [goal]|pause|resume|retry|delete <id-prefix>")
 args=sys.argv[1:];cmd=args[0] if args else "list"
 if cmd=="status":
  try:
@@ -40,7 +40,7 @@ with locked():
    done=len((j.get("missionState") or {}).get("completedSteps") or []);total=len((j.get("payload") or {}).get("plan") or []);progress=f" progress={done}/{total}" if total else "";alert=" ALERT" if bool((j.get("lastResult") or {}).get("alert",False)) else ""
    print(j.get("id"),j.get("state"),j.get("kind"),j.get("title"),"next=",j.get("nextRunAt"),"failures=",j.get("failures",0),progress,alert)
   sys.exit(0)
- if cmd=="add-probe":j=new_job("TRAVIS Runtime Probe","heartbeatProbe",None,"runtime self-test");d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
+ if cmd=="add-probe":j=new_job("TRAVIS Runtime Probe","heartbeatProbe",None,{"probe":"runtime"});d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
  if cmd=="add-system-watcher":
   cadence=max(10,int(args[1])) if len(args)>1 else 60;j=new_job("TRAVIS System Health Watcher","systemWatcher",cadence,{"minDiskFreePercent":10});d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
  if cmd=="add-http-watcher":
@@ -49,20 +49,27 @@ with locked():
  if cmd=="add-repo-snapshot":
   if len(args)<2:usage()
   j=new_job("Repository Snapshot","repositorySnapshot",None,{"path":args[1]});d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
+ if cmd=="add-repo-audit":
+  if len(args)<2:usage()
+  cadence=max(60,int(args[2])) if len(args)>2 else None;j=new_job("TRAVIS Repository Self-Audit","repositoryAudit",cadence,{"path":args[1]});d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
  if cmd=="add-file-inventory":
   if len(args)<2:usage()
   j=new_job("File Inventory","fileInventory",None,{"path":args[1]});d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
+ if cmd=="add-market-scan":
+  cadence=max(30,int(args[1])) if len(args)>1 else 300;assets=(args[2] if len(args)>2 else "BTC,ETH,SOL,XRP,BNB,ADA,DOGE,LINK").upper().split(",");j=new_job("TRAVIS Crypto Market Scan","marketScan",cadence,{"assets":assets,"interval":"1h"});d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
+ if cmd=="add-paper-trader":
+  cadence=max(60,int(args[1])) if len(args)>1 else 300;assets=(args[2] if len(args)>2 else "BTC,ETH,SOL,XRP,BNB,ADA,DOGE,LINK").upper().split(",");payload={"assets":assets,"interval":"1h","riskPercent":0.005,"maxOpenPositions":3,"maxDailyLoss":500,"maxPositionNotional":2000,"stopATRMultiple":1.8,"takeProfitATRMultiple":2.7,"minTrendScore":2.4,"startingBalance":10000};j=new_job("TRAVIS Autonomous PAPER Trader","tradingPaper",cadence,payload);d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
  if cmd=="add-headless-mission":
   goal=" ".join(args[1:]).strip() or "Generate a TRAVIS runtime health and safety report";j=new_job("Headless Runtime Mission","headlessMission",None,{"goal":goal,"plan":default_plan()});d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
  if cmd=="add-repo-mission":
   if len(args)<2:usage()
-  path=args[1];goal=" ".join(args[2:]).strip() or f"Inspect repository at {path} and generate a safe runtime report";j=new_job("Headless Repository Mission","headlessMission",None,{"goal":goal,"plan":repo_plan(path)});d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
+  path=args[1];goal=" ".join(args[2:]).strip() or f"Inspect and audit repository at {path}";j=new_job("Headless Repository Mission","headlessMission",None,{"goal":goal,"plan":repo_plan(path)});d["jobs"].append(j);save(d);print(j["id"]);sys.exit(0)
  if len(args)<2:usage()
  j=find(d,args[1])
  if not j:raise SystemExit("job not found or prefix ambiguous")
  if cmd=="show":print(json.dumps(j,indent=2,sort_keys=True));sys.exit(0)
- if cmd=="pause":j.update(enabled=False,state="paused",lease=None)
- elif cmd in ("resume","retry"):j.update(enabled=True,state="scheduled",nextRunAt=time.time(),lease=None,lastError=None)
+ if cmd=="pause":j.update(enabled=False,state="paused",cancelRequested=True)
+ elif cmd in ("resume","retry"):j.update(enabled=True,state="scheduled",nextRunAt=time.time(),lease=None,lastError=None,cancelRequested=False)
  elif cmd=="delete":d["jobs"].remove(j)
  else:usage()
  if cmd!="delete":j["updatedAt"]=time.time()
