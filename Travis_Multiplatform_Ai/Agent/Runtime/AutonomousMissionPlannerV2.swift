@@ -7,7 +7,20 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
 @MainActor final class AutonomousMissionPlannerV2{
  private let aiService:AIService;private let maxDecodeAttempts=2
  init(aiService:AIService = .shared){self.aiService=aiService}
- private static let headlessAliases:[String:String]=["repository_context":"repository.snapshot","runtime_health":"runtime.health","system_scan":"runtime.health","runtime_identity":"runtime.identity","runtime_safety":"runtime.safety","filesystem_inventory":"filesystem.inventory","http_probe":"network.http_probe","network_probe":"network.http_probe","report_synthesis":"report.synthesize","market_intelligence":"market.analyze","self_audit":"repository.audit"]
+ private static let headlessAliases:[String:String]=[
+  "repository_context":"repository.snapshot",
+  "runtime_health":"runtime.health",
+  "system_scan":"runtime.health",
+  "runtime_identity":"runtime.identity",
+  "runtime_safety":"runtime.safety",
+  "filesystem_inventory":"filesystem.inventory",
+  "http_probe":"network.http_probe",
+  "network_probe":"network.http_probe",
+  "report_synthesis":"report.synthesize",
+  "market_intelligence":"market.analyze",
+  "self_audit":"repository.audit",
+  "headless_reasoning":"ai.reason"
+ ]
  private static func headlessCatalog(_ caps:[AgentCapability])->String{caps.compactMap{c in guard let m=headlessAliases[c.id]else{return nil};return"- \(c.id) -> \(m) [HEADLESS-SAFE]"}.joined(separator:"\n")}
  func makePlan(goal:String,capabilities:[AgentCapability],priorKnowledge:String?=nil)async throws->TaskPlan{
   let g=goal.trimmingCharacters(in:.whitespacesAndNewlines);guard !g.isEmpty else{throw AutonomousMissionPlannerV2Error.emptyGoal};guard !capabilities.isEmpty else{throw AutonomousMissionPlannerV2Error.noCapabilities}
@@ -24,12 +37,14 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
   - canRunInBackground=true ONLY for capability IDs in the headless map. Otherwise false.
   - repository_context, filesystem_inventory, self_audit require explicit path=/absolute/path in instructions. Never invent a path.
   - http_probe/network_probe require explicit url=http(s)://... . Never invent a URL.
-  - market_intelligence requires explicit asset=TICKER and may include interval=1h. For a broad market report, create separate market_intelligence steps for requested/major assets rather than fabricating an unsupported opaque operation.
+  - market_intelligence requires explicit asset=TICKER and may include interval=1h. For a broad market report, create separate market_intelligence steps for requested/major assets.
+  - headless_reasoning is for read-only reasoning/synthesis over verified context. Put the full reasoning objective in instructions; it may depend on earlier evidence-producing steps and can remain background-safe.
   - Market analysis is probabilistic. Never claim guaranteed profit, certain prediction, or risk-free return.
   - Trading mutations are NOT headless-safe through this planner unless a dedicated deterministic worker trading contract is explicitly available. Do not disguise order execution as market analysis.
   - self_audit is read-only. Code/GUI mutation belongs to approval-gated coding/self-improvement capabilities and must remain foreground/approval-gated.
   - If foreground mutation is required, place it before any independent headless verification/report suffix when dependencies permit.
   - Never mark approval-required work as background-safe.
+  - Prefer evidence -> reasoning -> report chains. Reasoning must not fabricate missing evidence.
 
   GENERAL RULES:
   - Prefer 3-12 steps. Every step uses exactly one available capabilityId.
@@ -51,7 +66,7 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
   FAILURE:\n\(failure)
   CAPABILITIES:\n\(catalog)
   HEADLESS MAP:\n\(headless)
-  Choose a materially better route. Preserve the same headless argument rules: explicit path=/..., url=..., asset=TICKER; never invent them. Market analysis is probabilistic. Code/trading mutations remain approval-gated. Use exact IDs, 1-8 steps, maxAttempts 1...5. Output the normal JSON schema only.
+  Choose a materially better route. Preserve the same headless argument rules: explicit path=/..., url=..., asset=TICKER; never invent them. headless_reasoning may synthesize verified evidence but must not invent unavailable facts. Market analysis is probabilistic. Code/trading mutations remain approval-gated. Use exact IDs, 1-8 steps, maxAttempts 1...5. Output the normal JSON schema only.
   """
   let p=try materialize(draft:try await requestDraft(prompt:prompt),allowed:Set(capabilities.map(\.id)));return TaskPlan(version:task.plan.version+1,summary:"Recovery v\(task.plan.version+1): \(p.summary)",steps:p.steps)
  }
