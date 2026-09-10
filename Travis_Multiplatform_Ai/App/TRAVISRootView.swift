@@ -37,9 +37,13 @@ struct TRAVISRootView: View {
             var alwaysOn:TravisBridgeAlwaysOnSnapshot?=nil
 #if os(macOS)
             let coordinator=AlwaysOnRuntimeCoordinator.shared;coordinator.worker.refresh();let status=AlwaysOnRuntimeStatus.current(engine:coordinator.engine,monitor:coordinator.worker)
-            let workerJobs=coordinator.worker.serviceJobs.map{j in TravisBridgeAlwaysOnJobSnapshot(id:j.id,title:j.title,kind:j.kind,state:j.state,nextRunAt:j.nextRunAt.map{Date(timeIntervalSince1970:$0)},consecutiveFailures:j.failures,lastError:j.lastError,isEnabled:j.enabled,lastCompletedAt:j.lastCompletedAt.map{Date(timeIntervalSince1970:$0)},lastSummary:j.summary,finalReport:j.finalReport,completedSteps:j.completedSteps,totalSteps:j.totalSteps,checkpoint:j.checkpoint?.title,recoveryCount:j.recoveryCount)}
+            let workerJobs=coordinator.worker.serviceJobs.map{j -> TravisBridgeAlwaysOnJobSnapshot in
+                let leader=j.market?.assets?.first,portfolio=j.portfolio,action=j.actions?.last,audit=j.audit?.counts
+                let actionText=action.map{a in [a.action?.uppercased(),a.asset,a.pnl.map{String(format:"P&L %+.2f",$0)},a.reason].compactMap{$0}.joined(separator:" · ")}
+                return TravisBridgeAlwaysOnJobSnapshot(id:j.id,title:j.title,kind:j.kind,state:j.state,nextRunAt:j.nextRunAt.map{Date(timeIntervalSince1970:$0)},consecutiveFailures:j.failures,lastError:j.lastError,isEnabled:j.enabled,lastCompletedAt:j.lastCompletedAt.map{Date(timeIntervalSince1970:$0)},lastSummary:j.summary,finalReport:j.finalReport,completedSteps:j.completedSteps,totalSteps:j.totalSteps,checkpoint:j.checkpoint?.title,recoveryCount:j.recoveryCount,portfolioEquity:portfolio?.equity,portfolioCash:portfolio?.cash,dailyPnL:portfolio?.dailyRealizedPnL,realizedPnL:portfolio?.realizedPnL,unrealizedPnL:portfolio?.unrealizedPnL,winRate:portfolio?.winRate,profitFactor:portfolio?.profitFactor,drawdownPercent:portfolio?.drawdownPercent,openPositions:portfolio?.openPositions,closedTrades:portfolio?.closedTrades,marketLeader:leader?.asset,marketLeaderSignal:leader?.signal,marketLeaderConfidence:leader?.confidence,marketLeaderScore:leader?.trendScore,marketLeaderRSI:leader?.rsi14,marketLeader24h:leader?.change24hPercent,marketRegime:leader?.regime,recentTradeAction:actionText,auditHigh:audit?.high,auditMedium:audit?.medium,auditLow:audit?.low)
+            }
             let fallbackJobs=coordinator.engine.jobs.map{j in TravisBridgeAlwaysOnJobSnapshot(id:j.id,title:j.title,kind:j.kind.rawValue,state:j.state.rawValue,nextRunAt:j.nextRunAt,consecutiveFailures:j.consecutiveFailures,lastError:j.lastError,isEnabled:j.isEnabled)}
-            alwaysOn=TravisBridgeAlwaysOnSnapshot(workerHealthy:status.workerHealthy,workerPID:status.workerPID,killSwitchEnabled:status.killSwitchEnabled,jobsTotal:workerJobs.isEmpty ? status.jobsTotal:workerJobs.count,jobsActive:workerJobs.isEmpty ? status.jobsActive:workerJobs.filter{$0.isEnabled && $0.state != "paused" && $0.state != "stopped"}.count,jobsFailed:workerJobs.isEmpty ? status.jobsFailed:workerJobs.filter{$0.state=="failed"}.count,summary:status.summary,jobs:workerJobs.isEmpty ? fallbackJobs : workerJobs)
+            alwaysOn=TravisBridgeAlwaysOnSnapshot(workerHealthy:status.workerHealthy,workerPID:status.workerPID,killSwitchEnabled:status.killSwitchEnabled,jobsTotal:workerJobs.isEmpty ? status.jobsTotal:workerJobs.count,jobsActive:workerJobs.isEmpty ? status.jobsActive:workerJobs.filter{$0.isEnabled && $0.state != "paused" && $0.state != "stopped"}.count,jobsFailed:workerJobs.isEmpty ? status.jobsFailed:workerJobs.filter{$0.state=="failed"}.count,summary:status.summary,jobs:workerJobs.isEmpty ? fallbackJobs:workerJobs,workerGeneration:coordinator.worker.snapshot?.generation,heartbeatAgeSeconds:coordinator.worker.heartbeatAge)
 #endif
             return TravisBridgeStatusSnapshot(deviceName:ProcessInfo.processInfo.hostName,platform:platformName,isBusy:appState.isBusy,activeRuntimeTasks:all.filter{active.contains($0.status)}.count,lastSummary:appState.lastResponseSummary,fccAvailable:fccAvailableOnThisDevice,runtimeTasks:snapshots,alwaysOn:alwaysOn)
         }
@@ -78,12 +82,7 @@ struct TRAVISRootView: View {
 
 #if os(iOS)
 private enum TRAVISInlineMissionNotifier {
-    static func prepare() { UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in } }
-    static func notify(task: TravisBridgeTaskSnapshot) {
-        let failed = task.status.lowercased().contains("fail");let content = UNMutableNotificationContent();content.title = failed ? "TRAVIS Mission Needs Attention" : "TRAVIS Mission Ready";content.subtitle = task.title
-        let detail = failed ? (task.failureReason ?? task.checkpoint ?? "Mission failed.") : (task.finalReport ?? task.checkpoint ?? "Mission completed.");content.body = String(detail.prefix(180));content.sound = .default
-        let request = UNNotificationRequest(identifier: "travis-mission-\(task.id)-\(task.status)", content: content, trigger: nil);UNUserNotificationCenter.current().add(request)
-        DispatchQueue.main.async { UINotificationFeedbackGenerator().notificationOccurred(failed ? .error : .success) }
-    }
+    static func prepare(){UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound,.badge]){_,_ in}}
+    static func notify(task:TravisBridgeTaskSnapshot){let failed=task.status.lowercased().contains("fail"),content=UNMutableNotificationContent();content.title=failed ? "TRAVIS Mission Needs Attention":"TRAVIS Mission Ready";content.subtitle=task.title;let detail=failed ? (task.failureReason ?? task.checkpoint ?? "Mission failed."):(task.finalReport ?? task.checkpoint ?? "Mission completed.");content.body=String(detail.prefix(180));content.sound = .default;UNUserNotificationCenter.current().add(UNNotificationRequest(identifier:"travis-mission-\(task.id)-\(task.status)",content:content,trigger:nil));DispatchQueue.main.async{UINotificationFeedbackGenerator().notificationOccurred(failed ? .error:.success)}}
 }
 #endif
