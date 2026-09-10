@@ -18,7 +18,7 @@ launchctl enable "$DOMAIN/$LABEL";launchctl kickstart -k "$DOMAIN/$LABEL"
 for _ in {1..30};do
   if [[ -f "$HB" ]] && "$PYTHON" - "$HB" <<'PY' >/dev/null 2>&1
 import json,sys,time
-h=json.load(open(sys.argv[1]));assert int(h.get('version',0))>=11;assert time.time()-float(h.get('lastBeatAt',0))<8
+h=json.load(open(sys.argv[1]));assert int(h.get('version',0))>=12;assert time.time()-float(h.get('lastBeatAt',0))<8
 PY
   then break;fi
   sleep .25
@@ -33,7 +33,7 @@ if [[ ! -f "$HB" ]];then
 fi
 "$PYTHON" - "$HB" <<'PY'
 import json,sys,time
-h=json.load(open(sys.argv[1]));age=time.time()-float(h.get('lastBeatAt',0));assert int(h.get('version',0))>=11,("unexpected heartbeat version",h);assert age<8,("stale heartbeat",age,h)
+h=json.load(open(sys.argv[1]));age=time.time()-float(h.get('lastBeatAt',0));assert int(h.get('version',0))>=12,("unexpected heartbeat version",h);assert age<8,("stale heartbeat",age,h)
 print(f"Heartbeat v{h.get('version')} healthy; pid={h.get('pid')} age={age:.2f}s state={h.get('state')}")
 PY
-echo "TRAVIS Always-On intelligence worker v5 installed: $LABEL";echo "Interpreter: $PYTHON";echo "Runtime components: worker + market + headless AI + Binance testnet";launchctl print "$DOMAIN/$LABEL" | grep -E "state =|pid =" | head -4 || true
+echo "TRAVIS Always-On intelligence worker v5.1 installed: $LABEL";echo "Interpreter: $PYTHON";echo "Runtime components: worker + market + headless AI + Binance testnet";launchctl print "$DOMAIN/$LABEL" | grep -E "state =|pid =" | head -4 || true
