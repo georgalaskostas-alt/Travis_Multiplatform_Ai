@@ -103,7 +103,9 @@ final class CognitiveCoreV6 {
         let recent = decisions.suffix(250)
         let routes = Dictionary(grouping: recent, by: \.route).mapValues(\.count)
         let routeRows = Route.allCases.map { "\($0.rawValue): \(routes[$0, default: 0])" }.joined(separator: "\n")
-        let usage = AIUsageLedger.shared.summary(since: Calendar.current.startOfDay(for: Date()))
+        let start = Calendar.current.startOfDay(for: Date())
+        let usage = AIUsageLedger.shared.usageSummary(since: start)
+        let efficiency = AIUsageLedger.shared.efficiencySummary(since: start)
         return """
         TRAVIS COGNITIVE CORE V6
 
@@ -119,12 +121,12 @@ final class CognitiveCoreV6 {
         learning confidence: \(Int(learning.confidence * 100))%
 
         TODAY CLOUD USAGE
-        requests: \(usage.requests)
+        requests: \(efficiency.requests)
         input tokens: \(usage.inputTokens)
         cached input tokens: \(usage.cachedInputTokens)
         output tokens: \(usage.outputTokens)
         reasoning tokens: \(usage.reasoningTokens)
-        estimated spend: $\(String(format: "%.4f", usage.estimatedCostUSD))
+        estimated spend: $\(String(format: "%.4f", efficiency.costUSD))
 
         RECENT ROUTING
         \(routeRows)
