@@ -13,7 +13,7 @@ final class PresentationArtifactCapability: AgentCapability {
     private let aiService:AIService
     private let locations:FileLocationService
     init(aiService:AIService = .shared,locations:FileLocationService = .shared){self.aiService=aiService;self.locations=locations}
-    var descriptor:CapabilityDescriptor{CapabilityDescriptor(id:id,displayName:name,summary:capabilityDescription,domain:.files,keywords:keywords,policy:CapabilityExecutionPolicy(declaredEffects:[.readOnly,.localMutation],permissionKeys:["file_save"],requiresExplicitApproval:true,supportsBackgroundExecution:false,supportsProjectContext:true,timeoutSeconds:180,maxAttempts:2))}
+    var descriptor:CapabilityDescriptor{CapabilityDescriptor(id:id,displayName:name,summary:capabilityDescription,domain:.files,keywords:keywords,policy:CapabilityExecutionPolicy(declaredEffects:[.readOnly,.localMutation],permissionKeys:["file_save"],requiresExplicitApproval:true,supportsBackgroundExecution:false,supportsProjectContext:true,timeoutSeconds:180,maxAttempts:2),version:2,inputSchema:["request":"visualization/report goal grounded in available evidence","format":"optional svg|html|md"],outputKinds:[.chart,.dashboard,.document,.file],costClass:.cloudReasoning,deterministicWhenStructured:false,freshnessSensitive:false)}
     private struct Payload:Codable{var filename:String;var location:String?;var content:String;var format:String}
     func handle(command:String,recentHistory:[ChatMessage])async throws->CapabilityOutcome{
         status = .running;defer{status = .idle};let request=command.trimmingCharacters(in:.whitespacesAndNewlines);guard !request.isEmpty else{return .reply("Πες μου τι visualization/report θέλεις να δημιουργήσω.")}
@@ -23,13 +23,14 @@ final class PresentationArtifactCapability: AgentCapability {
         SECURITY: no JavaScript, no script tags, no event handlers, no external URLs/resources/fonts/images, no forms, no network calls. Inline CSS only in HTML. SVG must be standalone XML/SVG with no foreignObject or external references.
         DATA INTEGRITY: use only facts/numbers present in the request/context; do not invent measurements. If exact numeric data is absent, make an explanatory visual rather than fabricated chart values.
         ACCESSIBILITY: include meaningful title/labels; make SVG text readable.
+        ECONOMY: use the supplied evidence only; do not restate irrelevant conversation context.
         Return JSON only with keys format, filename, content. filename must be a simple safe filename ending .svg/.html/.md.
 
         REQUEST
         \(request)
 
-        RECENT CONTEXT
-        \(recentHistory.suffix(8).promptTranscript.prefix(24000))
+        RECENT RELEVANT CONTEXT
+        \(recentHistory.suffix(5).promptTranscript.prefix(14000))
         """
         let context=AIInvocationContext(workload:.complex,capabilityId:id,operation:"presentation.generate")
         let raw=try await aiService.generateText(prompt:prompt,maxTokens:9000,context:context)
