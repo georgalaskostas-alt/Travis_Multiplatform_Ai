@@ -29,17 +29,30 @@ enum HeadlessMissionReconciler {
                 else{step=runtime.task(id:taskID)?.plan.steps.first{$0.order==ws.order && (exportedIDs.isEmpty || exportedIDs.contains($0.id))}}
                 guard let step,step.status != .completed else{continue}
                 runtime.markStepCompleted(taskId:taskID,stepId:step.id,resultSummary:ws.result.map{String($0.compact.prefix(6000))} ?? "Completed by Always-On worker");changed += 1
+                // markStepCompleted normally promotes unfinished work to RUNNING. During a handoff the worker,
+                // not the GUI executor, owns all remaining exported steps. Re-pause intermediate reconciliation
+                // so no scheduler can dispatch the same mission concurrently.
+                if let current=runtime.task(id:taskID),current.status == .running {
+                    runtime.pause(taskId:taskID,reason:"ALWAYS-ON HEADLESS ownership · worker job \(job.id)")
+                }
             }
             let state=job.state.lowercased()
-            if state=="failed"{runtime.failTask(taskId:taskID,reason:"Always-On worker failed: \(job.lastError ?? "Unknown headless error")");changed += 1;continue}
-            if ["running","scheduled","sleeping"].contains(state){runtime.checkpoint(taskId:taskID,summary:"ALWAYS-ON HEADLESS · \(evidence.count)/\((job.payload?.plan ?? []).count) exported steps",nextAction:nil)}
+            if state=="failed"{
+                runtime.failTask(taskId:taskID,reason:"Always-On worker failed: \(job.lastError ?? "Unknown headless error")");changed += 1;continue
+            }
+            if ["running","scheduled","sleeping","paused"].contains(state){
+                runtime.checkpoint(taskId:taskID,summary:"ALWAYS-ON HEADLESS · \(evidence.count)/\((job.payload?.plan ?? []).count) exported steps · \(state.uppercased())",nextAction:nil)
+            }
             if state=="stopped",let result=job.lastResult{
                 if let report=result.finalReport,!report.isEmpty{runtime.checkpoint(taskId:taskID,summary:"HEADLESS FINAL REPORT\n\(String(report.prefix(8000)))",nextAction:nil)}
-                // Never mark unrelated foreground steps. Only exported step IDs are eligible for terminal reconciliation.
                 if let done=result.completedSteps,let total=result.totalSteps,done==total{
                     let current=runtime.task(id:taskID)
                     for step in current?.plan.steps ?? [] where exportedIDs.contains(step.id) && step.status != .completed && step.status != .skipped{
                         runtime.markStepCompleted(taskId:taskID,stepId:step.id,resultSummary:result.finalReport ?? result.summary ?? "Completed by Always-On worker");changed += 1
+                    }
+                    if let current=runtime.task(id:taskID),current.status == .running {
+                        // Defensive: a malformed partial export must never silently return execution authority to GUI.
+                        runtime.pause(taskId:taskID,reason:"Headless reconciliation completed exported subset; foreground ownership requires explicit resume")
                     }
                 }
             }
