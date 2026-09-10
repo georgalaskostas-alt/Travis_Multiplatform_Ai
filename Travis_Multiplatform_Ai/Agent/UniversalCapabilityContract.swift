@@ -21,6 +21,28 @@ enum CapabilityDomain: String, Codable, CaseIterable, Hashable {
     case other
 }
 
+enum CapabilityCostClass: String, Codable, CaseIterable, Hashable {
+    case zeroLocal
+    case localCompute
+    case networkFree
+    case cloudEconomy
+    case cloudReasoning
+    case externalMetered
+}
+
+enum CapabilityArtifactKind: String, Codable, CaseIterable, Hashable {
+    case text
+    case structuredData
+    case table
+    case chart
+    case image
+    case document
+    case presentation
+    case dashboard
+    case code
+    case file
+}
+
 struct CapabilityExecutionPolicy: Codable, Hashable {
     var declaredEffects: [CapabilityEffect]
     var permissionKeys: [String]
@@ -49,9 +71,7 @@ struct CapabilityExecutionPolicy: Codable, Hashable {
         self.maxAttempts = max(1, maxAttempts)
     }
 
-    func declares(_ effect: CapabilityEffect) -> Bool {
-        declaredEffects.contains(effect)
-    }
+    func declares(_ effect: CapabilityEffect) -> Bool { declaredEffects.contains(effect) }
 }
 
 struct CapabilityDescriptor: Identifiable, Codable, Hashable {
@@ -63,6 +83,14 @@ struct CapabilityDescriptor: Identifiable, Codable, Hashable {
     var policy: CapabilityExecutionPolicy
     var version: Int
 
+    /// Optional machine-readable contract used by Mission V6. Old capabilities
+    /// remain source-compatible and simply omit these fields.
+    var inputSchema: [String: String]?
+    var outputKinds: [CapabilityArtifactKind]?
+    var costClass: CapabilityCostClass?
+    var deterministicWhenStructured: Bool?
+    var freshnessSensitive: Bool?
+
     init(
         id: String,
         displayName: String,
@@ -70,7 +98,12 @@ struct CapabilityDescriptor: Identifiable, Codable, Hashable {
         domain: CapabilityDomain = .other,
         keywords: [String] = [],
         policy: CapabilityExecutionPolicy = CapabilityExecutionPolicy(),
-        version: Int = 1
+        version: Int = 1,
+        inputSchema: [String:String]? = nil,
+        outputKinds: [CapabilityArtifactKind]? = nil,
+        costClass: CapabilityCostClass? = nil,
+        deterministicWhenStructured: Bool? = nil,
+        freshnessSensitive: Bool? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -79,6 +112,11 @@ struct CapabilityDescriptor: Identifiable, Codable, Hashable {
         self.keywords = keywords
         self.policy = policy
         self.version = max(1, version)
+        self.inputSchema = inputSchema
+        self.outputKinds = outputKinds
+        self.costClass = costClass
+        self.deterministicWhenStructured = deterministicWhenStructured
+        self.freshnessSensitive = freshnessSensitive
     }
 }
 
@@ -105,15 +143,7 @@ struct CapabilityExecutionRecord: Identifiable, Codable, Hashable {
     var artifactPaths: [String]
     var errorDescription: String?
 
-    init(
-        id: UUID = UUID(),
-        capabilityId: String,
-        startedAt: Date = Date(),
-        status: Status = .started,
-        commandSummary: String,
-        taskId: UUID? = nil,
-        projectId: UUID? = nil
-    ) {
+    init(id: UUID = UUID(), capabilityId: String, startedAt: Date = Date(), status: Status = .started, commandSummary: String, taskId: UUID? = nil, projectId: UUID? = nil) {
         self.id = id
         self.capabilityId = capabilityId
         self.startedAt = startedAt
