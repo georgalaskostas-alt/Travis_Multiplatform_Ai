@@ -24,11 +24,9 @@ PY
 sleep 4
 "$PY" - <<'PY'
 import json,os,time
-root=os.path.expanduser('~/Library/Application Support/TRAVIS/AlwaysOn');d=json.load(open(root+'/service-jobs-v1.json'));jobs=[j for j in d['jobs'] if j['id'].startswith('bbbbbbbb')];assert len(jobs)==1,jobs;j=jobs[0];assert j['state']=='stopped',j;assert j['lastResult']['completedSteps']==3,j;assert j['payload']['sourceTaskID'].startswith('cccccccc'),j
-hb=json.load(open(root+'/worker-heartbeat.json'));assert hb['version']==12,hb;assert any(x.get('sourceTaskID','').startswith('cccccccc') for x in hb['serviceJobs']),hb;assert time.time()-hb['lastBeatAt']<4,hb;print('PASS: idempotency + source identity + heartbeat linkage')
+root=os.path.expanduser('~/Library/Application Support/TRAVIS/AlwaysOn');d=json.load(open(root+'/service-jobs-v1.json'));jobs=[j for j in d['jobs'] if str(j.get('id') or '').startswith('bbbbbbbb')];assert len(jobs)==1,jobs;j=jobs[0];assert j['state']=='stopped',j;assert j['lastResult']['completedSteps']==3,j;assert str(j['payload'].get('sourceTaskID') or '').startswith('cccccccc'),j
+hb=json.load(open(root+'/worker-heartbeat.json'));assert hb['version']==12,hb;assert any(str(x.get('sourceTaskID') or '').startswith('cccccccc') for x in hb.get('serviceJobs',[])),hb;assert time.time()-hb['lastBeatAt']<4,hb;print('PASS: idempotency + source identity + heartbeat linkage')
 PY
-# Deterministically seed owned running jobs and invoke worker functions without starting its main loop.
-# This validates that pause and kill-switch are safe-stop transitions, never generic failures.
 kill "$WPID" 2>/dev/null || true;wait "$WPID" 2>/dev/null || true;unset WPID
 "$PY" - <<'PY'
 import ast,json,os,time,uuid
@@ -36,12 +34,10 @@ path=os.path.expanduser('~/Library/Application Support/TRAVIS/Runtime/bin/travis
 root=os.path.expanduser('~/Library/Application Support/TRAVIS/AlwaysOn');jobs=root+'/service-jobs-v1.json';control=root+'/worker-control.json'
 def seed(jid,enabled,cancel,kill=False):
  token=str(uuid.uuid4());now=time.time();lease={'owner':'acceptance','generation':ns['GEN'],'token':token,'acquiredAt':now,'renewedAt':now,'expiresAt':now+45};j={'id':jid,'title':'safe stop acceptance','kind':'headlessMission','state':'running','createdAt':now,'updatedAt':now,'payload':{},'enabled':enabled,'cancelRequested':cancel,'failures':0,'recoveryCount':0,'lease':lease};json.dump({'version':12,'jobs':[j]},open(jobs,'w'));json.dump({'killSwitch':kill},open(control,'w'));return token
-# pause
 jid='11111111-1111-4111-8111-111111111111';token=seed(jid,False,True)
 try:ns['pulse'](jid,token);raise AssertionError('pause did not interrupt')
 except ns['SafeStop'] as e:assert e.reason=='paused';ns['commit'](jid,token,safe_stop=e.reason)
 j=json.load(open(jobs))['jobs'][0];assert j['state']=='paused' and j['failures']==0 and j.get('lease') is None,j
-# kill switch
 jid='22222222-2222-4222-8222-222222222222';token=seed(jid,True,False,True)
 try:ns['pulse'](jid,token);raise AssertionError('kill switch did not interrupt')
 except ns['SafeStop'] as e:assert e.reason=='kill-switch';ns['commit'](jid,token,safe_stop=e.reason)
