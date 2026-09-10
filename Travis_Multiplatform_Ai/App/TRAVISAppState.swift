@@ -59,6 +59,8 @@ final class TRAVISAppState {
         self.taskRuntime = taskRuntime
         self.taskExecutor = taskExecutor
 
+        let marketIntelligenceCapability = MarketIntelligenceCapability()
+        let selfAuditCapability = SelfAuditCapability()
         let cryptoTradingCapability = CryptoTradingCapability()
         let filesystemOperationsCapability = FilesystemOperationsCapability()
         let advancedFilesystemCapability = AdvancedFilesystemCapability()
@@ -79,6 +81,8 @@ final class TRAVISAppState {
         let fccAssistantCapability = FCCAssistantCapability()
 
         orchestrator.register(TextTaskCapability())
+        orchestrator.register(marketIntelligenceCapability)
+        orchestrator.register(selfAuditCapability)
         orchestrator.register(cryptoTradingCapability)
         orchestrator.register(SelfImprovementCapability())
         orchestrator.register(filesystemOperationsCapability)
