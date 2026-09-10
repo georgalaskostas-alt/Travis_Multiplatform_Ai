@@ -8,7 +8,7 @@ import Foundation
     static func analyze(task:AgentTask)->Analysis {
         let remaining=task.plan.steps.filter{$0.status != .completed && $0.status != .skipped};var headless=Set<UUID>();var foreground=Set<UUID>()
         for step in remaining {
-            let mapped=mappedCapability(step.capabilityId);let args=mapped.flatMap{arguments(for:step,capability:$0)};let needsArgs=mapped.map{["repository.snapshot","filesystem.inventory","network.http_probe","market.analyze","repository.audit"].contains($0)} ?? false
+            let mapped=mappedCapability(step.capabilityId);let args=mapped.flatMap{arguments(for:step,capability:$0)};let needsArgs=mapped.map{["repository.snapshot","filesystem.inventory","network.http_probe","market.analyze","repository.audit","ai.reason"].contains($0)} ?? false
             let safe=step.canRunInBackground && !step.requiresApproval && mapped != nil && (!needsArgs || args != nil)
             if safe { headless.insert(step.id) } else { foreground.insert(step.id) }
         }
@@ -25,7 +25,7 @@ import Foundation
         for step in selected {
             guard let cap=mappedCapability(step.capabilityId)else{throw HandoffError.unsupportedStep(step.capabilityId ?? step.title)}
             let args=arguments(for:step,capability:cap)
-            if ["repository.snapshot","filesystem.inventory","network.http_probe","market.analyze","repository.audit"].contains(cap),args==nil{throw HandoffError.missingArguments(step.title)}
+            if ["repository.snapshot","filesystem.inventory","network.http_probe","market.analyze","repository.audit","ai.reason"].contains(cap),args==nil{throw HandoffError.missingArguments(step.title)}
             var item:[String:Any]=["order":step.order,"sourceStepID":step.id.uuidString,"title":step.title,"capability":cap]
             if let args{item["arguments"]=args};plan.append(item)
         }
@@ -34,12 +34,13 @@ import Foundation
         do{try monitor.enqueueCreateJob(id:id,title:"Mission V2 · \(task.title)",kind:"headlessMission",payload:payload)}catch{throw HandoffError.writeFailed(error.localizedDescription)}
         return .init(jobID:id,exportedSteps:plan.count,mode:mode)
     }
-    private static func mappedCapability(_ id:String?)->String?{switch id{case "repository_context":return "repository.snapshot";case "runtime_health","system_scan":return "runtime.health";case "runtime_identity":return "runtime.identity";case "runtime_safety":return "runtime.safety";case "filesystem_inventory":return "filesystem.inventory";case "http_probe","network_probe":return "network.http_probe";case "report_synthesis":return "report.synthesize";case "market_intelligence":return "market.analyze";case "self_audit":return "repository.audit";default:return nil}}
+    private static func mappedCapability(_ id:String?)->String?{switch id{case "repository_context":return "repository.snapshot";case "runtime_health","system_scan":return "runtime.health";case "runtime_identity":return "runtime.identity";case "runtime_safety":return "runtime.safety";case "filesystem_inventory":return "filesystem.inventory";case "http_probe","network_probe":return "network.http_probe";case "report_synthesis":return "report.synthesize";case "market_intelligence":return "market.analyze";case "self_audit":return "repository.audit";case "headless_reasoning":return "ai.reason";default:return nil}}
     private static func arguments(for step:PlanStep,capability:String)->[String:String]?{
-        let text=step.instructions
+        let text=step.instructions.trimmingCharacters(in:.whitespacesAndNewlines)
         if capability=="repository.snapshot" || capability=="filesystem.inventory" || capability=="repository.audit"{guard let p=firstValue(prefixes:["path=","repoPath=","rootPath="],in:text)else{return nil};return ["path":p]}
         if capability=="network.http_probe"{guard let u=firstValue(prefixes:["url="],in:text)else{return nil};return ["url":u]}
         if capability=="market.analyze"{guard let asset=firstValue(prefixes:["asset="],in:text)else{return nil};var r=["asset":asset];if let interval=firstValue(prefixes:["interval="],in:text){r["interval"]=interval};return r}
+        if capability=="ai.reason"{guard !text.isEmpty else{return nil};return ["prompt":text,"maxTokens":"2200"]}
         return nil
     }
     private static func firstValue(prefixes:[String],in text:String)->String?{for token in text.split(whereSeparator:{$0.isWhitespace || $0=="," || $0==";"}){let value=String(token);for prefix in prefixes where value.hasPrefix(prefix){let r=String(value.dropFirst(prefix.count)).trimmingCharacters(in:CharacterSet(charactersIn:"\"'"));if !r.isEmpty{return r}}};return nil}
