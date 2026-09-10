@@ -21,13 +21,23 @@ final class AlwaysOnWorkerMonitor {
     func sendServiceJobCommand(action:String,jobID:UUID)throws{
         let normalized=action.lowercased(),allowed:Set<String>=["pause","resume","retry","delete"];guard allowed.contains(normalized) else{throw WorkerCommandError.unsupported}
         let command:[String:Any]=["action":normalized,"jobID":jobID.uuidString,"nonce":UUID().uuidString,"createdAt":Date().timeIntervalSince1970]
+        try enqueue(command)
+        // Compatibility transport for pre-v8 workers only. New workers consume the queue.
+        if (snapshot?.version ?? 0) < 8 { let legacyData=try JSONSerialization.data(withJSONObject:command,options:[.sortedKeys]);try legacyData.write(to:legacyCommandURL,options:.atomic) }
+    }
+    /// Creates a worker-owned job without ever decoding or rewriting service-jobs-v1.json from Swift.
+    /// Job validation, locking and duplicate protection are owned by the worker process.
+    func enqueueCreateJob(id:UUID,title:String,kind:String,payload:[String:Any],cadenceSeconds:Double?=nil)throws{
+        var job:[String:Any]=["id":id.uuidString,"title":title,"kind":kind,"state":"scheduled","createdAt":Date().timeIntervalSince1970,"updatedAt":Date().timeIntervalSince1970,"nextRunAt":Date().timeIntervalSince1970,"payload":payload,"enabled":true,"failures":0,"recoveryCount":0]
+        if let cadenceSeconds { job["cadenceSeconds"]=cadenceSeconds }
+        try enqueue(["action":"create","job":job,"nonce":UUID().uuidString,"createdAt":Date().timeIntervalSince1970])
+    }
+    private func enqueue(_ command:[String:Any])throws{
         var queue:[[String:Any]]=[]
         if let data=try? Data(contentsOf:commandQueueURL),let object=try? JSONSerialization.jsonObject(with:data) as? [String:Any],let existing=object["commands"] as? [[String:Any]]{queue=existing}
-        queue.append(command);if queue.count>200{queue=Array(queue.suffix(200))}
-        let queueData=try JSONSerialization.data(withJSONObject:["version":1,"commands":queue],options:[.sortedKeys]);try queueData.write(to:commandQueueURL,options:.atomic)
-        // Worker v5 consumes this single-slot transport. Keep it until worker v6 queue consumption is installed.
-        let legacyData=try JSONSerialization.data(withJSONObject:command,options:[.sortedKeys]);try legacyData.write(to:legacyCommandURL,options:.atomic)
+        queue.append(command);if queue.count>500{throw WorkerCommandError.queueFull}
+        let data=try JSONSerialization.data(withJSONObject:["version":2,"commands":queue],options:[.sortedKeys]);try data.write(to:commandQueueURL,options:.atomic)
     }
     func resolveServiceJob(_ raw:String)->ServiceJob?{let key=raw.trimmingCharacters(in:.whitespacesAndNewlines).lowercased();if let id=UUID(uuidString:key){return serviceJobs.first{$0.id==id}};let matches=serviceJobs.filter{$0.id.uuidString.lowercased().hasPrefix(key)};return matches.count==1 ? matches[0]:nil}
-    enum WorkerCommandError:LocalizedError{case unsupported;var errorDescription:String?{"Unsupported worker command"}}
+    enum WorkerCommandError:LocalizedError{case unsupported,queueFull;var errorDescription:String?{switch self{case .unsupported:return "Unsupported worker command";case .queueFull:return "Worker command queue is full"}}}
 }
