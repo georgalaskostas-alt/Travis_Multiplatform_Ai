@@ -24,8 +24,15 @@ extension TRAVISAppState {
         return matches[0].id
     }
 
+    private func headlessJobID(for taskID: UUID) -> UUID? { AlwaysOnWorkerMonitor.shared.serviceJobID(forSourceTaskID: taskID) }
+
     private func remotePauseTask(_ id: UUID) {
         guard let task = taskRuntime.task(id: id) else { lastResponseSummary = "Task not found"; return }
+        if let workerID = headlessJobID(for: id) {
+            do { try AlwaysOnWorkerMonitor.shared.sendServiceJobCommand(action: "pause", jobID: workerID); if task.status == .running { taskRuntime.pause(taskId: id, reason: "Paused with Always-On worker from iPhone") }; lastResponseSummary = "Pausing headless mission \(String(task.id.uuidString.prefix(8)))" }
+            catch { lastResponseSummary = "Headless pause failed: \(error.localizedDescription)" }
+            return
+        }
         if taskExecutor.isTaskExecuting(id) { _ = taskExecutor.requestCancellation(taskId: id, reason: "Paused from iPhone") }
         else { taskRuntime.pause(taskId: id, reason: "Paused from iPhone") }
         lastResponseSummary = "Paused \(String(task.id.uuidString.prefix(8))) — \(task.title)"
@@ -33,6 +40,11 @@ extension TRAVISAppState {
 
     private func remoteResumeTask(_ id: UUID) {
         guard let task = taskRuntime.task(id: id) else { lastResponseSummary = "Task not found"; return }
+        if let workerID = headlessJobID(for: id) {
+            do { try AlwaysOnWorkerMonitor.shared.sendServiceJobCommand(action: "resume", jobID: workerID); lastResponseSummary = "Resuming Always-On worker mission \(String(task.id.uuidString.prefix(8)))" }
+            catch { lastResponseSummary = "Headless resume failed: \(error.localizedDescription)" }
+            return
+        }
         guard task.status == .paused else { lastResponseSummary = "Task \(String(id.uuidString.prefix(8))) is not paused"; return }
         taskRuntime.resume(taskId: id)
         lastResponseSummary = "Resuming \(String(id.uuidString.prefix(8))) — \(task.title)"
@@ -41,6 +53,11 @@ extension TRAVISAppState {
 
     private func remoteRetryTask(_ id: UUID) {
         guard let task = taskRuntime.task(id: id) else { lastResponseSummary = "Task not found"; return }
+        if let workerID = headlessJobID(for: id) {
+            do { try AlwaysOnWorkerMonitor.shared.sendServiceJobCommand(action: "retry", jobID: workerID); lastResponseSummary = "Retrying Always-On worker mission \(String(task.id.uuidString.prefix(8)))" }
+            catch { lastResponseSummary = "Headless retry failed: \(error.localizedDescription)" }
+            return
+        }
         guard task.status == .failed else { lastResponseSummary = "Task \(String(id.uuidString.prefix(8))) is not failed"; return }
         guard taskRuntime.prepareRetry(taskId: id) else { lastResponseSummary = "No failed step is available to retry"; return }
         lastResponseSummary = "Retrying \(String(id.uuidString.prefix(8))) — \(task.title)"
@@ -49,6 +66,10 @@ extension TRAVISAppState {
 
     private func remoteCancelTask(_ id: UUID) {
         guard taskRuntime.task(id: id) != nil else { lastResponseSummary = "Task not found"; return }
+        if let workerID = headlessJobID(for: id) {
+            do { try AlwaysOnWorkerMonitor.shared.sendServiceJobCommand(action: "delete", jobID: workerID) }
+            catch { lastResponseSummary = "Headless cancel failed: \(error.localizedDescription)"; return }
+        }
         cancelAutonomousTask(reference: id.uuidString)
         lastResponseSummary = "Task cancelled from iPhone"
     }
@@ -56,6 +77,7 @@ extension TRAVISAppState {
     private func remoteDeleteTask(_ id: UUID) {
         guard let task = taskRuntime.task(id: id) else { lastResponseSummary = "Task already removed"; return }
         do {
+            if let workerID = headlessJobID(for: id) { try? AlwaysOnWorkerMonitor.shared.sendServiceJobCommand(action: "delete", jobID: workerID) }
             let activeIDs = activeRuntimeTaskIDs
             let deleted = try AgentTaskStore.shared.deleteTask(id: id, activeTaskIDs: activeIDs)
             taskRuntime.reloadFromDisk()
