@@ -19,8 +19,17 @@ enum HeadlessMissionReconciler {
         guard let doc=load()else{return 0};var changed=0
         for job in doc.jobs where job.kind=="headlessMission"{
             guard let raw=job.payload?.sourceTaskID,let taskID=UUID(uuidString:raw),let original=runtime.task(id:taskID)else{continue}
-            guard ![AgentTaskStatus.completed,.cancelled,.failed].contains(original.status)else{continue}
+            guard ![AgentTaskStatus.completed,.cancelled].contains(original.status)else{continue}
             if let v=job.payload?.sourcePlanVersion,v != original.plan.version{continue}
+            let state=job.state.lowercased()
+            if original.status == .failed {
+                let workerFailure = original.failureReason?.hasPrefix("Always-On worker failed:") == true
+                guard workerFailure else{continue}
+                if state == "failed" { continue }
+                // A worker retry owns execution. Reattach the exact same plan to clear terminal GUI failure
+                // without replanning, then immediately return it to paused/headless ownership.
+                runtime.attachPlan(taskId:taskID,plan:original.plan);runtime.start(taskId:taskID);runtime.pause(taskId:taskID,reason:"ALWAYS-ON HEADLESS retry ownership · worker job \(job.id)");changed += 1
+            }
             let exportedIDs=Set((job.payload?.plan ?? []).compactMap{$0.sourceStepID}.compactMap(UUID.init(uuidString:)))
             let evidence=(job.lastResult?.steps ?? job.missionState?.completedSteps ?? [])
             for ws in evidence where (ws.status ?? "completed")=="completed"{
@@ -29,31 +38,16 @@ enum HeadlessMissionReconciler {
                 else{step=runtime.task(id:taskID)?.plan.steps.first{$0.order==ws.order && (exportedIDs.isEmpty || exportedIDs.contains($0.id))}}
                 guard let step,step.status != .completed else{continue}
                 runtime.markStepCompleted(taskId:taskID,stepId:step.id,resultSummary:ws.result.map{String($0.compact.prefix(6000))} ?? "Completed by Always-On worker");changed += 1
-                // markStepCompleted normally promotes unfinished work to RUNNING. During a handoff the worker,
-                // not the GUI executor, owns all remaining exported steps. Re-pause intermediate reconciliation
-                // so no scheduler can dispatch the same mission concurrently.
-                if let current=runtime.task(id:taskID),current.status == .running {
-                    runtime.pause(taskId:taskID,reason:"ALWAYS-ON HEADLESS ownership · worker job \(job.id)")
-                }
+                if let current=runtime.task(id:taskID),current.status == .running { runtime.pause(taskId:taskID,reason:"ALWAYS-ON HEADLESS ownership · worker job \(job.id)") }
             }
-            let state=job.state.lowercased()
-            if state=="failed"{
-                runtime.failTask(taskId:taskID,reason:"Always-On worker failed: \(job.lastError ?? "Unknown headless error")");changed += 1;continue
-            }
-            if ["running","scheduled","sleeping","paused"].contains(state){
-                runtime.checkpoint(taskId:taskID,summary:"ALWAYS-ON HEADLESS · \(evidence.count)/\((job.payload?.plan ?? []).count) exported steps · \(state.uppercased())",nextAction:nil)
-            }
+            if state=="failed"{runtime.failTask(taskId:taskID,reason:"Always-On worker failed: \(job.lastError ?? "Unknown headless error")");changed += 1;continue}
+            if ["running","scheduled","sleeping","paused"].contains(state){runtime.checkpoint(taskId:taskID,summary:"ALWAYS-ON HEADLESS · \(evidence.count)/\((job.payload?.plan ?? []).count) exported steps · \(state.uppercased())",nextAction:nil)}
             if state=="stopped",let result=job.lastResult{
                 if let report=result.finalReport,!report.isEmpty{runtime.checkpoint(taskId:taskID,summary:"HEADLESS FINAL REPORT\n\(String(report.prefix(8000)))",nextAction:nil)}
                 if let done=result.completedSteps,let total=result.totalSteps,done==total{
                     let current=runtime.task(id:taskID)
-                    for step in current?.plan.steps ?? [] where exportedIDs.contains(step.id) && step.status != .completed && step.status != .skipped{
-                        runtime.markStepCompleted(taskId:taskID,stepId:step.id,resultSummary:result.finalReport ?? result.summary ?? "Completed by Always-On worker");changed += 1
-                    }
-                    if let current=runtime.task(id:taskID),current.status == .running {
-                        // Defensive: a malformed partial export must never silently return execution authority to GUI.
-                        runtime.pause(taskId:taskID,reason:"Headless reconciliation completed exported subset; foreground ownership requires explicit resume")
-                    }
+                    for step in current?.plan.steps ?? [] where exportedIDs.contains(step.id) && step.status != .completed && step.status != .skipped{runtime.markStepCompleted(taskId:taskID,stepId:step.id,resultSummary:result.finalReport ?? result.summary ?? "Completed by Always-On worker");changed += 1}
+                    if let current=runtime.task(id:taskID),current.status == .running{runtime.pause(taskId:taskID,reason:"Headless reconciliation completed exported subset; foreground ownership requires explicit resume")}
                 }
             }
         }
