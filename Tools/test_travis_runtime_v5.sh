@@ -29,8 +29,9 @@ hb=json.load(open(root+'/worker-heartbeat.json'));assert hb['version']==12,hb;as
 PY
 kill "$WPID" 2>/dev/null || true;wait "$WPID" 2>/dev/null || true;unset WPID
 "$PY" - <<'PY'
-import ast,json,os,time,uuid
-path=os.path.expanduser('~/Library/Application Support/TRAVIS/Runtime/bin/travis_runtime_worker.py');src=open(path).read();tree=ast.parse(src);cut=next(n.lineno for n in tree.body if isinstance(n,ast.Try));ns={'__name__':'travis_worker_acceptance','__file__':path};exec(compile('\n'.join(src.splitlines()[:cut-1]),path,'exec'),ns)
+import json,os,time,uuid
+path=os.path.expanduser('~/Library/Application Support/TRAVIS/Runtime/bin/travis_runtime_worker.py');src=open(path).read();marker='try:\n journal("worker_started");recover();heartbeat()';assert marker in src,'worker startup marker missing';prefix=src.split(marker,1)[0];ns={'__name__':'travis_worker_acceptance','__file__':path};exec(compile(prefix,path,'exec'),ns)
+required=('GEN','SafeStop','pulse','commit');missing=[name for name in required if name not in ns];assert not missing,('worker test harness missing symbols',missing)
 root=os.path.expanduser('~/Library/Application Support/TRAVIS/AlwaysOn');jobs=root+'/service-jobs-v1.json';control=root+'/worker-control.json'
 def seed(jid,enabled,cancel,kill=False):
  token=str(uuid.uuid4());now=time.time();lease={'owner':'acceptance','generation':ns['GEN'],'token':token,'acquiredAt':now,'renewedAt':now,'expiresAt':now+45};j={'id':jid,'title':'safe stop acceptance','kind':'headlessMission','state':'running','createdAt':now,'updatedAt':now,'payload':{},'enabled':enabled,'cancelRequested':cancel,'failures':0,'recoveryCount':0,'lease':lease};json.dump({'version':12,'jobs':[j]},open(jobs,'w'));json.dump({'killSwitch':kill},open(control,'w'));return token
