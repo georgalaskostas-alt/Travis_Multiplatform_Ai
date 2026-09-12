@@ -40,6 +40,8 @@ final class SelfAuditCapability: AgentCapability, DeterministicInvocableCapabili
         guard invocation.operation == "audit_repository", let raw = invocation.arguments["path"] else {
             return .reply("Unsupported self-audit operation.")
         }
+
+        #if os(macOS)
         status = .running
         defer { status = .idle }
         let root = URL(fileURLWithPath: raw).standardizedFileURL
@@ -49,8 +51,12 @@ final class SelfAuditCapability: AgentCapability, DeterministicInvocableCapabili
         }
         let report = try scan(root: root)
         return .reply(report)
+        #else
+        return .reply("TRAVIS repository self-audit is executed by the macOS runtime. The iPhone companion can request and display the result, but does not scan the Mac filesystem directly.")
+        #endif
     }
 
+    #if os(macOS)
     private func scan(root: URL) throws -> String {
         let fm = FileManager.default
         guard fm.fileExists(atPath: root.path) else { throw CocoaError(.fileNoSuchFile) }
@@ -88,6 +94,8 @@ final class SelfAuditCapability: AgentCapability, DeterministicInvocableCapabili
     }
 
     private func severity(_ rank: Int) -> String { rank == 3 ? "HIGH" : rank == 2 ? "MEDIUM" : "LOW" }
+    #endif
+
     private func explicitPath(in text: String) -> String? {
         for token in text.split(whereSeparator: { $0.isWhitespace || $0 == ";" }) {
             let s = String(token)
