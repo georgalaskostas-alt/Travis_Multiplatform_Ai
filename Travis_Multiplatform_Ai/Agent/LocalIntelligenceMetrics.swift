@@ -11,6 +11,7 @@ final class LocalIntelligenceMetrics {
         case deterministicSchedule
         case deterministicFilesystemParse
         case deterministicSkillPlan
+        case deterministicCapabilityRoute
         case structuredCapabilityExecution
         case modelFreeAutonomousExecution
         case learnedCapabilityRoute
@@ -44,6 +45,7 @@ final class LocalIntelligenceMetrics {
         count(.learnedVerification)
         + count(.learnedMissionPlan)
         + count(.deterministicSkillPlan)
+        + count(.deterministicCapabilityRoute)
         + count(.learnedCapabilityRoute)
         + count(.modelFreeAutonomousExecution)
     }
