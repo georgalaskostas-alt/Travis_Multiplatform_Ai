@@ -22,7 +22,27 @@ struct iOSAppShell: View {
             }.toolbar(.hidden, for: .navigationBar).safeAreaInset(edge: .bottom) { bottomDock }
         }.preferredColorScheme(.dark)
         .task { bridge.start(); while !Task.isCancelled { if bridge.isConnected { bridge.requestStatus() }; try? await Task.sleep(for: .seconds(3)) } }
-        .sheet(item: $activeSheet) { sheet in NavigationStack { sheetContent(sheet).toolbar { ToolbarItem(placement: .topBarTrailing) { Button { activeSheet = nil } label: { Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(cyan) }.accessibilityLabel("Close") } } }.preferredColorScheme(.dark) }
+        .sheet(item: $activeSheet) { sheet in
+            NavigationStack {
+                ZStack(alignment: .topTrailing) {
+                    sheetContent(sheet)
+                    Button { activeSheet = nil } label: {
+                        Label("CLOSE", systemImage: "xmark.circle.fill")
+                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                            .foregroundStyle(cyan)
+                            .padding(.horizontal, 11).padding(.vertical, 8)
+                            .background(Capsule().fill(Color.black.opacity(0.88)))
+                            .overlay(Capsule().stroke(cyan.opacity(0.55), lineWidth: 1))
+                            .shadow(color: cyan.opacity(0.22), radius: 7)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close")
+                    .padding(.top, 8).padding(.trailing, 12)
+                    .zIndex(100)
+                }
+                .toolbar(.hidden, for: .navigationBar)
+            }.preferredColorScheme(.dark)
+        }
     }
 
     private var premiumBackground: some View { ZStack { navy.ignoresSafeArea(); LinearGradient(colors: [.black, navy, panel.opacity(0.84), navy], startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea(); RadialGradient(colors: [cyan.opacity(0.12), .clear], center: .top, startRadius: 0, endRadius: 420).ignoresSafeArea() } }
