@@ -9,10 +9,16 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
  init(aiService:AIService = .shared){self.aiService=aiService}
  private static let headlessAliases:[String:String]=["repository_context":"repository.snapshot","runtime_health":"runtime.health","system_scan":"runtime.health","runtime_identity":"runtime.identity","runtime_safety":"runtime.safety","filesystem_inventory":"filesystem.inventory","http_probe":"network.http_probe","network_probe":"network.http_probe","report_synthesis":"report.synthesize","market_intelligence":"market.analyze","self_audit":"repository.audit","headless_reasoning":"ai.reason"]
  private static func headlessCatalog(_ caps:[AgentCapability])->String{caps.compactMap{c in guard let m=headlessAliases[c.id]else{return nil};return"- \(c.id) -> \(m) [HEADLESS-SAFE]"}.joined(separator:"\n")}
+
+ /// Hard deterministic routes are authoritative contracts. They must outrank learned plans so stale memory can never override current safety/tool semantics.
+ func deterministicPlanIfAvailable(goal:String,capabilities:[AgentCapability])->TaskPlan?{
+  deterministicRuntimeDiagnosticsPlan(goal:goal,available:Set(capabilities.map(\.id)))
+ }
+
  func makePlan(goal:String,capabilities:[AgentCapability],priorKnowledge:String?=nil)async throws->TaskPlan{
   let g=goal.trimmingCharacters(in:.whitespacesAndNewlines);guard !g.isEmpty else{throw AutonomousMissionPlannerV2Error.emptyGoal};guard !capabilities.isEmpty else{throw AutonomousMissionPlannerV2Error.noCapabilities}
   let registry=CapabilityRegistry(capabilities:capabilities)
-  if let localPlan=deterministicRuntimeDiagnosticsPlan(goal:g,available:Set(capabilities.map(\.id))){LocalIntelligenceMetrics.shared.record(.deterministicCapabilityRoute);return localPlan}
+  if let localPlan=deterministicPlanIfAvailable(goal:g,capabilities:capabilities){return localPlan}
   let catalog=registry.promptCatalog(),headless=Self.headlessCatalog(capabilities),knowledge=priorKnowledge?.trimmingCharacters(in:.whitespacesAndNewlines)
   let prompt="""
   You are the TRAVIS Cognitive Mission Planner V2 running under the V6 economy policy. Build the smallest reliable executable end-to-end plan.
@@ -20,14 +26,12 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
   UNIVERSAL CAPABILITY REGISTRY:\n\(catalog)
   HEADLESS ALWAYS-ON EXPORT MAP:\n\(headless.isEmpty ? "None":headless)
   PRIOR VERIFIED KNOWLEDGE:\n\(knowledge?.isEmpty == false ? String(knowledge!.prefix(9000)):"None")
-
   INTELLIGENCE ECONOMY:
   - Every unnecessary cloud call is a defect. Prefer deterministic/local capabilities and verified prior knowledge.
   - Do not add an AI reasoning step when a deterministic capability can produce and verify the answer.
   - Use headless_reasoning only when evidence genuinely requires synthesis; never as ceremony.
   - Produce the minimum sufficient plan, but never omit verification for mutation, money, code or safety-sensitive work.
   - Reuse prior procedural lessons but re-check current facts and mutable state.
-
   EXECUTION / SAFETY POLICY:
   - Treat each capability descriptor's effects, approval, background, timeout and permission declarations as hard constraints.
   - canRunInBackground=true ONLY for capability IDs in the headless map AND only if descriptor policy allows background execution.
@@ -41,7 +45,6 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
   - self_evolution_v6 and coding_repository are mutation-capable. Use only for explicit code/GUI changes, keep approval=true via descriptor, inspect before mutation and validate after mutation.
   - Never weaken an approval requirement from the descriptor.
   - Prefer evidence → action/reasoning → independent verification → artifact/report when the goal warrants it.
-
   PLAN RULES:
   - Prefer 2-10 steps; exceed that only when the goal genuinely requires decomposition.
   - Every step uses exactly one registered capabilityId.
@@ -56,7 +59,7 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
  }
  func makeRecoveryPlan(task:AgentTask,capabilities:[AgentCapability])async throws->TaskPlan{
   let completed=task.plan.steps.filter{$0.status == .completed}.sorted{$0.order<$1.order}.map{"STEP #\($0.order) \($0.title): \(String(($0.resultSummary ?? "No result").prefix(4000)))"}.joined(separator:"\n"),failed=task.plan.steps.first{$0.status == .failed},failure=failed.map{"STEP #\($0.order) \($0.title): \($0.lastError ?? task.failureReason ?? "Unknown")"} ?? (task.failureReason ?? "Unknown"),registry=CapabilityRegistry(capabilities:capabilities),headless=Self.headlessCatalog(capabilities),reflection=CognitiveReflectionStore.shared.compactContext(goal:task.goal,projectId:AIExecutionScope.context.projectId)
-  if let localPlan=deterministicRuntimeDiagnosticsPlan(goal:task.goal,available:Set(capabilities.map(\.id))){return TaskPlan(version:task.plan.version+1,summary:"Deterministic recovery v\(task.plan.version+1): \(localPlan.summary)",steps:localPlan.steps)}
+  if let localPlan=deterministicPlanIfAvailable(goal:task.goal,capabilities:capabilities){return TaskPlan(version:task.plan.version+1,summary:"Deterministic recovery v\(task.plan.version+1): \(localPlan.summary)",steps:localPlan.steps)}
   let prompt="""
   You are TRAVIS Self-Correction Planner V2 under V6 cognitive economy. Diagnose the failure and produce only the remaining work for ORIGINAL GOAL: \(task.goal)
   COMPLETED VERIFIED WORK:\n\(String(completed.prefix(16000)).isEmpty ? "None":String(completed.prefix(16000)))
@@ -69,19 +72,8 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
   let p=try materialize(draft:try await requestDraft(prompt:prompt,workload:planningWorkload(task.goal)),allowed:Set(capabilities.map(\.id)),registry:registry);return TaskPlan(version:task.plan.version+1,summary:"Recovery v\(task.plan.version+1): \(p.summary)",steps:p.steps)
  }
  private func deterministicRuntimeDiagnosticsPlan(goal:String,available:Set<String>)->TaskPlan?{
-  let normalized=goal.folding(options:[.diacriticInsensitive,.caseInsensitive],locale:Locale(identifier:"el_GR")).lowercased()
-  let runtimeIntent=normalized.contains("runtime") || normalized.contains("travis runtime")
-  let diagnosticIntent=["identity","ταυτοτητα","health","υγεια","safety","ασφαλ","report","αναφορα","status","κατασταση"].contains(where:normalized.contains)
-  let required:Set<String>=["runtime_identity","runtime_health","runtime_safety","report_synthesis"]
-  guard runtimeIntent && diagnosticIntent && required.isSubset(of:available) else{return nil}
-  let identityID=UUID(),healthID=UUID(),safetyID=UUID(),reportID=UUID()
-  let steps=[
-   PlanStep(id:identityID,order:1,title:"Συλλογή ταυτότητας runtime",instructions:"Collect deterministic TRAVIS runtime identity, version, platform and environment evidence.",capabilityId:"runtime_identity",successCriteria:["Structured runtime identity evidence is returned."],riskLevel:.low,requiresApproval:false,canRunInBackground:true,estimatedEffort:.short,maxAttempts:2),
-   PlanStep(id:healthID,order:2,title:"Έλεγχος υγείας runtime",instructions:"Inspect deterministic TRAVIS runtime and Always-On worker health telemetry.",capabilityId:"runtime_health",successCriteria:["Runtime health evidence is returned."],riskLevel:.low,requiresApproval:false,canRunInBackground:true,estimatedEffort:.short,maxAttempts:2),
-   PlanStep(id:safetyID,order:3,title:"Έλεγχος safety controls",instructions:"Inspect deterministic runtime safety controls, kill-switch state and prohibited capabilities without changing state.",capabilityId:"runtime_safety",successCriteria:["Safety-control evidence is returned without mutation."],riskLevel:.low,requiresApproval:false,canRunInBackground:true,estimatedEffort:.short,maxAttempts:2),
-   PlanStep(id:reportID,order:4,title:"Τελική αναφορά runtime",instructions:"Synthesize the verified identity, health and safety evidence into a concise deterministic final runtime report.",capabilityId:"report_synthesis",dependencyStepIds:[identityID,healthID,safetyID],successCriteria:["Final report incorporates identity, health and safety evidence."],riskLevel:.low,requiresApproval:false,canRunInBackground:true,estimatedEffort:.short,maxAttempts:2)
-  ]
-  return TaskPlan(version:1,summary:"Zero-cloud deterministic runtime diagnostics → Always-On identity, health and safety checks → verified final report.",steps:steps)
+  let normalized=goal.folding(options:[.diacriticInsensitive,.caseInsensitive],locale:Locale(identifier:"el_GR")).lowercased();let runtimeIntent=normalized.contains("runtime") || normalized.contains("travis runtime");let diagnosticIntent=["identity","ταυτοτητα","health","υγεια","safety","ασφαλ","report","αναφορα","status","κατασταση"].contains(where:normalized.contains);let required:Set<String>=["runtime_identity","runtime_health","runtime_safety","report_synthesis"];guard runtimeIntent && diagnosticIntent && required.isSubset(of:available) else{return nil}
+  let identityID=UUID(),healthID=UUID(),safetyID=UUID(),reportID=UUID();let steps=[PlanStep(id:identityID,order:1,title:"Συλλογή ταυτότητας runtime",instructions:"Collect deterministic TRAVIS runtime identity, version, platform and environment evidence.",capabilityId:"runtime_identity",successCriteria:["Structured runtime identity evidence is returned."],riskLevel:.low,requiresApproval:false,canRunInBackground:true,estimatedEffort:.short,maxAttempts:2),PlanStep(id:healthID,order:2,title:"Έλεγχος υγείας runtime",instructions:"Inspect deterministic TRAVIS runtime and Always-On worker health telemetry.",capabilityId:"runtime_health",successCriteria:["Runtime health evidence is returned."],riskLevel:.low,requiresApproval:false,canRunInBackground:true,estimatedEffort:.short,maxAttempts:2),PlanStep(id:safetyID,order:3,title:"Έλεγχος safety controls",instructions:"Inspect deterministic runtime safety controls, kill-switch state and prohibited capabilities without changing state.",capabilityId:"runtime_safety",successCriteria:["Safety-control evidence is returned without mutation."],riskLevel:.low,requiresApproval:false,canRunInBackground:true,estimatedEffort:.short,maxAttempts:2),PlanStep(id:reportID,order:4,title:"Τελική αναφορά runtime",instructions:"Synthesize the verified identity, health and safety evidence into a concise deterministic final runtime report.",capabilityId:"report_synthesis",dependencyStepIds:[identityID,healthID,safetyID],successCriteria:["Final report incorporates identity, health and safety evidence."],riskLevel:.low,requiresApproval:false,canRunInBackground:true,estimatedEffort:.short,maxAttempts:2)];return TaskPlan(version:1,summary:"Zero-cloud deterministic runtime diagnostics → Always-On identity, health and safety checks → verified final report.",steps:steps)
  }
  private func planningWorkload(_ goal:String)->AIWorkloadClass{let v=goal.lowercased(),frontier=["self improve","self-improve","αυτοβελ","architecture","αρχιτεκτον","security","ασφάλ","trading system","risk engine","production incident","gui του travis","κώδικα του travis"];return frontier.contains(where:v.contains) ? .frontier:.complex}
  private func requestDraft(prompt:String,workload:AIWorkloadClass)async throws->MissionPlannerV2Draft{var raw="",last="unknown";for attempt in 1...maxDecodeAttempts{try Task.checkCancellation();let req=attempt==1 ? prompt:"Repair the following into valid MissionPlannerV2 JSON only. Preserve semantics and capability IDs; do not expand scope:\n\(raw)";let context=AIInvocationContext(workload:attempt==1 ? workload:.routine,capabilityId:"mission_planner",taskId:AIExecutionScope.context.taskId,stepId:AIExecutionScope.context.stepId,projectId:AIExecutionScope.context.projectId,operation:attempt==1 ? "autonomous.mission.plan.v2":"autonomous.mission.plan.repair");let packet=CognitiveCoreV6.shared.prepareRemotePrompt(req,context:context);raw=try await aiService.generateText(prompt:packet.prompt,maxTokens:attempt==1 ? 5000:2200,context:context);do{let j=extract(raw);guard let d=j.data(using:.utf8)else{throw AutonomousMissionPlannerV2Error.malformedPlan("UTF-8")};return try JSONDecoder().decode(MissionPlannerV2Draft.self,from:d)}catch{last=error.localizedDescription}};throw AutonomousMissionPlannerV2Error.malformedPlan(last)}
