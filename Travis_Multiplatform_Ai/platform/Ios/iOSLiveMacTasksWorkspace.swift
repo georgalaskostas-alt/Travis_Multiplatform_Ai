@@ -14,6 +14,7 @@ struct iOSLiveMacTasksWorkspace: View {
     @State private var showLocalDeleteTaskAlert = false
     @State private var showDeleteAllAlert = false
     @State private var showEmergencyStopAlert = false
+    @State private var showClearEmergencyStopAlert = false
     @State private var terminalTaskIDs: Set<UUID> = []
     @State private var didSeedNotificationState = false
     @State private var completionToast: String?
@@ -90,6 +91,14 @@ struct iOSLiveMacTasksWorkspace: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This immediately activates the Mac Always-On kill switch and pauses enabled jobs. Clearing the emergency stop later will NOT automatically resume paused jobs.")
+        }
+        .alert("Clear Emergency Stop?", isPresented: $showClearEmergencyStopAlert) {
+            Button("CLEAR EMERGENCY STOP") {
+                sendKillSwitch(enabled: false)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the global Always-On execution block. Jobs paused by the Emergency Stop will remain paused and must be resumed explicitly.")
         }
     }
 
@@ -170,7 +179,7 @@ struct iOSLiveMacTasksWorkspace: View {
     private func emergencyActionButton(active: Bool) -> some View {
         if active {
             Button {
-                sendKillSwitch(enabled: false)
+                showClearEmergencyStopAlert = true
             } label: {
                 emergencyButtonLabel(
                     title: "CLEAR EMERGENCY STOP",
@@ -382,10 +391,50 @@ struct iOSLiveMacTasksWorkspace: View {
         )
 
         bridge.sendControlCommand(command)
+        armControlCommandTimeout(commandID: command.id)
 
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(450))
             bridge.requestStatus()
+        }
+    }
+
+    private func armControlCommandTimeout(
+        commandID: UUID,
+        timeout: Duration = .seconds(12)
+    ) {
+        Task { @MainActor in
+            try? await Task.sleep(for: timeout)
+
+            guard pendingControlCommandID == commandID else {
+                return
+            }
+
+            let timeoutResult = TravisControlCommandResult(
+                commandID: commandID,
+                status: .failed,
+                message: "No terminal response from Mac TRAVIS. Final runtime state is unknown; status refresh requested."
+            )
+
+            pendingControlCommandID = nil
+            lastControlResult = timeoutResult
+
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+                controlToast = timeoutResult
+            }
+
+            bridge.requestStatus()
+
+            try? await Task.sleep(for: .seconds(4))
+
+            guard controlToast?.commandID == commandID,
+                  controlToast?.status == .failed else {
+                return
+            }
+
+            withAnimation(.easeOut(duration: 0.2)) {
+                controlToast = nil
+            }
         }
     }
 
@@ -460,6 +509,7 @@ struct iOSLiveMacTasksWorkspace: View {
         controlToast = queued
 
         bridge.sendControlCommand(command)
+        armControlCommandTimeout(commandID: command.id)
 
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(450))
