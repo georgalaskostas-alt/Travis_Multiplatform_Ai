@@ -9,7 +9,9 @@ struct iOSLiveMacTasksWorkspace: View {
     @State private var bridge = TravisDeviceBridgeService.shared
     @State private var expandedTaskIDs: Set<UUID> = []
     @State private var pendingDeleteTask: TravisBridgeTaskSnapshot?
+    @State private var pendingLocalDeleteTask: AgentTask?
     @State private var showDeleteTaskAlert = false
+    @State private var showLocalDeleteTaskAlert = false
     @State private var showDeleteAllAlert = false
     @State private var terminalTaskIDs: Set<UUID> = []
     @State private var didSeedNotificationState = false
@@ -41,6 +43,7 @@ struct iOSLiveMacTasksWorkspace: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { requestNotificationAuthorization(); while !Task.isCancelled { if bridge.isConnected { bridge.requestStatus(); try? await Task.sleep(for: .milliseconds(350)); processTerminalTaskChanges() }; try? await Task.sleep(for: .milliseconds(1650)) } }
         .alert("Delete task?", isPresented: $showDeleteTaskAlert, presenting: pendingDeleteTask) { task in Button("Delete", role: .destructive) { deleteTask(task) }; Button("Cancel", role: .cancel) { pendingDeleteTask = nil } } message: { task in Text("Delete \(task.title) from the Mac TRAVIS runtime history?") }
+        .alert("Delete local task?", isPresented: $showLocalDeleteTaskAlert, presenting: pendingLocalDeleteTask) { task in Button("Delete", role: .destructive) { deleteLocalTask(task) }; Button("Cancel", role: .cancel) { pendingLocalDeleteTask = nil } } message: { task in Text("Delete \(task.title) from the iPhone fallback runtime history?") }
         .alert("Delete finished task history?", isPresented: $showDeleteAllAlert) { Button("Delete Finished", role: .destructive) { deleteAllTasks() }; Button("Cancel", role: .cancel) {} } message: { Text("This removes completed, failed and cancelled tasks only. Any active mission remains protected and keeps running.") }
     }
 
@@ -75,24 +78,35 @@ struct iOSLiveMacTasksWorkspace: View {
 
     @ViewBuilder private func trashButton(_ task: TravisBridgeTaskSnapshot) -> some View {
         let terminal = isTerminal(task.status)
-        Button {
-            guard terminal else { return }
-            pendingDeleteTask = task; showDeleteTaskAlert = true
-        } label: {
-            Image(systemName: terminal ? "trash.fill" : "trash")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(terminal ? Color.red : Color.secondary.opacity(0.45))
-                .frame(width: 34, height: 30)
-                .background(RoundedRectangle(cornerRadius: 8).fill(terminal ? Color.red.opacity(0.10) : Color.white.opacity(0.025)))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(terminal ? Color.red.opacity(0.45) : Color.white.opacity(0.08), lineWidth: 0.8))
+        Button { guard terminal else { return }; pendingDeleteTask = task; showDeleteTaskAlert = true } label: {
+            Image(systemName: terminal ? "trash.fill" : "trash").font(.system(size: 15, weight: .bold)).foregroundStyle(terminal ? Color.red : Color.secondary.opacity(0.55)).frame(width: 38, height: 34).background(RoundedRectangle(cornerRadius: 9).fill(terminal ? Color.red.opacity(0.12) : Color.white.opacity(0.035))).overlay(RoundedRectangle(cornerRadius: 9).stroke(terminal ? Color.red.opacity(0.55) : Color.white.opacity(0.12), lineWidth: 0.9))
         }.buttonStyle(.plain).disabled(!terminal).accessibilityLabel(terminal ? "Delete task" : "Active task cannot be deleted")
+    }
+
+    @ViewBuilder private func localTrashButton(_ task: AgentTask) -> some View {
+        let terminal = isTerminal(task.status.rawValue)
+        Button { guard terminal else { return }; pendingLocalDeleteTask = task; showLocalDeleteTaskAlert = true } label: {
+            Image(systemName: terminal ? "trash.fill" : "trash").font(.system(size: 15, weight: .bold)).foregroundStyle(terminal ? Color.red : Color.secondary.opacity(0.55)).frame(width: 38, height: 34).background(RoundedRectangle(cornerRadius: 9).fill(terminal ? Color.red.opacity(0.12) : Color.white.opacity(0.035))).overlay(RoundedRectangle(cornerRadius: 9).stroke(terminal ? Color.red.opacity(0.55) : Color.white.opacity(0.12), lineWidth: 0.9))
+        }.buttonStyle(.plain).disabled(!terminal).accessibilityLabel(terminal ? "Delete local task" : "Active local task cannot be deleted")
     }
 
     @ViewBuilder private func remoteControls(_ task: TravisBridgeTaskSnapshot) -> some View { let key = normalize(task.status); HStack(spacing: 7) { switch key { case "running": controlButton("PAUSE", "pause.fill", .orange) { sendRemote("/remote-pause-task \(task.id.uuidString)") }; controlButton("CANCEL", "xmark", .red) { sendRemote("/remote-cancel-task \(task.id.uuidString)") }; case "paused": controlButton("RESUME", "play.fill", .green) { sendRemote("/remote-resume-task \(task.id.uuidString)") }; controlButton("CANCEL", "xmark", .red) { sendRemote("/remote-cancel-task \(task.id.uuidString)") }; case "waitingforapproval", "waitingfordependency": controlButton("PAUSE", "pause.fill", .orange) { sendRemote("/remote-pause-task \(task.id.uuidString)") }; controlButton("CANCEL", "xmark", .red) { sendRemote("/remote-cancel-task \(task.id.uuidString)") }; case "failed": controlButton("RETRY", "arrow.clockwise", .orange) { sendRemote("/remote-retry-task \(task.id.uuidString)") }; default: EmptyView() }; Spacer() } }
 
     private func planSteps(_ steps: [TravisBridgeStepSnapshot]) -> some View { VStack(alignment: .leading, spacing: 8) { ForEach(steps.sorted { $0.order < $1.order }) { step in HStack(alignment: .top, spacing: 8) { Image(systemName: stepIcon(step.status)).foregroundStyle(stepColor(step.status)).frame(width: 18); VStack(alignment: .leading, spacing: 2) { Text("#\(step.order)  \(step.title)").font(.system(size: 9, weight: .semibold, design: .rounded)); HStack(spacing: 6) { Text(step.status.uppercased()); if let capability = step.capability { Text(capability) }; Text("TRY \(step.attemptCount)/\(step.maxAttempts)"); if step.requiresApproval { Text("APPROVAL") } }.font(.system(size: 7, weight: .bold, design: .rounded)).foregroundStyle(.secondary); if let error = step.lastError, !error.isEmpty { Text(error).font(.system(size: 8, design: .rounded)).foregroundStyle(.red).lineLimit(3) } }; Spacer() }.padding(.vertical, 3) } }.padding(10).background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.25))).overlay(RoundedRectangle(cornerRadius: 10).stroke(cyan.opacity(0.16), lineWidth: 0.7)) }
 
-    private func localTaskCard(_ task: AgentTask) -> some View { let completed = task.plan.steps.filter { $0.status == .completed }.count, total = task.plan.steps.count; let progress = total > 0 ? Double(completed) / Double(total) : 0; return VStack(alignment: .leading, spacing: 9) { HStack(alignment: .top) { VStack(alignment: .leading, spacing: 3) { Text(task.title).font(.system(size: 14, weight: .bold, design: .rounded)).lineLimit(2); Text(task.goal).font(.system(size: 10, weight: .medium, design: .rounded)).foregroundStyle(.secondary).lineLimit(3) }; Spacer(minLength: 8); statusBadge(task.status.rawValue) }; ProgressView(value: progress).tint(cyan); HStack { Text("\(completed)/\(total) STEPS • \(Int(progress * 100))%"); Spacer(); Text(task.priority.rawValue.uppercased()) }.font(.system(size: 8, weight: .bold, design: .rounded)).foregroundStyle(.secondary) }.padding(13).liveTaskHUD(cyan: cyan, panel: panel) }
+    private func localTaskCard(_ task: AgentTask) -> some View {
+        let completed = task.plan.steps.filter { $0.status == .completed }.count, total = task.plan.steps.count
+        let progress = total > 0 ? Double(completed) / Double(total) : 0
+        return VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) { Text(task.title).font(.system(size: 14, weight: .bold, design: .rounded)).lineLimit(2); Text(task.goal).font(.system(size: 10, weight: .medium, design: .rounded)).foregroundStyle(.secondary).lineLimit(3) }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 7) { statusBadge(task.status.rawValue); localTrashButton(task) }
+            }
+            ProgressView(value: progress).tint(cyan)
+            HStack { Text("\(completed)/\(total) STEPS • \(Int(progress * 100))%"); Spacer(); Text(task.priority.rawValue.uppercased()) }.font(.system(size: 8, weight: .bold, design: .rounded)).foregroundStyle(.secondary)
+        }.padding(13).liveTaskHUD(cyan: cyan, panel: panel)
+    }
 
     private func detailRow(_ label: String, _ value: String, _ icon: String) -> some View { VStack(alignment: .leading, spacing: 3) { Label(label, systemImage: icon).font(.system(size: 8, weight: .bold, design: .rounded)).foregroundStyle(label == "FAILURE" ? .red : cyan); Text(value).font(.system(size: 10, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.82)).lineLimit(5) }.padding(.top, 2) }
     private func finalReportBlock(_ report: String) -> some View { VStack(alignment: .leading, spacing: 6) { Label("FINAL REPORT", systemImage: "doc.text.fill").font(.system(size: 9, weight: .heavy, design: .rounded)).foregroundStyle(.green); Text(report).font(.system(size: 10, weight: .medium, design: .rounded)).foregroundStyle(.white.opacity(0.9)).textSelection(.enabled) }.padding(10).background(RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.06))).overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.green.opacity(0.22), lineWidth: 0.8)).padding(.top, 3) }
@@ -107,6 +121,7 @@ struct iOSLiveMacTasksWorkspace: View {
     private func controlButton(_ title: String, _ icon: String, _ tint: Color, action: @escaping () -> Void) -> some View { Button(action: action) { Label(title, systemImage: icon).font(.system(size: 8, weight: .heavy, design: .rounded)).foregroundStyle(tint).padding(.horizontal, 9).padding(.vertical, 6).background(RoundedRectangle(cornerRadius: 8).fill(tint.opacity(0.08))).overlay(RoundedRectangle(cornerRadius: 8).stroke(tint.opacity(0.35), lineWidth: 0.8)) }.buttonStyle(.plain) }
     private func sendRemote(_ command: String) { guard bridge.isConnected else { return }; bridge.sendCommandToMac(command); Task { @MainActor in try? await Task.sleep(for: .milliseconds(450)); bridge.requestStatus() } }
     private func deleteTask(_ task: TravisBridgeTaskSnapshot) { pendingDeleteTask = nil; sendRemote("/remote-delete-task \(task.id.uuidString)") }
+    private func deleteLocalTask(_ task: AgentTask) { pendingLocalDeleteTask = nil; _ = appState.taskRuntime.deleteTerminalTask(id: task.id) }
     private func deleteAllTasks() { sendRemote("/remote-delete-all-tasks") }
     private func isTerminal(_ status: String) -> Bool { ["completed", "failed", "cancelled"].contains(normalize(status)) }
     private func requestNotificationAuthorization() { UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in } }
