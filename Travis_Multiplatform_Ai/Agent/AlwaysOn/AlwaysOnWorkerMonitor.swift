@@ -131,9 +131,43 @@ final class AlwaysOnWorkerMonitor {
     var heartbeatAge: TimeInterval? { snapshot.map { Date().timeIntervalSince1970 - $0.lastBeatAt } }
 
     init(fileManager: FileManager = .default) {
-        let base = (try? fileManager.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)) ?? fileManager.temporaryDirectory
-        let dir = base.appendingPathComponent("TRAVIS/AlwaysOn", isDirectory: true)
-        try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        // Canonical IPC directory shared with the external Python Always-On worker.
+        //
+        // FileManager's user Application Support directory is containerized when the
+        // macOS app runs inside App Sandbox. The Python worker is an independent
+        // launchd process and uses the real user's ~/Library/Application Support.
+        // Resolve the POSIX home directory so both processes address the same IPC
+        // files: heartbeat, kill switch, command queue, lock and service jobs.
+        #if os(macOS)
+        let homeDirectory: URL
+        if let passwd = getpwuid(getuid()),
+           let home = passwd.pointee.pw_dir {
+            homeDirectory = URL(fileURLWithPath: String(cString: home), isDirectory: true)
+        } else {
+            homeDirectory = fileManager.homeDirectoryForCurrentUser
+        }
+
+        let base = homeDirectory
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+        #else
+        let base = (try? fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )) ?? fileManager.temporaryDirectory
+        #endif
+
+        let dir = base
+            .appendingPathComponent("TRAVIS", isDirectory: true)
+            .appendingPathComponent("AlwaysOn", isDirectory: true)
+
+        try? fileManager.createDirectory(
+            at: dir,
+            withIntermediateDirectories: true
+        )
+
         heartbeatURL = dir.appendingPathComponent("worker-heartbeat.json")
         controlURL = dir.appendingPathComponent("worker-control.json")
         legacyCommandURL = dir.appendingPathComponent("worker-command.json")

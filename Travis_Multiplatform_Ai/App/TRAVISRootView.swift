@@ -50,6 +50,27 @@ struct TRAVISRootView: View {
 #endif
             return TravisBridgeStatusSnapshot(deviceName:ProcessInfo.processInfo.hostName,platform:platformName,isBusy:appState.isBusy,activeRuntimeTasks:all.filter{active.contains($0.status)}.count,lastSummary:appState.lastResponseSummary,fccAvailable:fccAvailableOnThisDevice,runtimeTasks:snapshots,alwaysOn:alwaysOn)
         }
+        bridge.onControlCommand={ [weak appState, weak bridge] command in
+#if os(macOS)
+            guard let appState, let bridge else { return }
+
+            // Immediate transport-level acknowledgement.
+            bridge.sendControlResult(
+                TravisControlCommandResult(
+                    commandID: command.id,
+                    status: .acknowledged,
+                    message: "Command acknowledged by Mac TRAVIS."
+                )
+            )
+
+            // Execute through the Control Plane dispatcher.
+            Task { @MainActor in
+                let result = await appState.handleControlPlaneCommand(command)
+                bridge.sendControlResult(result)
+            }
+#endif
+        }
+
         bridge.onRemoteCommand={ [weak appState] text in guard let appState else{return};let t=text.trimmingCharacters(in:.whitespacesAndNewlines);let lower=t.lowercased()
 #if os(macOS)
             if let response=AlwaysOnCommandRouter.handle(t){appState.lastResponseSummary=response;return}

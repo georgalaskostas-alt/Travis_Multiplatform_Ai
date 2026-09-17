@@ -2,6 +2,128 @@ import Foundation
 
 @MainActor
 extension TRAVISAppState {
+
+    // MARK: - Control Plane V2
+
+    @discardableResult
+    func handleControlPlaneCommand(_ command: TravisControlCommand) async -> TravisControlCommandResult {
+        guard !command.isExpired else {
+            return TravisControlCommandResult(
+                commandID: command.id,
+                status: .expired,
+                message: "Control command expired before execution."
+            )
+        }
+
+        let taskID = command.payload["taskID"]
+
+        let legacyCommand: String?
+
+        switch command.type {
+        case .pauseTask:
+            legacyCommand = taskID.map { "/remote-pause-task \($0)" }
+
+        case .resumeTask:
+            legacyCommand = taskID.map { "/remote-resume-task \($0)" }
+
+        case .cancelTask:
+            legacyCommand = taskID.map { "/remote-cancel-task \($0)" }
+
+        case .deleteTask:
+            legacyCommand = taskID.map { "/remote-delete-task \($0)" }
+
+        case .deleteFinished:
+            legacyCommand = "/remote-delete-all-tasks"
+
+        case .killSwitch:
+            guard let rawEnabled = command.payload["enabled"]?.lowercased(),
+                  ["true", "false"].contains(rawEnabled) else {
+                return TravisControlCommandResult(
+                    commandID: command.id,
+                    status: .failed,
+                    message: "Kill switch command requires enabled=true or enabled=false."
+                )
+            }
+
+            let enabled = rawEnabled == "true"
+            let coordinator = AlwaysOnRuntimeCoordinator.shared
+
+            if enabled {
+                coordinator.emergencyStop()
+            } else {
+                coordinator.clearEmergencyStop()
+            }
+
+            if let error = coordinator.lastError, !error.isEmpty {
+                return TravisControlCommandResult(
+                    commandID: command.id,
+                    status: .failed,
+                    message: "Kill switch operation failed: \(error)"
+                )
+            }
+
+            // The control file is written immediately, but the authoritative
+            // kill-switch state is published asynchronously by the headless
+            // worker in worker-heartbeat.json.
+            let verificationDeadline = Date().addingTimeInterval(5)
+            var actualState = coordinator.worker.snapshot?.killSwitch ?? false
+
+            while actualState != enabled && Date() < verificationDeadline {
+                try? await Task.sleep(for: .milliseconds(250))
+                coordinator.worker.refresh()
+                actualState = coordinator.worker.snapshot?.killSwitch ?? false
+            }
+
+            guard actualState == enabled else {
+                return TravisControlCommandResult(
+                    commandID: command.id,
+                    status: .failed,
+                    message: "Kill switch verification timed out. Requested \(enabled), worker reports \(actualState)."
+                )
+            }
+
+            lastResponseSummary = enabled
+                ? "EMERGENCY STOP ACTIVE — Always-On jobs paused"
+                : "Emergency stop cleared — jobs remain paused until explicitly resumed"
+
+            return TravisControlCommandResult(
+                commandID: command.id,
+                status: .completed,
+                message: lastResponseSummary
+            )
+
+        default:
+            return TravisControlCommandResult(
+                commandID: command.id,
+                status: .failed,
+                message: "Unsupported Control Plane command: \(command.type.rawValue)"
+            )
+        }
+
+        guard let legacyCommand else {
+            return TravisControlCommandResult(
+                commandID: command.id,
+                status: .failed,
+                message: "Missing taskID payload."
+            )
+        }
+
+        let handled = handleRemoteMissionControlCommand(legacyCommand)
+
+        guard handled else {
+            return TravisControlCommandResult(
+                commandID: command.id,
+                status: .failed,
+                message: "Control command was not handled."
+            )
+        }
+
+        return TravisControlCommandResult(
+            commandID: command.id,
+            status: .completed,
+            message: lastResponseSummary
+        )
+    }
     @discardableResult
     func handleRemoteMissionControlCommand(_ text: String) -> Bool {
         let trimmed=text.trimmingCharacters(in:.whitespacesAndNewlines);let lower=trimmed.lowercased()

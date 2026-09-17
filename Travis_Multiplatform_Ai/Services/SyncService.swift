@@ -19,12 +19,65 @@ struct TravisBridgeTaskSnapshot: Codable, Equatable, Identifiable {
 struct TravisBridgeStatusSnapshot: Codable, Equatable {
     var deviceName: String; var platform: String; var isBusy: Bool; var activeRuntimeTasks: Int; var lastSummary: String; var fccAvailable: Bool; var runtimeTasks: [TravisBridgeTaskSnapshot] = []; var alwaysOn: TravisBridgeAlwaysOnSnapshot? = nil
 }
-enum TravisBridgeCommand: Codable, Equatable { case requestStatus, status(TravisBridgeStatusSnapshot), openFCC, systemScan, runCommand(String), speak(String) }
+enum TravisBridgeCommand: Codable {
+    case requestStatus
+    case status(TravisBridgeStatusSnapshot)
+    case openFCC
+    case systemScan
+    case runCommand(String)
+    case speak(String)
+
+    // Control Plane V2
+    case controlCommand(TravisControlCommand)
+    case controlResult(TravisControlCommandResult)
+}
+
+struct TravisControlCommandResult: Codable, Equatable, Sendable, Identifiable {
+    let id: UUID
+    let commandID: UUID
+    let status: TravisControlCommandStatus
+    let message: String
+    let completedAt: Date
+
+    init(
+        commandID: UUID,
+        status: TravisControlCommandStatus,
+        message: String
+    ) {
+        self.id = UUID()
+        self.commandID = commandID
+        self.status = status
+        self.message = message
+        self.completedAt = .now
+    }
+}
 
 @Observable final class TravisDeviceBridgeService: NSObject {
+    private static let controlPlaneDeviceIDKey = "travis.controlPlane.deviceID"
+
+    var localDeviceID: UUID {
+        if let raw = UserDefaults.standard.string(forKey: Self.controlPlaneDeviceIDKey),
+           let existing = UUID(uuidString: raw) {
+            return existing
+        }
+
+        let created = UUID()
+        UserDefaults.standard.set(
+            created.uuidString,
+            forKey: Self.controlPlaneDeviceIDKey
+        )
+        return created
+    }
+
     static let shared=TravisDeviceBridgeService()
     private(set) var isRunning=false; private(set) var isConnected=false; private(set) var connectedPeerName:String?; private(set) var lastStatus:TravisBridgeStatusSnapshot?; private(set) var lastError:String?; private(set) var lastStatusReceivedAt:Date?
-    var statusProvider:(()->TravisBridgeStatusSnapshot)?; var onRemoteCommand:((String)->Void)?; var onSystemScan:(()->Void)?; var onOpenFCC:(()->Void)?; var onSpeak:((String)->Void)?
+    var statusProvider:(()->TravisBridgeStatusSnapshot)?
+    var onRemoteCommand:((String)->Void)?
+    var onControlCommand:((TravisControlCommand)->Void)?
+    var onControlResult:((TravisControlCommandResult)->Void)?
+    var onSystemScan:(()->Void)?
+    var onOpenFCC:(()->Void)?
+    var onSpeak:((String)->Void)?
 #if os(iOS) || os(macOS)
     @ObservationIgnored private let serviceType="travis-link"
     @ObservationIgnored private lazy var peerID=MCPeerID(displayName:Self.makePeerName())
@@ -55,7 +108,17 @@ enum TravisBridgeCommand: Codable, Equatable { case requestStatus, status(Travis
 #endif
         updateConnectionState(peer:nil,connected:false)
     }
-    func requestStatus(){send(.requestStatus)};func openFCCOnMac(){send(.openFCC)};func runSystemScanOnMac(){send(.systemScan)}
+    func requestStatus(){send(.requestStatus)}
+    func openFCCOnMac(){send(.openFCC)}
+    func runSystemScanOnMac(){send(.systemScan)}
+
+    func sendControlCommand(_ command: TravisControlCommand) {
+        send(.controlCommand(command))
+    }
+
+    func sendControlResult(_ result: TravisControlCommandResult) {
+        send(.controlResult(result))
+    }
     func sendCommandToMac(_ text:String){let t=text.trimmingCharacters(in:.whitespacesAndNewlines);guard !t.isEmpty else{return};send(.runCommand(t))}
     func speakOnMac(_ text:String){let t=text.trimmingCharacters(in:.whitespacesAndNewlines);guard !t.isEmpty else{return};send(.speak(t))}
     private func send(_ command:TravisBridgeCommand){
@@ -72,7 +135,41 @@ enum TravisBridgeCommand: Codable, Equatable { case requestStatus, status(Travis
         }}
 #endif
     }
-    private func handle(_ command:TravisBridgeCommand){DispatchQueue.main.async{[weak self] in guard let self else{return};switch command{case .requestStatus:if let s=self.statusProvider?(){self.send(.status(s))};case .status(let s):self.lastStatus=s;self.lastStatusReceivedAt=Date();self.lastError=nil;case .openFCC:self.onOpenFCC?();case .systemScan:self.onSystemScan?();case .runCommand(let t):self.onRemoteCommand?(t);case .speak(let t):self.onSpeak?(t)}}}
+    private func handle(_ command: TravisBridgeCommand) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+
+            switch command {
+            case .requestStatus:
+                if let snapshot = self.statusProvider?() {
+                    self.send(.status(snapshot))
+                }
+
+            case .status(let snapshot):
+                self.lastStatus = snapshot
+                self.lastStatusReceivedAt = Date()
+                self.lastError = nil
+
+            case .openFCC:
+                self.onOpenFCC?()
+
+            case .systemScan:
+                self.onSystemScan?()
+
+            case .runCommand(let text):
+                self.onRemoteCommand?(text)
+
+            case .speak(let text):
+                self.onSpeak?(text)
+
+            case .controlCommand(let controlCommand):
+                self.onControlCommand?(controlCommand)
+
+            case .controlResult(let result):
+                self.onControlResult?(result)
+            }
+        }
+    }
     private func updateConnectionState(peer:MCPeerID?,connected:Bool){DispatchQueue.main.async{[weak self] in guard let self else{return};self.isConnected=connected;self.connectedPeerName=connected ? peer?.displayName:nil;if connected{self.lastError=nil
 #if os(iOS)
         self.reconnectWorkItem?.cancel();self.reconnectWorkItem=nil;self.requestStatus()
