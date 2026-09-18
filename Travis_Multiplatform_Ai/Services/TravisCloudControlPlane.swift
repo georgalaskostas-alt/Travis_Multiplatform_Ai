@@ -18,13 +18,50 @@ final class TravisCloudControlPlane {
     func configure(accessToken:String?){self.accessToken=accessToken?.trimmingCharacters(in:.whitespacesAndNewlines);if self.accessToken?.isEmpty==true{self.accessToken=nil};state=self.accessToken==nil ? .unauthorized:.connecting}
     func startMacHeartbeat(deviceKey:String,displayName:String,workerOnline:@escaping @MainActor()->Bool,guiOnline:@escaping @MainActor()->Bool,lanOnline:@escaping @MainActor()->Bool){
         loop?.cancel();guard accessToken != nil else{state = .unauthorized;return}
-        loop=Task{[weak self] in while !Task.isCancelled{guard let self else{return};do{let id=try await self.upsertDevice(deviceKey:deviceKey,displayName:displayName,platform:"macos",worker:workerOnline(),gui:guiOnline(),lan:lanOnline());self.deviceID=id;try await self.processCommands(for:id);self.state = .online;self.lastError=nil;self.lastSyncAt=Date()}catch{self.state = .degraded;self.lastError=error.localizedDescription};try? await Task.sleep(for:.seconds(3))}}
+        loop=Task{[weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                do {
+                    // Keep the long-running control-plane loop on a renewable
+                    // Supabase session. Refresh happens before expiry and the
+                    // rotated access token is adopted before any REST request.
+                    let token = try await TravisCloudAuthService.shared.validAccessToken()
+                    self.accessToken = token
+
+                    #if os(macOS)
+                    AlwaysOnWorkerMonitor.shared.refresh()
+                    let killSwitch = AlwaysOnWorkerMonitor.shared.snapshot?.killSwitch ?? false
+                    #else
+                    let killSwitch = false
+                    #endif
+
+                    let id = try await self.upsertDevice(
+                        deviceKey: deviceKey,
+                        displayName: displayName,
+                        platform: "macos",
+                        worker: workerOnline(),
+                        gui: guiOnline(),
+                        lan: lanOnline(),
+                        killSwitch: killSwitch
+                    )
+                    self.deviceID = id
+                    try await self.processCommands(for: id)
+                    self.state = .online
+                    self.lastError = nil
+                    self.lastSyncAt = Date()
+                } catch {
+                    self.state = .degraded
+                    self.lastError = error.localizedDescription
+                }
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }}
     }
     func stop(){loop?.cancel();loop=nil;state = .disabled}
 
-    private func upsertDevice(deviceKey:String,displayName:String,platform:String,worker:Bool,gui:Bool,lan:Bool) async throws -> UUID{
-        struct Body:Encodable{let device_key:String;let display_name:String;let platform:String;let worker_online:Bool;let gui_online:Bool;let lan_online:Bool;let cloud_online:Bool;let last_seen_at:String}
-        let b=Body(device_key:deviceKey,display_name:displayName,platform:platform,worker_online:worker,gui_online:gui,lan_online:lan,cloud_online:true,last_seen_at:ISO8601DateFormatter().string(from:Date()))
+    private func upsertDevice(deviceKey:String,displayName:String,platform:String,worker:Bool,gui:Bool,lan:Bool,killSwitch:Bool) async throws -> UUID{
+        struct Body:Encodable{let device_key:String;let display_name:String;let platform:String;let worker_online:Bool;let gui_online:Bool;let lan_online:Bool;let cloud_online:Bool;let kill_switch:Bool;let last_seen_at:String}
+        let b=Body(device_key:deviceKey,display_name:displayName,platform:platform,worker_online:worker,gui_online:gui,lan_online:lan,cloud_online:true,kill_switch:killSwitch,last_seen_at:ISO8601DateFormatter().string(from:Date()))
         let data=try await request(path:"/rest/v1/travis_devices?on_conflict=user_id,device_key",method:"POST",body:b,prefer:"resolution=merge-duplicates,return=representation");let values=try decoder.decode([Device].self,from:data);guard let id=values.first?.id else{throw CloudError.invalidResponse};return id
     }
     private func processCommands(for id: UUID) async throws {
