@@ -1,6 +1,47 @@
 import Foundation
 import AuthenticationServices
 import Observation
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
+
+@MainActor
+private final class TravisOAuthPresentationContextProvider: NSObject,
+    ASWebAuthenticationPresentationContextProviding {
+
+    func presentationAnchor(
+        for session: ASWebAuthenticationSession
+    ) -> ASPresentationAnchor {
+#if os(macOS)
+        if let keyWindow = NSApplication.shared.keyWindow {
+            return keyWindow
+        }
+        if let visibleWindow = NSApplication.shared.windows.first(where: { $0.isVisible }) {
+            return visibleWindow
+        }
+        return NSWindow()
+#elseif os(iOS)
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+
+        if let keyWindow = scenes
+            .flatMap({ $0.windows })
+            .first(where: { $0.isKeyWindow }) {
+            return keyWindow
+        }
+
+        if let window = scenes.flatMap({ $0.windows }).first {
+            return window
+        }
+
+        return UIWindow(frame: .zero)
+#else
+        return ASPresentationAnchor()
+#endif
+    }
+}
 
 @MainActor
 @Observable
@@ -50,6 +91,8 @@ final class TravisCloudAuthService {
     private(set) var session: TravisCloudCredentialStore.Session?
 
     private var webAuthenticationSession: ASWebAuthenticationSession?
+    private let oauthPresentationContext =
+        TravisOAuthPresentationContextProvider()
 
     private init() {}
 
@@ -169,6 +212,8 @@ final class TravisCloudAuthService {
             }
 
             authSession.prefersEphemeralWebBrowserSession = false
+            authSession.presentationContextProvider =
+                self.oauthPresentationContext
 
             self.webAuthenticationSession = authSession
 
