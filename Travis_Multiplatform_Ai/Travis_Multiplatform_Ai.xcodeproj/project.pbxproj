@@ -38,6 +38,9 @@
 		F05AD77107CAF9DA881E8544 /* PersistedLocationBookmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */; };
 		F5EC4F0794E848C6CA141788 /* FileLocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */; };
 		F9427A0857DC2CE7C90FEDDB /* PaperTradingConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6023541AB2F4D7680CC010C6 /* PaperTradingConstants.swift */; };
+		A1C10D010000000000000002 /* TravisCloudControlPlane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10D010000000000000001 /* TravisCloudControlPlane.swift */; };
+		A1C10D010000000000000004 /* TravisCloudCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10D010000000000000003 /* TravisCloudCredentialStore.swift */; };
+		A1C10D020000000000000002 /* TravisCloudAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10D020000000000000001 /* TravisCloudAuthService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -73,6 +76,9 @@
 		EC2171122FD5010100D1AB6E /* ProposedAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProposedAction.swift; sourceTree = "<group>"; };
 		EC2171202FD5020000D1AB6F /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
 		EC450BC06CAAD3E401F366EF /* PersistedProposedAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedProposedAction.swift; sourceTree = "<group>"; };
+		A1C10D010000000000000001 /* TravisCloudControlPlane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravisCloudControlPlane.swift; sourceTree = "<group>"; };
+		A1C10D010000000000000003 /* TravisCloudCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravisCloudCredentialStore.swift; sourceTree = "<group>"; };
+		A1C10D020000000000000001 /* TravisCloudAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravisCloudAuthService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -196,6 +202,9 @@
 		EC2170892FD046B400D1AB6D /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				A1C10D020000000000000001 /* TravisCloudAuthService.swift */,
+				A1C10D010000000000000001 /* TravisCloudControlPlane.swift */,
+				A1C10D010000000000000003 /* TravisCloudCredentialStore.swift */,
 				EC2170982FD0483200D1AB6D /* AIService.swift */,
 				EC21709A2FD0484500D1AB6D /* SyncService.swift */,
 				EC21709C2FD0485600D1AB6D /* PermissionService.swift */,
@@ -310,6 +319,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1C10D020000000000000002 /* TravisCloudAuthService.swift in Sources */,
+				A1C10D010000000000000002 /* TravisCloudControlPlane.swift in Sources */,
+				A1C10D010000000000000004 /* TravisCloudCredentialStore.swift in Sources */,
 				EC2170992FD0483200D1AB6D /* AIService.swift in Sources */,
 				EC21708D2FD0474200D1AB6D /* TRAVISAppState.swift in Sources */,
 				EC21709B2FD0484500D1AB6D /* SyncService.swift in Sources */,

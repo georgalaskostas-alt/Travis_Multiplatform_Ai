@@ -27,13 +27,333 @@ final class TravisCloudControlPlane {
         let b=Body(device_key:deviceKey,display_name:displayName,platform:platform,worker_online:worker,gui_online:gui,lan_online:lan,cloud_online:true,last_seen_at:ISO8601DateFormatter().string(from:Date()))
         let data=try await request(path:"/rest/v1/travis_devices?on_conflict=user_id,device_key",method:"POST",body:b,prefer:"resolution=merge-duplicates,return=representation");let values=try decoder.decode([Device].self,from:data);guard let id=values.first?.id else{throw CloudError.invalidResponse};return id
     }
-    private func processCommands(for id:UUID) async throws{
-        let now=ISO8601DateFormatter().string(from:Date()).addingPercentEncoding(withAllowedCharacters:.urlQueryAllowed) ?? "";let data=try await request(path:"/rest/v1/travis_commands?target_device_id=eq.\(id.uuidString)&status=eq.queued&expires_at=gt.\(now)&order=created_at.asc&limit=20",method:"GET");let commands=try decoder.decode([Command].self,from:data)
-        for c in commands{try await patchCommand(c.id,status:"acknowledged",result:nil);let out=execute(c);try await patchCommand(c.id,status:out.ok ? "completed":"failed",result:out.message)}
+    private func processCommands(for id: UUID) async throws {
+        let now = ISO8601DateFormatter()
+            .string(from: Date())
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+
+        let data = try await request(
+            path: "/rest/v1/travis_commands?target_device_id=eq.\(id.uuidString)&status=eq.queued&expires_at=gt.\(now)&order=created_at.asc&limit=20",
+            method: "GET"
+        )
+
+        let commands = try decoder.decode([Command].self, from: data)
+
+        for command in commands {
+            guard let claimed = try await claimCommandAtomically(
+                commandID: command.id,
+                targetDeviceID: id
+            ) else {
+                // Another consumer already claimed it, it expired, or it
+                // is no longer queued. This process must not execute it.
+                continue
+            }
+
+            try await processCommand(claimed)
+        }
     }
-    private func execute(_ c:Command)->(ok:Bool,message:String){switch c.command_type.lowercased(){case "kill_switch","kill_switch.enable","kill_switch.disable":let enabled=c.command_type.lowercased()=="kill_switch.enable" ? true:c.command_type.lowercased()=="kill_switch.disable" ? false:(c.payload?["enabled"] ?? "true").lowercased()=="true";do{try AlwaysOnWorkerMonitor.shared.setKillSwitch(enabled);return(true,enabled ? "Kill switch enabled":"Kill switch cleared")}catch{return(false,error.localizedDescription)};case "worker_job":guard let action=c.payload?["action"],let raw=c.payload?["job_id"],let id=UUID(uuidString:raw) else{return(false,"Malformed worker job command")};do{try AlwaysOnWorkerMonitor.shared.sendServiceJobCommand(action:action,jobID:id);return(true,"Worker command queued")}catch{return(false,error.localizedDescription)};default:return(false,"Command type is not allowlisted")}}
+
+    private func claimCommandAtomically(
+        commandID: UUID,
+        targetDeviceID: UUID
+    ) async throws -> Command? {
+        struct Body: Encodable {
+            let p_command_id: UUID
+            let p_target_device_id: UUID
+        }
+
+        let body = Body(
+            p_command_id: commandID,
+            p_target_device_id: targetDeviceID
+        )
+
+        let data = try await request(
+            path: "/rest/v1/rpc/travis_claim_command",
+            method: "POST",
+            body: body
+        )
+
+        let claimed = try decoder.decode([Command].self, from: data)
+
+        guard claimed.count <= 1 else {
+            throw CloudError.invalidResponse
+        }
+
+        return claimed.first
+    }
+
+    private func processCommand(_ command: Command) async throws {
+        let receipts = TravisControlCommandReceiptStore.shared
+
+        let normalized: Command
+        do {
+            normalized = try normalizeCommand(command)
+        } catch {
+            try await patchCommand(
+                command.id,
+                status: "failed",
+                result: "Invalid control command semantics: \(error.localizedDescription)"
+            )
+            return
+        }
+
+        let payload = normalized.payload ?? [:]
+
+        let claim: TravisControlCommandReceiptStore.Claim
+
+        do {
+            claim = try await receipts.claim(
+                commandID: normalized.id,
+                nonce: normalized.nonce,
+                commandType: normalized.command_type,
+                sourceDeviceID: normalized.target_device_id,
+                payload: payload
+            )
+        } catch {
+            // Fail closed: no durable claim means no side effect.
+            try await patchCommand(
+                command.id,
+                status: "failed",
+                result: "Control Plane receipt persistence failed; execution blocked: \(error.localizedDescription)"
+            )
+            return
+        }
+
+        switch claim {
+        case .conflict:
+            try await patchCommand(
+                command.id,
+                status: "failed",
+                result: "Control command identity conflict; execution blocked."
+            )
+            return
+
+        case .duplicate(let receipt):
+            if let resultStatus = receipt.resultStatus,
+               let resultMessage = receipt.resultMessage {
+
+                let cloudStatus: String
+
+                switch resultStatus {
+                case .completed:
+                    cloudStatus = "completed"
+
+                case .failed, .expired,
+                     .queued, .acknowledged, .executing:
+                    cloudStatus = "failed"
+                }
+
+                try await patchCommand(
+                    command.id,
+                    status: cloudStatus,
+                    result: resultMessage
+                )
+            } else {
+                // Never re-execute an unresolved receipt. The original
+                // execution may still be running or may have produced its
+                // side effect before a crash.
+                try await patchCommand(
+                    command.id,
+                    status: "failed",
+                    result: "Duplicate command suppressed: prior execution is unresolved; reconciliation required."
+                )
+            }
+
+            return
+
+        case .execute:
+            break
+        }
+
+        // Server-side atomic claim already transitioned this command
+        // from queued to acknowledged. Reaching this point means this
+        // consumer owns execution of this cloud delivery.
+        let output = execute(normalized)
+
+        let terminalStatus: TravisControlCommandStatus =
+            output.ok ? .completed : .failed
+
+        do {
+            try await receipts.finish(
+                commandID: command.id,
+                status: terminalStatus,
+                message: output.message
+            )
+        } catch {
+            // The side effect may already have happened. Do not make this
+            // command eligible for automatic execution again.
+            try await patchCommand(
+                command.id,
+                status: "failed",
+                result: "Command may have executed, but terminal receipt persistence failed; reconciliation required: \(error.localizedDescription)"
+            )
+            return
+        }
+
+        try await patchCommand(
+            command.id,
+            status: output.ok ? "completed" : "failed",
+            result: output.message
+        )
+    }
+
+    private func normalizeCommand(_ command: Command) throws -> Command {
+        let rawType = command.command_type
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        var payload = command.payload ?? [:]
+
+        switch rawType {
+        case "kill_switch.enable":
+            payload["enabled"] = "true"
+
+            return Command(
+                id: command.id,
+                target_device_id: command.target_device_id,
+                command_type: "killSwitch",
+                payload: payload,
+                nonce: command.nonce,
+                status: command.status,
+                created_at: command.created_at,
+                expires_at: command.expires_at
+            )
+
+        case "kill_switch.disable":
+            payload["enabled"] = "false"
+
+            return Command(
+                id: command.id,
+                target_device_id: command.target_device_id,
+                command_type: "killSwitch",
+                payload: payload,
+                nonce: command.nonce,
+                status: command.status,
+                created_at: command.created_at,
+                expires_at: command.expires_at
+            )
+
+        case "killswitch", "kill_switch":
+            guard let rawEnabled = payload["enabled"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased(),
+                  rawEnabled == "true" || rawEnabled == "false" else {
+                throw CloudError.invalidCommand(
+                    "killSwitch requires payload.enabled=true or false"
+                )
+            }
+
+            payload["enabled"] = rawEnabled
+
+            return Command(
+                id: command.id,
+                target_device_id: command.target_device_id,
+                command_type: "killSwitch",
+                payload: payload,
+                nonce: command.nonce,
+                status: command.status,
+                created_at: command.created_at,
+                expires_at: command.expires_at
+            )
+
+        default:
+            return command
+        }
+    }
+
+    private func execute(_ c: Command) -> (ok: Bool, message: String) {
+        switch c.command_type.lowercased() {
+        case "killswitch":
+            guard let rawEnabled = c.payload?["enabled"]?.lowercased(),
+                  rawEnabled == "true" || rawEnabled == "false" else {
+                return (false, "Malformed kill switch command")
+            }
+
+            let enabled = rawEnabled == "true"
+
+            do {
+                try AlwaysOnWorkerMonitor.shared.setKillSwitch(enabled)
+                return (
+                    true,
+                    enabled ? "Kill switch enabled" : "Kill switch cleared"
+                )
+            } catch {
+                return (false, error.localizedDescription)
+            }
+
+        case "worker_job":
+            guard let action = c.payload?["action"],
+                  let raw = c.payload?["job_id"],
+                  let id = UUID(uuidString: raw) else {
+                return (false, "Malformed worker job command")
+            }
+
+            do {
+                try AlwaysOnWorkerMonitor.shared.sendServiceJobCommand(
+                    action: action,
+                    jobID: id
+                )
+                return (true, "Worker command queued")
+            } catch {
+                return (false, error.localizedDescription)
+            }
+
+        default:
+            return (false, "Command type is not allowlisted")
+        }
+    }
+
     private func patchCommand(_ id:UUID,status:String,result:String?) async throws{struct Patch:Encodable{let status:String;let acknowledged_at:String?;let completed_at:String?;let result:[String:String]?};let now=ISO8601DateFormatter().string(from:Date());let terminal=["completed","failed"].contains(status);let p=Patch(status:status,acknowledged_at:status=="acknowledged" ? now:nil,completed_at:terminal ? now:nil,result:result.map{["message":$0]});_ = try await request(path:"/rest/v1/travis_commands?id=eq.\(id.uuidString)",method:"PATCH",body:p)}
-    func sendCommand(targetDeviceID:UUID,type:String,payload:[String:String]=[:]) async throws{struct Body:Encodable{let target_device_id:UUID;let command_type:String;let payload:[String:String];let expires_at:String};let b=Body(target_device_id:targetDeviceID,command_type:type,payload:payload,expires_at:ISO8601DateFormatter().string(from:Date().addingTimeInterval(300)));_ = try await request(path:"/rest/v1/travis_commands",method:"POST",body:b)}
+    @discardableResult
+    func sendCommand(
+        targetDeviceID: UUID,
+        type: String,
+        payload: [String: String] = [:],
+        commandID: UUID = UUID(),
+        nonce: UUID = UUID(),
+        expiresAt: Date = Date().addingTimeInterval(300)
+    ) async throws -> (commandID: UUID, nonce: UUID) {
+        struct Body: Encodable {
+            let id: UUID
+            let target_device_id: UUID
+            let command_type: String
+            let payload: [String: String]
+            let nonce: UUID
+            let expires_at: String
+        }
+
+        let body = Body(
+            id: commandID,
+            target_device_id: targetDeviceID,
+            command_type: type,
+            payload: payload,
+            nonce: nonce,
+            expires_at: ISO8601DateFormatter().string(from: expiresAt)
+        )
+
+        _ = try await request(
+            path: "/rest/v1/travis_commands",
+            method: "POST",
+            body: body
+        )
+
+        return (commandID, nonce)
+    }
+
+    @discardableResult
+    func sendCommand(
+        _ command: TravisControlCommand,
+        targetDeviceID: UUID
+    ) async throws -> (commandID: UUID, nonce: UUID) {
+        try await sendCommand(
+            targetDeviceID: targetDeviceID,
+            type: command.type.rawValue,
+            payload: command.payload,
+            commandID: command.id,
+            nonce: command.nonce,
+            expiresAt: command.expiresAt
+        )
+    }
     func devices() async throws->[Device]{let data=try await request(path:"/rest/v1/travis_devices?select=*&order=last_seen_at.desc",method:"GET");return try decoder.decode([Device].self,from:data)}
 
     private var decoder:JSONDecoder{let d=JSONDecoder();d.dateDecodingStrategy = .iso8601;return d}
@@ -41,5 +361,23 @@ final class TravisCloudControlPlane {
     private func perform(_ r:URLRequest) async throws -> Data{let(data,response)=try await URLSession.shared.data(for:r);guard let h=response as? HTTPURLResponse else{throw CloudError.invalidResponse};guard 200..<300 ~= h.statusCode else{throw CloudError.http(h.statusCode,String(data:data,encoding:.utf8) ?? "")};return data}
     private func request(path:String,method:String,prefer:String?=nil) async throws -> Data{try await perform(preparedRequest(path:path,method:method,prefer:prefer))}
     private func request<B:Encodable>(path:String,method:String,body:B,prefer:String?=nil) async throws -> Data{var r=try preparedRequest(path:path,method:method,prefer:prefer);r.httpBody=try JSONEncoder().encode(body);return try await perform(r)}
-    enum CloudError:LocalizedError{case unauthorized,invalidResponse,http(Int,String);var errorDescription:String?{switch self{case .unauthorized:return "Cloud authentication required";case .invalidResponse:return "Invalid cloud response";case let .http(code,msg):return "Cloud HTTP \(code): \(msg)"}}}
+    enum CloudError: LocalizedError {
+        case unauthorized
+        case invalidResponse
+        case invalidCommand(String)
+        case http(Int, String)
+
+        var errorDescription: String? {
+            switch self {
+            case .unauthorized:
+                return "Cloud authentication required"
+            case .invalidResponse:
+                return "Invalid cloud response"
+            case .invalidCommand(let message):
+                return message
+            case let .http(code, msg):
+                return "Cloud HTTP \(code): \(msg)"
+            }
+        }
+    }
 }

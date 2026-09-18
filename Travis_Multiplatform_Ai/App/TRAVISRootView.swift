@@ -23,6 +23,38 @@ struct TRAVISRootView: View {
         let bridge=TravisDeviceBridgeService.shared
 #if os(macOS)
         AlwaysOnRuntimeCoordinator.shared.configure(appState:appState)
+
+        // Cloud Control Plane is the WAN fallback for the existing LAN bridge.
+        // Restore the renewable Supabase session first. If the access token
+        // is near expiry, TravisCloudAuthService refreshes it before the
+        // Cloud Control Plane is configured or allowed to start polling.
+        Task { @MainActor in
+            let auth = TravisCloudAuthService.shared
+            let cloud = TravisCloudControlPlane.shared
+
+            guard let session = await auth.restoreSession() else {
+                cloud.stop()
+                cloud.configure(accessToken: nil)
+                return
+            }
+
+            cloud.configure(accessToken: session.accessToken)
+
+            cloud.startMacHeartbeat(
+                deviceKey: bridge.localDeviceID.uuidString,
+                displayName: ProcessInfo.processInfo.hostName,
+                workerOnline: {
+                    AlwaysOnWorkerMonitor.shared.refresh()
+                    return AlwaysOnWorkerMonitor.shared.isHealthy
+                },
+                guiOnline: {
+                    true
+                },
+                lanOnline: {
+                    TravisDeviceBridgeService.shared.isConnected
+                }
+            )
+        }
 #endif
         bridge.statusProvider={ [weak appState] in
             guard let appState else{return TravisBridgeStatusSnapshot(deviceName:"TRAVIS",platform:platformName,isBusy:false,activeRuntimeTasks:0,lastSummary:"Unavailable",fccAvailable:false)}

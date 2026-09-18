@@ -7,6 +7,8 @@ struct SettingsView: View {
     @State private var githubToken: String = KeychainService.shared.githubToken ?? ""
     @State private var startupAudioConfigured = false
     @State private var voiceReferenceConfigured = false
+    @State private var cloudAuthBusy = false
+    @State private var cloudAuthMessage: String?
 
     @AppStorage("ai.openrouter.economyModel") private var openRouterEconomyModel = ""
     @AppStorage("ai.openrouter.standardModel") private var openRouterStandardModel = ""
@@ -121,6 +123,75 @@ struct SettingsView: View {
                     Text("Χρησιμοποιείται μόνο για approved source-code commits από το coding_repository capability. Read-only repository analysis δεν χρειάζεται write token.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                Section("TRAVIS Cloud Account") {
+                    HStack(spacing: 10) {
+                        Image(systemName: cloudStatusSymbol)
+                            .foregroundStyle(cloudStatusColor)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(cloudStatusTitle)
+                                .font(.headline)
+
+                            Text(cloudStatusDetail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        if cloudAuthBusy {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+
+                    if TravisCloudAuthService.shared.isSignedIn {
+                        HStack {
+                            Button("Refresh Session") {
+                                Task {
+                                    await refreshCloudSession()
+                                }
+                            }
+                            .disabled(cloudAuthBusy)
+
+                            Spacer()
+
+                            Button("Sign Out", role: .destructive) {
+                                signOutCloud()
+                            }
+                            .disabled(cloudAuthBusy)
+                        }
+                    } else {
+                        Button {
+                            Task {
+                                await signInCloudWithGitHub()
+                            }
+                        } label: {
+                            Label(
+                                "Continue with GitHub",
+                                systemImage: "person.crop.circle.badge.checkmark"
+                            )
+                        }
+                        .disabled(cloudAuthBusy)
+                    }
+
+                    if let cloudAuthMessage {
+                        Text(cloudAuthMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+
+                    Text(
+                        "Η σύνδεση γίνεται μέσω GitHub και Supabase OAuth. "
+                        + "Ο TRAVIS δεν βλέπει ούτε αποθηκεύει GitHub password. "
+                        + "Το renewable Supabase session παραμένει στο Keychain "
+                        + "αυτής της συσκευής."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
 
                 Section("Assistant") {
@@ -262,4 +333,203 @@ struct SettingsView: View {
         .scrollIndicators(.visible)
         .navigationTitle("Settings")
     }
+
+    private var cloudStatusTitle: String {
+        let auth = TravisCloudAuthService.shared
+
+        if cloudAuthBusy {
+            return "Connecting…"
+        }
+
+        if !auth.isSignedIn {
+            return "Signed Out"
+        }
+
+#if os(macOS)
+        switch TravisCloudControlPlane.shared.state {
+        case .online:
+            return "Cloud Online"
+        case .connecting:
+            return "Cloud Connecting"
+        case .degraded:
+            return "Cloud Degraded"
+        case .unauthorized:
+            return "Cloud Unauthorized"
+        case .disabled:
+            return "Signed In — Cloud Stopped"
+        }
+#else
+        return "Signed In"
+#endif
+    }
+
+    private var cloudStatusDetail: String {
+#if os(macOS)
+        let cloud = TravisCloudControlPlane.shared
+
+        if let error = cloud.lastError, !error.isEmpty {
+            return error
+        }
+
+        if let sync = cloud.lastSyncAt {
+            return "Last heartbeat: \(sync.formatted(date: .abbreviated, time: .standard))"
+        }
+
+        return TravisCloudAuthService.shared.isSignedIn
+            ? "Authenticated. Waiting for cloud heartbeat."
+            : "Sign in to enable the WAN Control Plane."
+#else
+        return TravisCloudAuthService.shared.isSignedIn
+            ? "Cloud session stored securely in Keychain."
+            : "Sign in to TRAVIS Cloud."
+#endif
+    }
+
+    private var cloudStatusSymbol: String {
+        if cloudAuthBusy {
+            return "arrow.triangle.2.circlepath"
+        }
+
+        if !TravisCloudAuthService.shared.isSignedIn {
+            return "icloud.slash"
+        }
+
+#if os(macOS)
+        switch TravisCloudControlPlane.shared.state {
+        case .online:
+            return "icloud.fill"
+        case .connecting:
+            return "icloud.and.arrow.up"
+        case .degraded:
+            return "exclamationmark.icloud"
+        case .unauthorized:
+            return "lock.icloud"
+        case .disabled:
+            return "icloud"
+        }
+#else
+        return "icloud.fill"
+#endif
+    }
+
+    private var cloudStatusColor: Color {
+        if cloudAuthBusy {
+            return .secondary
+        }
+
+        if !TravisCloudAuthService.shared.isSignedIn {
+            return .secondary
+        }
+
+#if os(macOS)
+        switch TravisCloudControlPlane.shared.state {
+        case .online:
+            return .green
+        case .connecting:
+            return .orange
+        case .degraded, .unauthorized:
+            return .red
+        case .disabled:
+            return .secondary
+        }
+#else
+        return .green
+#endif
+    }
+
+    @MainActor
+    private func signInCloudWithGitHub() async {
+        guard !cloudAuthBusy else { return }
+
+        cloudAuthBusy = true
+        cloudAuthMessage = nil
+
+        defer {
+            cloudAuthBusy = false
+        }
+
+        do {
+            let session =
+                try await TravisCloudAuthService.shared.signInWithGitHub()
+
+#if os(macOS)
+            startMacCloudControlPlane(
+                accessToken: session.accessToken
+            )
+            cloudAuthMessage =
+                "GitHub authenticated. Starting Cloud Control Plane…"
+#else
+            cloudAuthMessage =
+                "GitHub authenticated successfully."
+#endif
+        } catch {
+            cloudAuthMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func refreshCloudSession() async {
+        guard !cloudAuthBusy else { return }
+
+        cloudAuthBusy = true
+        cloudAuthMessage = nil
+
+        defer {
+            cloudAuthBusy = false
+        }
+
+        do {
+            let session =
+                try await TravisCloudAuthService.shared.refreshSession()
+
+#if os(macOS)
+            TravisCloudControlPlane.shared.stop()
+            startMacCloudControlPlane(accessToken: session.accessToken)
+            cloudAuthMessage = "Session refreshed. Cloud Control Plane restarted."
+#else
+            cloudAuthMessage = "Cloud session refreshed."
+#endif
+        } catch {
+            cloudAuthMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func signOutCloud() {
+#if os(macOS)
+        TravisCloudControlPlane.shared.stop()
+        TravisCloudControlPlane.shared.configure(accessToken: nil)
+#endif
+
+        TravisCloudAuthService.shared.signOut()
+
+        cloudAuthMessage = "Signed out. Cloud credentials removed from Keychain."
+    }
+
+#if os(macOS)
+    @MainActor
+    private func startMacCloudControlPlane(accessToken: String) {
+        let cloud = TravisCloudControlPlane.shared
+        let bridge = TravisDeviceBridgeService.shared
+
+        // Ensure a previous loop cannot survive a re-authentication.
+        cloud.stop()
+        cloud.configure(accessToken: accessToken)
+
+        cloud.startMacHeartbeat(
+            deviceKey: bridge.localDeviceID.uuidString,
+            displayName: ProcessInfo.processInfo.hostName,
+            workerOnline: {
+                AlwaysOnWorkerMonitor.shared.refresh()
+                return AlwaysOnWorkerMonitor.shared.isHealthy
+            },
+            guiOnline: {
+                true
+            },
+            lanOnline: {
+                TravisDeviceBridgeService.shared.isConnected
+            }
+        )
+    }
+#endif
 }

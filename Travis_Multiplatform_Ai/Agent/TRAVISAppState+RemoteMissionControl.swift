@@ -7,6 +7,144 @@ extension TRAVISAppState {
 
     @discardableResult
     func handleControlPlaneCommand(_ command: TravisControlCommand) async -> TravisControlCommandResult {
+        let receipts = TravisControlCommandReceiptStore.shared
+
+        // Expired commands never receive permission to execute.
+        if command.isExpired {
+            let result = TravisControlCommandResult(
+                commandID: command.id,
+                status: .expired,
+                message: "Control command expired before execution."
+            )
+
+            do {
+                let claim = try await receipts.claim(
+                    commandID: command.id,
+                    nonce: command.nonce,
+                    commandType: command.type.rawValue,
+                    sourceDeviceID: command.deviceID,
+                    payload: command.payload
+                )
+
+                switch claim {
+                case .execute:
+                    try await receipts.finish(
+                        commandID: command.id,
+                        status: result.status,
+                        message: result.message
+                    )
+
+                case .duplicate(let receipt):
+                    return cachedControlPlaneResult(
+                        commandID: command.id,
+                        receipt: receipt
+                    )
+
+                case .conflict:
+                    return TravisControlCommandResult(
+                        commandID: command.id,
+                        status: .failed,
+                        message: "Control command ID conflict: commandID was previously claimed with a different nonce."
+                    )
+                }
+            } catch {
+                return TravisControlCommandResult(
+                    commandID: command.id,
+                    status: .failed,
+                    message: "Control Plane receipt persistence failed: \(error.localizedDescription)"
+                )
+            }
+
+            return result
+        }
+
+        let claim: TravisControlCommandReceiptStore.Claim
+
+        do {
+            claim = try await receipts.claim(
+                commandID: command.id,
+                nonce: command.nonce,
+                commandType: command.type.rawValue,
+                sourceDeviceID: command.deviceID,
+                payload: command.payload
+            )
+        } catch {
+            // Fail closed: if we cannot durably claim the command, no
+            // side effect is allowed to execute.
+            return TravisControlCommandResult(
+                commandID: command.id,
+                status: .failed,
+                message: "Control Plane receipt persistence failed: \(error.localizedDescription)"
+            )
+        }
+
+        switch claim {
+        case .duplicate(let receipt):
+            return cachedControlPlaneResult(
+                commandID: command.id,
+                receipt: receipt
+            )
+
+        case .conflict:
+            return TravisControlCommandResult(
+                commandID: command.id,
+                status: .failed,
+                message: "Control command ID conflict: commandID was previously claimed with a different nonce."
+            )
+
+        case .execute:
+            break
+        }
+
+        // From this point onward this invocation is the only invocation
+        // permitted to perform the command's side effects.
+        let result = await executeControlPlaneCommand(command)
+
+        do {
+            try await receipts.finish(
+                commandID: command.id,
+                status: result.status,
+                message: result.message
+            )
+        } catch {
+            // The command may already have produced a side effect.
+            // Never retry it automatically when terminal receipt persistence
+            // fails; require reconciliation instead.
+            return TravisControlCommandResult(
+                commandID: command.id,
+                status: .failed,
+                message: "Command executed but terminal receipt persistence failed; reconciliation required: \(error.localizedDescription)"
+            )
+        }
+
+        return result
+    }
+
+    private func cachedControlPlaneResult(
+        commandID: UUID,
+        receipt: TravisControlCommandReceiptStore.Receipt
+    ) -> TravisControlCommandResult {
+        if let status = receipt.resultStatus,
+           let message = receipt.resultMessage {
+            return TravisControlCommandResult(
+                commandID: commandID,
+                status: status,
+                message: message
+            )
+        }
+
+        // An executing receipt without a terminal result is deliberately
+        // not re-executed. The original invocation may still be running,
+        // or the process may have stopped after the side effect but before
+        // persisting the terminal result.
+        return TravisControlCommandResult(
+            commandID: commandID,
+            status: .failed,
+            message: "Duplicate command suppressed: prior execution is unresolved; reconciliation required."
+        )
+    }
+
+    private func executeControlPlaneCommand(_ command: TravisControlCommand) async -> TravisControlCommandResult {
         guard !command.isExpired else {
             return TravisControlCommandResult(
                 commandID: command.id,
