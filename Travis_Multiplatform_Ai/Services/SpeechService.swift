@@ -248,22 +248,31 @@ final class PrivateAudioProfileService: NSObject, AVAudioPlayerDelegate {
 
     func playStartupSequence(greeting: String, language: AppLanguage) {
         startupSequenceTask?.cancel()
+        startupPlayer?.stop()
+        startupPlayer = nil
+
         startupSequenceTask = Task { @MainActor in
             let trimmed = greeting.trimmingCharacters(in: .whitespacesAndNewlines)
-            let hasMusic = startLoopingStartupMusic()
-            if hasMusic {
-                try? await Task.sleep(for: .milliseconds(900))
-                guard !Task.isCancelled else { return }
-                startupPlayer?.setVolume(0.22, fadeDuration: 0.55)
+
+            // Startup audio and TRAVIS speech are deliberately sequential.
+            // A configured startup clip must never be mixed underneath the
+            // generated/private TRAVIS voice (and voiceReference is never
+            // treated as playback audio here).
+            if let duration = playStartupSoundForSequence() {
+                let wait = max(0, duration) + 0.15
+                try? await Task.sleep(for: .seconds(wait))
+                guard !Task.isCancelled else {
+                    startupPlayer?.stop()
+                    startupPlayer = nil
+                    return
+                }
             }
 
             let briefing = taskBriefing(language: language)
             let spokenText = [trimmed, briefing].filter { !$0.isEmpty }.joined(separator: " ")
-            guard !spokenText.isEmpty else { scheduleMusicFadeOut(); return }
+            guard !spokenText.isEmpty else { return }
 
-            SpeechService.shared.speak(spokenText, language: language) { [weak self] in
-                self?.scheduleMusicFadeOut()
-            }
+            SpeechService.shared.speak(spokenText, language: language)
         }
     }
 
@@ -285,6 +294,30 @@ final class PrivateAudioProfileService: NSObject, AVAudioPlayerDelegate {
         }
         if active.count > 3 { parts.append("Υπάρχουν ακόμη \(active.count - 3) ενεργές εργασίες.") }
         return parts.joined(separator: " ")
+    }
+
+    private func playStartupSoundForSequence() -> TimeInterval? {
+        guard let url = storedURL(for: .startup),
+              FileManager.default.fileExists(atPath: url.path) else {
+            return nil
+        }
+
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            startupPlayer = player
+            player.delegate = self
+            player.numberOfLoops = 0
+            player.volume = 0.72
+            player.prepareToPlay()
+            guard player.play() else {
+                startupPlayer = nil
+                return nil
+            }
+            return player.duration
+        } catch {
+            print("[PrivateAudioProfileService] Startup sequence playback failed: \(error)")
+            return nil
+        }
     }
 
     private func startLoopingStartupMusic() -> Bool {
