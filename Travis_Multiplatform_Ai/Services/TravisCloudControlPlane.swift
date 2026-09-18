@@ -55,7 +55,7 @@ final class TravisCloudControlPlane {
                 }
                 try? await Task.sleep(for: .seconds(3))
             }
-        }}
+        }
     }
     func stop(){loop?.cancel();loop=nil;state = .disabled}
 
