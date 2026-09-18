@@ -7,6 +7,7 @@ struct TravisPremiumCommandCenterView: View {
     @State private var learning = TravisLearningService.shared
     @State private var pulse = false
     @State private var showingChat = false
+    @State private var worker = AlwaysOnWorkerMonitor.shared
 
     private let cyan = Color(red: 0.04, green: 0.82, blue: 1)
     private let electric = Color(red: 0.16, green: 0.48, blue: 1)
@@ -24,7 +25,7 @@ struct TravisPremiumCommandCenterView: View {
                             navigationRail.frame(width: 200)
                             VStack(spacing: 12) {
                                 HStack(alignment: .top, spacing: 12) {
-                                    VStack(spacing: 12) { systemStatus; coreModules; systemMetrics; resourceMonitor }.frame(width: 320)
+                                    VStack(spacing: 12) { systemStatus; alwaysOnWorkerPanel; coreModules; systemMetrics; resourceMonitor }.frame(width: 320)
                                     aiCore.frame(width: 540, height: 730)
                                     VStack(spacing: 12) { currentMission; taskPipeline; missionActivity; quickActions }.frame(width: 445)
                                 }
@@ -38,7 +39,7 @@ struct TravisPremiumCommandCenterView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onAppear { telemetry.start(); learning.refresh(); pulse = true }
+        .onAppear { telemetry.start(); learning.refresh(); worker.start(); worker.refresh(); pulse = true }
         .onDisappear { telemetry.stop() }
         .sheet(isPresented: $showingChat) {
             TravisPremiumWorkspaceChatView(appState: appState)
@@ -84,6 +85,50 @@ struct TravisPremiumCommandCenterView: View {
         .overlay(alignment: .bottom) { LinearGradient(colors: [.clear, electric.opacity(0.18), cyan.opacity(0.08), .clear], startPoint: .leading, endPoint: .trailing).frame(height: 3).offset(y: 3) }
         .shadow(color: .black.opacity(0.98), radius: 20, y: 13)
         .shadow(color: cyan.opacity(0.16), radius: 16, y: -2)
+    }
+
+    private var alwaysOnWorkerPanel: some View {
+        let snapshot = worker.snapshot
+        let healthy = worker.isHealthy
+        let killSwitch = snapshot?.killSwitch ?? false
+        let state = snapshot?.state.uppercased() ?? "OFFLINE"
+        let age = max(0, worker.heartbeatAge ?? 0)
+        let active = snapshot?.activeServiceJobs ?? 0
+        let failed = snapshot?.failedServiceJobs ?? 0
+        return hudPanel("ALWAYS-ON WORKER", "server.rack") {
+            HStack {
+                statusPill(healthy ? "ONLINE" : "OFFLINE", healthy ? .green : .red)
+                Spacer()
+                Text(state).font(.system(size: 9, weight: .heavy, design: .rounded)).foregroundStyle(killSwitch ? .red : (healthy ? .green : .secondary))
+            }
+            HStack(spacing: 8) {
+                workerMetric("PID", snapshot.map { String($0.pid) } ?? "—")
+                workerMetric("HEARTBEAT", healthy ? String(format: "%.1fs", age) : "STALE")
+            }
+            HStack(spacing: 8) {
+                workerMetric("JOBS", "\\(active) ACTIVE")
+                workerMetric("FAILED", "\\(failed)")
+            }
+            HStack {
+                Label(killSwitch ? "KILL SWITCH ON" : "KILL SWITCH OFF", systemImage: killSwitch ? "exclamationmark.octagon.fill" : "checkmark.shield.fill")
+                    .font(.system(size: 8, weight: .heavy, design: .rounded))
+                    .foregroundStyle(killSwitch ? .red : .green)
+                Spacer()
+                Button { worker.refresh() } label: { Image(systemName: "arrow.clockwise").foregroundStyle(cyan) }
+                    .buttonStyle(.plain).help("Refresh Always-On worker status")
+            }
+        }
+    }
+
+    private func workerMetric(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.system(size: 6, weight: .bold, design: .rounded)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundStyle(.white)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(7)
+        .background(RoundedRectangle(cornerRadius: 7).fill(.black.opacity(0.24)))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(cyan.opacity(0.18), lineWidth: 0.7))
     }
 
     private var navigationRail: some View {
