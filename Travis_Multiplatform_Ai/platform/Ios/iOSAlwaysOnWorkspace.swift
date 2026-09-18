@@ -5,12 +5,34 @@ struct iOSAlwaysOnWorkspace:View{
     @State private var bridge=TravisDeviceBridgeService.shared
     @State private var confirm=false
     @State private var expanded:Set<UUID>=[]
+    @State private var controlMessage:String?
     private let cyan=Color(red:0.04,green:0.82,blue:1),panel=Color(red:0.004,green:0.042,blue:0.125)
-    var body:some View{ZStack{Color.black.ignoresSafeArea();ScrollView{VStack(spacing:12){header;stats;controls;jobs}.padding(14)}}.navigationTitle("Always-On").task{while !Task.isCancelled{if bridge.isConnected{bridge.requestStatus()};try? await Task.sleep(for:.seconds(2))}}.alert("Emergency stop?",isPresented:$confirm){Button("STOP ALL",role:.destructive){bridge.sendCommandToMac("/alwayson-kill")};Button("Cancel",role:.cancel){}}}
+    var body:some View{ZStack{Color.black.ignoresSafeArea();ScrollView{VStack(spacing:12){header;stats;controls;jobs}.padding(14)}}.navigationTitle("Always-On").task{while !Task.isCancelled{if bridge.isConnected{bridge.requestStatus()};try? await Task.sleep(for:.seconds(2))}}.alert("Emergency stop?",isPresented:$confirm){Button("STOP ALL",role:.destructive){sendKillSwitch(true)};Button("Cancel",role:.cancel){}}}
     private var r:TravisBridgeAlwaysOnSnapshot?{bridge.lastStatus?.alwaysOn}
     private var header:some View{HStack{Image(systemName:"server.rack").foregroundStyle(cyan);VStack(alignment:.leading,spacing:3){Text("ALWAYS-ON RUNTIME").bold();Text(r?.summary ?? "WAITING FOR MAC").font(.caption).foregroundStyle(r?.workerHealthy == true ? .green:.orange);HStack(spacing:8){if let pid=r?.workerPID{Text("PID \(pid)")};if let age=r?.heartbeatAgeSeconds{Text(String(format:"HB %.1fs",age))};if let gen=r?.workerGeneration{Text("GEN \(gen.prefix(8))")}}.font(.caption2).foregroundStyle(.secondary)};Spacer();Circle().fill(r?.workerHealthy == true ? Color.green:Color.orange).frame(width:8,height:8)}.padding().background(RoundedRectangle(cornerRadius:14).fill(panel))}
     private var stats:some View{HStack{tile("WORKER",r?.workerHealthy == true ? "ONLINE":"OFFLINE",r?.workerHealthy == true ? .green:.red);tile("ACTIVE","\(r?.jobsActive ?? 0)",cyan);tile("FAILED","\(r?.jobsFailed ?? 0)",.orange)}}
-    private var controls:some View{HStack{Button{confirm=true}label:{Label("KILL SWITCH",systemImage:"exclamationmark.octagon.fill").frame(maxWidth:.infinity)}.buttonStyle(.borderedProminent).tint(.red);Button{bridge.sendCommandToMac("/alwayson-clear-kill")}label:{Text("CLEAR").frame(maxWidth:.infinity)}.buttonStyle(.bordered).tint(cyan)}}
+    private var controls:some View{VStack(spacing:8){HStack{Button{confirm=true}label:{Label("KILL SWITCH",systemImage:"exclamationmark.octagon.fill").frame(maxWidth:.infinity)}.buttonStyle(.borderedProminent).tint(.red);Button{sendKillSwitch(false)}label:{Text("CLEAR").frame(maxWidth:.infinity)}.buttonStyle(.bordered).tint(cyan)};if let controlMessage{Text(controlMessage).font(.caption2).foregroundStyle(.secondary).frame(maxWidth:.infinity,alignment:.leading)}}}
+    private func sendKillSwitch(_ enabled:Bool){
+        controlMessage = enabled ? "Sending emergency stop…" : "Clearing emergency stop…"
+        if bridge.isConnected {
+            bridge.sendCommandToMac(enabled ? "/alwayson-kill" : "/alwayson-clear-kill")
+        }
+        Task {
+            do {
+                let cloud = TravisCloudControlPlane.shared
+                if let target = try await cloud.devices().first(where: { $0.platform.lowercased() == "macos" && $0.cloud_online }) {
+                    _ = try await cloud.sendCommand(targetDeviceID: target.id,type: "killSwitch",payload: ["enabled": enabled ? "true" : "false"])
+                    controlMessage = enabled ? "Emergency stop sent via Cloud Control Plane." : "Clear sent via Cloud Control Plane; jobs remain paused."
+                } else if bridge.isConnected {
+                    controlMessage = enabled ? "Emergency stop sent over LAN." : "Clear sent over LAN; jobs remain paused."
+                } else {
+                    controlMessage = "No reachable Mac via LAN or Cloud."
+                }
+            } catch {
+                controlMessage = bridge.isConnected ? "LAN command sent; Cloud fallback unavailable." : "Control command failed: \(error.localizedDescription)"
+            }
+        }
+    }
     @ViewBuilder private var jobs:some View{
         if let items=r?.jobs,!items.isEmpty{
             ForEach(items){j in
