@@ -1,0 +1,26 @@
+# macOS
+.DS_Store
+
+# Xcode
+xcuserdata/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+*.moved-aside
+*.pbxuser
+*.perspectivev3
+!default.perspectivev3
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# CocoaPods
+Pods/
+
+# Carthage
+Carthage/Build/

@@ -1,0 +1,614 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		227EC4D057E5DA09BCA718F5 /* SpeechRecognitionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1DC9788190AEBC7B78C4355 /* SpeechRecognitionService.swift */; };
+		5E1CB6B1475BBF9E9DC8A16C /* PersistedPaperAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CB0CA6A571176843957B003 /* PersistedPaperAccount.swift */; };
+		7DD7C82285C8369DD87F1BB9 /* PersistedProposedAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC450BC06CAAD3E401F366EF /* PersistedProposedAction.swift */; };
+		8116E394C469741F6A3F8DD6 /* PersistedChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A69246C40E57CB8B02C7544 /* PersistedChatMessage.swift */; };
+		893F1500C5EA890AFF209370 /* PersistedFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 649AB93329903D4F8F4A3477 /* PersistedFile.swift */; };
+		8B49A644F5700CCEA73B5E7B /* SpeechService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCB1DAF452075101C5ACDEC /* SpeechService.swift */; };
+		9F4A7A48ED9AC92FBFEF22C7 /* BinanceMarketDataService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */; };
+		A1637D2306AEDD20E59287F6 /* PersistenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D26CE687E215F445D4CC99D /* PersistenceService.swift */; };
+		BCB07EF7ECD6F3D5D3376542 /* StandingPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = B644373748CB262FB7E7B6BF /* StandingPermission.swift */; };
+		CEF8E2DC99224BD3FCF91515 /* TradingMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 284B3761775A6B546AB734F2 /* TradingMode.swift */; };
+		E438AC5CAB39E69A957D22FD /* PersistedPaperPosition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */; };
+		E78A0768C174CFCA897B1B06 /* BinanceTestnetTradingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3269621D0FB51D907F9F824 /* BinanceTestnetTradingService.swift */; };
+		E7FF4041F8088D0BD73BE9C5 /* ChatSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8A4BC751EBB945A37C536C8 /* ChatSession.swift */; };
+		EC21708D2FD0474200D1AB6D /* TRAVISAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC21708C2FD0474200D1AB6D /* TRAVISAppState.swift */; };
+		EC2170932FD047D600D1AB6D /* TravisPermission.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170922FD047D600D1AB6D /* TravisPermission.swift */; };
+		EC2170952FD047EE00D1AB6D /* TravisTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170942FD047EE00D1AB6D /* TravisTask.swift */; };
+		EC2170972FD0480300D1AB6D /* DeviceState.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170962FD0480300D1AB6D /* DeviceState.swift */; };
+		EC2170992FD0483200D1AB6D /* AIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170982FD0483200D1AB6D /* AIService.swift */; };
+		EC21709B2FD0484500D1AB6D /* SyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC21709A2FD0484500D1AB6D /* SyncService.swift */; };
+		EC21709D2FD0485600D1AB6D /* PermissionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC21709C2FD0485600D1AB6D /* PermissionService.swift */; };
+		EC21709F2FD0486500D1AB6D /* ExecutionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC21709E2FD0486500D1AB6D /* ExecutionService.swift */; };
+		EC2170BE2FD4471000D1AB6D /* TRAVISRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170BD2FD4471000D1AB6D /* TRAVISRootView.swift */; };
+		EC2170C02FD4472800D1AB6D /* TravisCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170BF2FD4472800D1AB6D /* TravisCommand.swift */; };
+		EC2170C32FD4472A00D1AB6D /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170C22FD4472A00D1AB6D /* AppLanguage.swift */; };
+		EC2170C52FD4472B00D1AB6D /* SidebarItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170C42FD4472B00D1AB6D /* SidebarItem.swift */; };
+		EC2170C72FD4472C00D1AB6D /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */; };
+		EC2171142FD5010200D1AB6E /* ProposedAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2171122FD5010100D1AB6E /* ProposedAction.swift */; };
+		EC2171222FD5020100D1AB6F /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2171202FD5020000D1AB6F /* KeychainService.swift */; };
+		F05AD77107CAF9DA881E8544 /* PersistedLocationBookmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */; };
+		F5EC4F0794E848C6CA141788 /* FileLocationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */; };
+		F9427A0857DC2CE7C90FEDDB /* PaperTradingConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6023541AB2F4D7680CC010C6 /* PaperTradingConstants.swift */; };
+		A1C10D010000000000000002 /* TravisCloudControlPlane.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10D010000000000000001 /* TravisCloudControlPlane.swift */; };
+		A1C10D010000000000000004 /* TravisCloudCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10D010000000000000003 /* TravisCloudCredentialStore.swift */; };
+		A1C10D020000000000000002 /* TravisCloudAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C10D020000000000000001 /* TravisCloudAuthService.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0D26CE687E215F445D4CC99D /* PersistenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceService.swift; sourceTree = "<group>"; };
+		1CB0CA6A571176843957B003 /* PersistedPaperAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedPaperAccount.swift; sourceTree = "<group>"; };
+		1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileLocationService.swift; sourceTree = "<group>"; };
+		284B3761775A6B546AB734F2 /* TradingMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradingMode.swift; sourceTree = "<group>"; };
+		3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinanceMarketDataService.swift; sourceTree = "<group>"; };
+		6023541AB2F4D7680CC010C6 /* PaperTradingConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaperTradingConstants.swift; sourceTree = "<group>"; };
+		649AB93329903D4F8F4A3477 /* PersistedFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedFile.swift; sourceTree = "<group>"; };
+		6FCB1DAF452075101C5ACDEC /* SpeechService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechService.swift; sourceTree = "<group>"; };
+		7A69246C40E57CB8B02C7544 /* PersistedChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedChatMessage.swift; sourceTree = "<group>"; };
+		92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedPaperPosition.swift; sourceTree = "<group>"; };
+		A3269621D0FB51D907F9F824 /* BinanceTestnetTradingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinanceTestnetTradingService.swift; sourceTree = "<group>"; };
+		ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedLocationBookmark.swift; sourceTree = "<group>"; };
+		B644373748CB262FB7E7B6BF /* StandingPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandingPermission.swift; sourceTree = "<group>"; };
+		B8A4BC751EBB945A37C536C8 /* ChatSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSession.swift; sourceTree = "<group>"; };
+		E1DC9788190AEBC7B78C4355 /* SpeechRecognitionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognitionService.swift; sourceTree = "<group>"; };
+		EC2170782FD0469A00D1AB6D /* Travis_Multiplatform_Ai.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Travis_Multiplatform_Ai.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EC21708C2FD0474200D1AB6D /* TRAVISAppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TRAVISAppState.swift; sourceTree = "<group>"; };
+		EC2170922FD047D600D1AB6D /* TravisPermission.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravisPermission.swift; sourceTree = "<group>"; };
+		EC2170942FD047EE00D1AB6D /* TravisTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravisTask.swift; sourceTree = "<group>"; };
+		EC2170962FD0480300D1AB6D /* DeviceState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceState.swift; sourceTree = "<group>"; };
+		EC2170982FD0483200D1AB6D /* AIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIService.swift; sourceTree = "<group>"; };
+		EC21709A2FD0484500D1AB6D /* SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncService.swift; sourceTree = "<group>"; };
+		EC21709C2FD0485600D1AB6D /* PermissionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionService.swift; sourceTree = "<group>"; };
+		EC21709E2FD0486500D1AB6D /* ExecutionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExecutionService.swift; sourceTree = "<group>"; };
+		EC2170BD2FD4471000D1AB6D /* TRAVISRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TRAVISRootView.swift; sourceTree = "<group>"; };
+		EC2170BF2FD4472800D1AB6D /* TravisCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravisCommand.swift; sourceTree = "<group>"; };
+		EC2170C22FD4472A00D1AB6D /* AppLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLanguage.swift; sourceTree = "<group>"; };
+		EC2170C42FD4472B00D1AB6D /* SidebarItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarItem.swift; sourceTree = "<group>"; };
+		EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
+		EC2171122FD5010100D1AB6E /* ProposedAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProposedAction.swift; sourceTree = "<group>"; };
+		EC2171202FD5020000D1AB6F /* KeychainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainService.swift; sourceTree = "<group>"; };
+		EC450BC06CAAD3E401F366EF /* PersistedProposedAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedProposedAction.swift; sourceTree = "<group>"; };
+		A1C10D010000000000000001 /* TravisCloudControlPlane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravisCloudControlPlane.swift; sourceTree = "<group>"; };
+		A1C10D010000000000000003 /* TravisCloudCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravisCloudCredentialStore.swift; sourceTree = "<group>"; };
+		A1C10D020000000000000001 /* TravisCloudAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravisCloudAuthService.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		EC2170BC2FD04AC300D1AB6D /* Exceptions for "Macos" folder in "Travis_Multiplatform_Ai" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			platformFiltersByRelativePath = {
+				MacAppShell.swift = (macos, xros, );
+			};
+			target = EC2170772FD0469A00D1AB6D /* Travis_Multiplatform_Ai */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		EC21707A2FD0469A00D1AB6D /* Travis_Multiplatform_Ai */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Travis_Multiplatform_Ai;
+			sourceTree = "<group>";
+		};
+		EC2170A02FD0488700D1AB6D /* Chat */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Chat;
+			sourceTree = "<group>";
+		};
+		EC2170A42FD048A300D1AB6D /* Settings */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		EC2170A82FD048CA00D1AB6D /* Permissions */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Permissions;
+			sourceTree = "<group>";
+		};
+		EC2170AC2FD048F100D1AB6D /* Ios */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Ios;
+			sourceTree = "<group>";
+		};
+		EC2170AD2FD048F900D1AB6D /* Macos */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				EC2170BC2FD04AC300D1AB6D /* Exceptions for "Macos" folder in "Travis_Multiplatform_Ai" target */,
+			);
+			path = Macos;
+			sourceTree = "<group>";
+		};
+		EC2171102FD5010000D1AB6E /* Agent */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Agent;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		EC2170752FD0469A00D1AB6D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		EC21706F2FD0469A00D1AB6D = {
+			isa = PBXGroup;
+			children = (
+				EC2171102FD5010000D1AB6E /* Agent */,
+				EC21708B2FD046E000D1AB6D /* platform */,
+				EC21708A2FD046D900D1AB6D /* Features */,
+				EC2170892FD046B400D1AB6D /* Services */,
+				EC2170882FD046AD00D1AB6D /* App */,
+				EC2170872FD046A200D1AB6D /* Models */,
+				EC21707A2FD0469A00D1AB6D /* Travis_Multiplatform_Ai */,
+				EC2170792FD0469A00D1AB6D /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		EC2170792FD0469A00D1AB6D /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				EC2170782FD0469A00D1AB6D /* Travis_Multiplatform_Ai.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		EC2170872FD046A200D1AB6D /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				EC2170922FD047D600D1AB6D /* TravisPermission.swift */,
+				EC2170942FD047EE00D1AB6D /* TravisTask.swift */,
+				EC2170962FD0480300D1AB6D /* DeviceState.swift */,
+				EC2170BF2FD4472800D1AB6D /* TravisCommand.swift */,
+				EC2170C22FD4472A00D1AB6D /* AppLanguage.swift */,
+				EC2170C42FD4472B00D1AB6D /* SidebarItem.swift */,
+				EC2170C62FD4472C00D1AB6D /* ChatMessage.swift */,
+				EC2171122FD5010100D1AB6E /* ProposedAction.swift */,
+				7A69246C40E57CB8B02C7544 /* PersistedChatMessage.swift */,
+				EC450BC06CAAD3E401F366EF /* PersistedProposedAction.swift */,
+				649AB93329903D4F8F4A3477 /* PersistedFile.swift */,
+				ADFE81A707900052A682A287 /* PersistedLocationBookmark.swift */,
+				B644373748CB262FB7E7B6BF /* StandingPermission.swift */,
+				B8A4BC751EBB945A37C536C8 /* ChatSession.swift */,
+				6023541AB2F4D7680CC010C6 /* PaperTradingConstants.swift */,
+				284B3761775A6B546AB734F2 /* TradingMode.swift */,
+				1CB0CA6A571176843957B003 /* PersistedPaperAccount.swift */,
+				92C8DFC69CFCA5D8ABB078F2 /* PersistedPaperPosition.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		EC2170882FD046AD00D1AB6D /* App */ = {
+			isa = PBXGroup;
+			children = (
+				EC21708C2FD0474200D1AB6D /* TRAVISAppState.swift */,
+				EC2170BD2FD4471000D1AB6D /* TRAVISRootView.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		EC2170892FD046B400D1AB6D /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				A1C10D020000000000000001 /* TravisCloudAuthService.swift */,
+				A1C10D010000000000000001 /* TravisCloudControlPlane.swift */,
+				A1C10D010000000000000003 /* TravisCloudCredentialStore.swift */,
+				EC2170982FD0483200D1AB6D /* AIService.swift */,
+				EC21709A2FD0484500D1AB6D /* SyncService.swift */,
+				EC21709C2FD0485600D1AB6D /* PermissionService.swift */,
+				EC21709E2FD0486500D1AB6D /* ExecutionService.swift */,
+				EC2171202FD5020000D1AB6F /* KeychainService.swift */,
+				0D26CE687E215F445D4CC99D /* PersistenceService.swift */,
+				1CDD3C3912D6CBA28B7CE264 /* FileLocationService.swift */,
+				3A17D594F1E75FC3049E53B9 /* BinanceMarketDataService.swift */,
+				A3269621D0FB51D907F9F824 /* BinanceTestnetTradingService.swift */,
+				6FCB1DAF452075101C5ACDEC /* SpeechService.swift */,
+				E1DC9788190AEBC7B78C4355 /* SpeechRecognitionService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		EC21708A2FD046D900D1AB6D /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				EC2170A82FD048CA00D1AB6D /* Permissions */,
+				EC2170A42FD048A300D1AB6D /* Settings */,
+				EC2170A02FD0488700D1AB6D /* Chat */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		EC21708B2FD046E000D1AB6D /* platform */ = {
+			isa = PBXGroup;
+			children = (
+				EC2170AD2FD048F900D1AB6D /* Macos */,
+				EC2170AC2FD048F100D1AB6D /* Ios */,
+			);
+			path = platform;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		EC2170772FD0469A00D1AB6D /* Travis_Multiplatform_Ai */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EC2170842FD0469B00D1AB6D /* Build configuration list for PBXNativeTarget "Travis_Multiplatform_Ai" */;
+			buildPhases = (
+				EC2170742FD0469A00D1AB6D /* Sources */,
+				EC2170752FD0469A00D1AB6D /* Frameworks */,
+				EC2170762FD0469A00D1AB6D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				EC21707A2FD0469A00D1AB6D /* Travis_Multiplatform_Ai */,
+				EC2170A02FD0488700D1AB6D /* Chat */,
+				EC2170A42FD048A300D1AB6D /* Settings */,
+				EC2170A82FD048CA00D1AB6D /* Permissions */,
+				EC2170AC2FD048F100D1AB6D /* Ios */,
+				EC2170AD2FD048F900D1AB6D /* Macos */,
+				EC2171102FD5010000D1AB6E /* Agent */,
+			);
+			name = Travis_Multiplatform_Ai;
+			packageProductDependencies = (
+			);
+			productName = Travis_Multiplatform_Ai;
+			productReference = EC2170782FD0469A00D1AB6D /* Travis_Multiplatform_Ai.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		EC2170702FD0469A00D1AB6D /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1640;
+				LastUpgradeCheck = 1640;
+				TargetAttributes = {
+					EC2170772FD0469A00D1AB6D = {
+						CreatedOnToolsVersion = 16.4;
+					};
+				};
+			};
+			buildConfigurationList = EC2170732FD0469A00D1AB6D /* Build configuration list for PBXProject "Travis_Multiplatform_Ai" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = EC21706F2FD0469A00D1AB6D;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = EC2170792FD0469A00D1AB6D /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				EC2170772FD0469A00D1AB6D /* Travis_Multiplatform_Ai */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		EC2170762FD0469A00D1AB6D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		EC2170742FD0469A00D1AB6D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1C10D020000000000000002 /* TravisCloudAuthService.swift in Sources */,
+				A1C10D010000000000000002 /* TravisCloudControlPlane.swift in Sources */,
+				A1C10D010000000000000004 /* TravisCloudCredentialStore.swift in Sources */,
+				EC2170992FD0483200D1AB6D /* AIService.swift in Sources */,
+				EC21708D2FD0474200D1AB6D /* TRAVISAppState.swift in Sources */,
+				EC21709B2FD0484500D1AB6D /* SyncService.swift in Sources */,
+				EC2170C02FD4472800D1AB6D /* TravisCommand.swift in Sources */,
+				EC2170952FD047EE00D1AB6D /* TravisTask.swift in Sources */,
+				EC2170BE2FD4471000D1AB6D /* TRAVISRootView.swift in Sources */,
+				EC2170932FD047D600D1AB6D /* TravisPermission.swift in Sources */,
+				EC2170972FD0480300D1AB6D /* DeviceState.swift in Sources */,
+				EC21709F2FD0486500D1AB6D /* ExecutionService.swift in Sources */,
+				EC21709D2FD0485600D1AB6D /* PermissionService.swift in Sources */,
+				EC2170C32FD4472A00D1AB6D /* AppLanguage.swift in Sources */,
+				EC2170C52FD4472B00D1AB6D /* SidebarItem.swift in Sources */,
+				EC2170C72FD4472C00D1AB6D /* ChatMessage.swift in Sources */,
+				EC2171142FD5010200D1AB6E /* ProposedAction.swift in Sources */,
+				EC2171222FD5020100D1AB6F /* KeychainService.swift in Sources */,
+				8116E394C469741F6A3F8DD6 /* PersistedChatMessage.swift in Sources */,
+				7DD7C82285C8369DD87F1BB9 /* PersistedProposedAction.swift in Sources */,
+				893F1500C5EA890AFF209370 /* PersistedFile.swift in Sources */,
+				A1637D2306AEDD20E59287F6 /* PersistenceService.swift in Sources */,
+				F05AD77107CAF9DA881E8544 /* PersistedLocationBookmark.swift in Sources */,
+				F5EC4F0794E848C6CA141788 /* FileLocationService.swift in Sources */,
+				BCB07EF7ECD6F3D5D3376542 /* StandingPermission.swift in Sources */,
+				E7FF4041F8088D0BD73BE9C5 /* ChatSession.swift in Sources */,
+				F9427A0857DC2CE7C90FEDDB /* PaperTradingConstants.swift in Sources */,
+				CEF8E2DC99224BD3FCF91515 /* TradingMode.swift in Sources */,
+				5E1CB6B1475BBF9E9DC8A16C /* PersistedPaperAccount.swift in Sources */,
+				E438AC5CAB39E69A957D22FD /* PersistedPaperPosition.swift in Sources */,
+				9F4A7A48ED9AC92FBFEF22C7 /* BinanceMarketDataService.swift in Sources */,
+				E78A0768C174CFCA897B1B06 /* BinanceTestnetTradingService.swift in Sources */,
+				8B49A644F5700CCEA73B5E7B /* SpeechService.swift in Sources */,
+				227EC4D057E5DA09BCA718F5 /* SpeechRecognitionService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		EC2170822FD0469B00D1AB6D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 5N7C7P29DB;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		EC2170832FD0469B00D1AB6D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 5N7C7P29DB;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		EC2170852FD0469B00D1AB6D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Travis_Multiplatform_Ai/Travis_Multiplatform_Ai.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Travis_Multiplatform_Ai/Travis_Multiplatform_Ai-macOS.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5N7C7P29DB;
+				ENABLE_APP_SANDBOX = YES;
+				"ENABLE_APP_SANDBOX[sdk=macosx*]" = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "$(SRCROOT)/Travis-Multiplatform-Ai-Info.plist";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "TRAVIS uses the local network to securely connect your iPhone with your Mac.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ο TRAVIS χρειάζεται πρόσβαση στο μικρόφωνο για να σε ακούει όταν του μιλάς.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Ο TRAVIS χρειάζεται αναγνώριση ομιλίας για να καταλαβαίνει τι του λες φωναχτά.";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.konstantinos.Travis-Multiplatform-Ai";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				XROS_DEPLOYMENT_TARGET = 2.5;
+			};
+			name = Debug;
+		};
+		EC2170862FD0469B00D1AB6D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Travis_Multiplatform_Ai/Travis_Multiplatform_Ai.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Travis_Multiplatform_Ai/Travis_Multiplatform_Ai-macOS.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 5N7C7P29DB;
+				ENABLE_APP_SANDBOX = YES;
+				"ENABLE_APP_SANDBOX[sdk=macosx*]" = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "$(SRCROOT)/Travis-Multiplatform-Ai-Info.plist";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "TRAVIS uses the local network to securely connect your iPhone with your Mac.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ο TRAVIS χρειάζεται πρόσβαση στο μικρόφωνο για να σε ακούει όταν του μιλάς.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Ο TRAVIS χρειάζεται αναγνώριση ομιλίας για να καταλαβαίνει τι του λες φωναχτά.";
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
+				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
+				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 15.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.konstantinos.Travis-Multiplatform-Ai";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				XROS_DEPLOYMENT_TARGET = 2.5;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		EC2170732FD0469A00D1AB6D /* Build configuration list for PBXProject "Travis_Multiplatform_Ai" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EC2170822FD0469B00D1AB6D /* Debug */,
+				EC2170832FD0469B00D1AB6D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EC2170842FD0469B00D1AB6D /* Build configuration list for PBXNativeTarget "Travis_Multiplatform_Ai" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EC2170852FD0469B00D1AB6D /* Debug */,
+				EC2170862FD0469B00D1AB6D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = EC2170702FD0469A00D1AB6D /* Project object */;
+}
