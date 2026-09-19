@@ -28,7 +28,7 @@ final class AlwaysOnRuntimeEngine {
     }
     func stop(){isRunning=false;loopTask?.cancel();loopTask=nil}
 
-    func schedule(_ job:AlwaysOnJob){ jobs.removeAll{$0.id==job.id}; jobs.append(job); persistUpsert(job) }
+    func schedule(_ job:AlwaysOnJob){ mutateOrInsert(job) }
     func pause(_ id:UUID){ mutate(id){$0.state = .paused;$0.isEnabled=false} }
     func resume(_ id:UUID){ mutate(id){$0.state = .scheduled;$0.isEnabled=true;$0.nextRunAt=Date()} }
     func delete(_ id:UUID){
@@ -40,8 +40,28 @@ final class AlwaysOnRuntimeEngine {
         }
     }
 
-    private func mutate(_ id:UUID,_ body:(inout AlwaysOnJob)->Void){guard let i=jobs.firstIndex(where:{$0.id==id})else{return};body(&jobs[i]);jobs[i].updatedAt=Date();persistUpsert(jobs[i])}
-    private func persistUpsert(_ job:AlwaysOnJob){Task{[weak self] in do{try await AlwaysOnJobStore.shared.upsert(job);await MainActor.run{self?.lastPersistenceError=nil}}catch{await MainActor.run{self?.lastPersistenceError=error.localizedDescription}}}}
+    private func mutateOrInsert(_ job:AlwaysOnJob){
+        let previous=jobs.first(where:{$0.id==job.id})
+        jobs.removeAll{$0.id==job.id};jobs.append(job)
+        persistUpsert(job,rollback:previous)
+    }
+    private func mutate(_ id:UUID,_ body:(inout AlwaysOnJob)->Void){
+        guard let i=jobs.firstIndex(where:{$0.id==id})else{return}
+        let previous=jobs[i]
+        body(&jobs[i]);jobs[i].updatedAt=Date()
+        persistUpsert(jobs[i],rollback:previous)
+    }
+    private func persistUpsert(_ job:AlwaysOnJob,rollback:AlwaysOnJob?){
+        Task{[weak self] in
+            do{try await AlwaysOnJobStore.shared.upsert(job);await MainActor.run{self?.lastPersistenceError=nil}}
+            catch{await MainActor.run{
+                guard let self else{return}
+                self.jobs.removeAll{$0.id==job.id}
+                if let rollback{self.jobs.append(rollback)}
+                self.lastPersistenceError=error.localizedDescription
+            }}
+        }
+    }
 
     private func tick() async {
         lastHeartbeat=Date()
