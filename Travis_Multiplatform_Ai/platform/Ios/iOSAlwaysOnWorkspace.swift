@@ -50,8 +50,31 @@ struct iOSAlwaysOnWorkspace:View{
                 }
                 _ = try await cloud.sendCommand(command, targetDeviceID: target.id)
                 controlMessage = enabled
-                    ? "Emergency stop sent via Cloud Control Plane."
-                    : "Clear sent via Cloud Control Plane; jobs remain paused."
+                    ? "Emergency stop sent via Cloud; waiting for Mac confirmation…"
+                    : "Clear sent via Cloud; waiting for Mac confirmation…"
+
+                let deadline = Date().addingTimeInterval(12)
+                while Date() < deadline && !Task.isCancelled {
+                    if let remote = try await cloud.commandStatus(commandID: command.id) {
+                        switch remote.status.lowercased() {
+                        case "completed":
+                            let detail = remote.result?["message"]
+                            controlMessage = detail ?? (enabled
+                                ? "Emergency stop confirmed by Mac."
+                                : "Emergency stop cleared by Mac; jobs remain paused.")
+                            return
+                        case "failed", "expired":
+                            controlMessage = remote.result?["message"]
+                                ?? "Mac rejected or could not complete the safety command."
+                            return
+                        default:
+                            break
+                        }
+                    }
+                    try await Task.sleep(for: .milliseconds(400))
+                }
+
+                controlMessage = "No terminal confirmation from Mac; final safety state is unknown."
             } catch {
                 controlMessage = "Cloud fallback failed: \(error.localizedDescription)"
             }
