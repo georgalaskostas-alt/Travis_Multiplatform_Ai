@@ -2,6 +2,7 @@ import Foundation
 
 final class DeferredWorkStore {
     static let shared = DeferredWorkStore()
+    private let schemaVersion = 1
 
     private struct Envelope: Codable {
         var version: Int
@@ -33,11 +34,15 @@ final class DeferredWorkStore {
     func load() throws -> [DeferredWorkItem] {
         guard fileManager.fileExists(atPath: fileURL.path) else { return [] }
         let data = try Data(contentsOf: fileURL)
-        return try decoder.decode(Envelope.self, from: data).items
+        let envelope = try decoder.decode(Envelope.self, from: data)
+        guard envelope.version == schemaVersion else {
+            throw DeferredWorkStoreError.unsupportedSchema(envelope.version)
+        }
+        return envelope.items
     }
 
     func save(_ items: [DeferredWorkItem]) throws {
-        let data = try encoder.encode(Envelope(version: 1, items: items))
+        let data = try encoder.encode(Envelope(version: schemaVersion, items: items))
         let temporaryURL = fileURL.appendingPathExtension("tmp")
         try data.write(to: temporaryURL, options: .atomic)
 
@@ -45,6 +50,18 @@ final class DeferredWorkStore {
             _ = try fileManager.replaceItemAt(fileURL, withItemAt: temporaryURL)
         } else {
             try fileManager.moveItem(at: temporaryURL, to: fileURL)
+        }
+    }
+}
+
+
+enum DeferredWorkStoreError: LocalizedError {
+    case unsupportedSchema(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedSchema(let version):
+            return "Unsupported deferred work snapshot schema: \(version)."
         }
     }
 }
