@@ -8,6 +8,7 @@ final class AlwaysOnRuntimeEngine {
     private(set) var isRunning=false
     private(set) var startedAt:Date?
     private(set) var lastHeartbeat:Date?
+    private(set) var lastPersistenceError:String?
     var onDueJob: ((AlwaysOnJob) async throws -> Void)?
     private var loopTask:Task<Void,Never>?
 
@@ -20,12 +21,13 @@ final class AlwaysOnRuntimeEngine {
     }
     func stop(){isRunning=false;loopTask?.cancel();loopTask=nil}
 
-    func schedule(_ job:AlwaysOnJob){ jobs.removeAll{$0.id==job.id}; jobs.append(job); Task{try? await AlwaysOnJobStore.shared.upsert(job)} }
+    func schedule(_ job:AlwaysOnJob){ jobs.removeAll{$0.id==job.id}; jobs.append(job); persistUpsert(job) }
     func pause(_ id:UUID){ mutate(id){$0.state = .paused;$0.isEnabled=false} }
     func resume(_ id:UUID){ mutate(id){$0.state = .scheduled;$0.isEnabled=true;$0.nextRunAt=Date()} }
-    func delete(_ id:UUID){jobs.removeAll{$0.id==id};Task{try? await AlwaysOnJobStore.shared.remove(id)}}
+    func delete(_ id:UUID){jobs.removeAll{$0.id==id};Task{[weak self] in do{try await AlwaysOnJobStore.shared.remove(id);await MainActor.run{self?.lastPersistenceError=nil}}catch{await MainActor.run{self?.lastPersistenceError=error.localizedDescription}}}}
 
-    private func mutate(_ id:UUID,_ body:(inout AlwaysOnJob)->Void){guard let i=jobs.firstIndex(where:{$0.id==id})else{return};body(&jobs[i]);jobs[i].updatedAt=Date();let copy=jobs[i];Task{try? await AlwaysOnJobStore.shared.upsert(copy)}}
+    private func mutate(_ id:UUID,_ body:(inout AlwaysOnJob)->Void){guard let i=jobs.firstIndex(where:{$0.id==id})else{return};body(&jobs[i]);jobs[i].updatedAt=Date();persistUpsert(jobs[i])}
+    private func persistUpsert(_ job:AlwaysOnJob){Task{[weak self] in do{try await AlwaysOnJobStore.shared.upsert(job);await MainActor.run{self?.lastPersistenceError=nil}}catch{await MainActor.run{self?.lastPersistenceError=error.localizedDescription}}}}
 
     private func tick() async {
         lastHeartbeat=Date()
@@ -33,7 +35,7 @@ final class AlwaysOnRuntimeEngine {
             guard jobs[index].isEnabled, jobs[index].state != .running else{continue}
             let due=jobs[index].nextRunAt ?? jobs[index].createdAt
             guard due <= Date() else{continue}
-            let id=jobs[index].id; jobs[index].state = .running; jobs[index].updatedAt=Date(); try? await AlwaysOnJobStore.shared.upsert(jobs[index])
+            let id=jobs[index].id; jobs[index].state = .running; jobs[index].updatedAt=Date(); do{try await AlwaysOnJobStore.shared.upsert(jobs[index]);lastPersistenceError=nil}catch{lastPersistenceError=error.localizedDescription;continue}
             do { if let onDueJob { try await onDueJob(jobs[index]) }; completeCycle(id) }
             catch { failCycle(id,error:error) }
         }
