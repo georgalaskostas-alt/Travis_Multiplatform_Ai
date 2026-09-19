@@ -7,7 +7,7 @@ final class TravisCloudControlPlane {
     static let shared = TravisCloudControlPlane()
     enum LinkState:String,Codable { case disabled,connecting,online,degraded,unauthorized }
     struct Device:Codable,Identifiable,Equatable { let id:UUID;let device_key:String;let display_name:String;let platform:String;var worker_online:Bool;var gui_online:Bool;var lan_online:Bool;var cloud_online:Bool;var kill_switch:Bool;var last_seen_at:Date? }
-    struct Command:Codable,Identifiable,Equatable { let id:UUID;let target_device_id:UUID;let command_type:String;let payload:[String:String]?;let nonce:UUID;let status:String;let created_at:Date?;let expires_at:Date? }
+    struct Command:Codable,Identifiable,Equatable { let id:UUID;let target_device_id:UUID;let command_type:String;let payload:[String:String]?;let nonce:UUID;let status:String;let created_at:Date?;let expires_at:Date?;let result:[String:String]? }
     private let base=URL(string:"https://ggppmrcsdjhbasubhzit.supabase.co")!
     private let publishableKey="sb_publishable_M7xNRugheKl_cIRzULxrrw_v0qoxyEc"
     private(set) var state:LinkState = .disabled
@@ -416,6 +416,12 @@ final class TravisCloudControlPlane {
             nonce: command.nonce,
             expiresAt: command.expiresAt
         )
+    }
+    func commandStatus(commandID:UUID) async throws -> Command? {
+        let data=try await request(path:"/rest/v1/travis_commands?id=eq.\(commandID.uuidString)&select=*",method:"GET")
+        let values=try decoder.decode([Command].self,from:data)
+        guard values.count <= 1 else{throw CloudError.invalidResponse}
+        return values.first
     }
     func devices() async throws->[Device]{let data=try await request(path:"/rest/v1/travis_devices?select=*&order=last_seen_at.desc",method:"GET");return try decoder.decode([Device].self,from:data)}
 
