@@ -70,12 +70,20 @@ final class SelfAuditCapability: AgentCapability, DeterministicInvocableCapabili
             scanned += 1
             let rel = url.path.replacingOccurrences(of: root.path + "/", with: "")
             let lower = text.lowercased()
-            if lower.contains("development-only safety net") || text.contains("deleteDefaultStore") { findings.append((3,rel,"Destructive development persistence fallback detected; replace with versioned migration before production.")) }
-            if lower.contains("fatalerror(") { findings.append((2,rel,"fatalError present; verify production failure/recovery policy.")) }
-            if lower.contains("todo") || lower.contains("fixme") { findings.append((1,rel,"TODO/FIXME markers remain.")) }
+            let isAuditImplementation = rel.hasSuffix("SelfAuditCapability.swift") || rel.contains("travis_runtime_worker_v")
+            if !isAuditImplementation && (lower.contains("development-only safety net") || lower.contains("deletedefaultstore")) {
+                findings.append((3,rel,"Destructive development persistence fallback detected; replace with versioned migration before production."))
+            }
+            if !isAuditImplementation && (lower.contains("fatalerror(") || lower.contains("preconditionfailure(")) {
+                findings.append((2,rel,"Process-terminating failure path present; verify production recovery policy."))
+            }
+            if !isAuditImplementation && (lower.contains("todo") || lower.contains("fixme")) {
+                findings.append((1,rel,"TODO/FIXME markers remain."))
+            }
             if text.split(separator: "\n", omittingEmptySubsequences: false).count > 1200 { findings.append((2,rel,"Very large source file; candidate for decomposition/test isolation.")) }
-            let secretMarkers = ["api_key=","apikey=","password=","private_key","secret="]
-            if secretMarkers.contains(where: { lower.contains($0) }) { findings.append((3,rel,"Possible credential literal marker; inspect without exposing secret values.")) }
+            if !isAuditImplementation && containsLikelyCredentialLiteral(text) {
+                findings.append((3,rel,"Possible credential literal assignment; inspect without exposing secret values."))
+            }
         }
         findings.sort { $0.0 != $1.0 ? $0.0 > $1.0 : $0.1 < $1.1 }
         let high = findings.filter{$0.0==3}.count, medium=findings.filter{$0.0==2}.count, low=findings.filter{$0.0==1}.count
@@ -91,6 +99,28 @@ final class SelfAuditCapability: AgentCapability, DeterministicInvocableCapabili
 
         This audit can recommend changes autonomously. Applying code or GUI modifications remains a separately approval-gated action.
         """
+    }
+
+    private func containsLikelyCredentialLiteral(_ text: String) -> Bool {
+        // Deliberately conservative: flag assignment-like source lines only.
+        // Avoid matching documentation, scanner marker tables, Keychain account
+        // names, or variable declarations such as apiKey/secret without a value.
+        let keys = ["api_key", "apikey", "api-key", "password", "private_key", "private-key", "secret"]
+        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.hasPrefix("//"), !line.hasPrefix("#"), !line.isEmpty else { continue }
+            let lower = line.lowercased()
+            guard keys.contains(where: { lower.contains($0) }) else { continue }
+            guard let equal = line.firstIndex(of: "=") else { continue }
+            let rhs = line[line.index(after: equal)...].trimmingCharacters(in: .whitespaces)
+            guard rhs.count >= 2, let quote = rhs.first, quote == "\"" || quote == "'" else { continue }
+            let value = rhs.dropFirst().prefix { $0 != quote }
+            guard value.count >= 8 else { continue }
+            let normalized = value.lowercased()
+            if normalized.contains("keychain") || normalized.contains("environment") || normalized.contains("placeholder") || normalized.contains("example") { continue }
+            return true
+        }
+        return false
     }
 
     private func severity(_ rank: Int) -> String { rank == 3 ? "HIGH" : rank == 2 ? "MEDIUM" : "LOW" }
