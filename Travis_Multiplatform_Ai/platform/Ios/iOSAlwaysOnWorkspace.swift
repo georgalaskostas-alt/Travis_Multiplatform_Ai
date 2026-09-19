@@ -33,21 +33,72 @@ struct iOSAlwaysOnWorkspace:View{
             result: nil
         )
 
-        if bridge.isConnected {
+        let sentOverLAN = bridge.isConnected
+        if sentOverLAN {
             bridge.sendControlCommand(command)
             controlMessage = enabled
-                ? "Emergency stop sent over secure LAN Control Plane."
-                : "Clear sent over secure LAN Control Plane; jobs remain paused."
-            return
+                ? "Emergency stop sent over LAN; waiting for Mac confirmation…"
+                : "Clear sent over LAN; waiting for Mac confirmation…"
         }
 
         Task {
+            // LAN is the fast path. If the Mac does not acknowledge this exact
+            // command promptly, deliver the SAME ID + nonce through Cloud.
+            // The Mac receipt ledger then guarantees cross-transport deduplication.
+            if sentOverLAN {
+                let acknowledgementDeadline = Date().addingTimeInterval(2)
+                while Date() < acknowledgementDeadline && !Task.isCancelled {
+                    if let result = bridge.lastControlResult,
+                       result.commandID == command.id {
+                        if result.status == .completed {
+                            controlMessage = result.message
+                            bridge.requestStatus()
+                            return
+                        }
+                        if result.status == .failed || result.status == .expired {
+                            controlMessage = result.message
+                            bridge.requestStatus()
+                            return
+                        }
+                        if result.status == .acknowledged || result.status == .executing {
+                            break
+                        }
+                    }
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+
+                // An acknowledgement proves receipt, but not completion.
+                // Give the LAN execution a bounded window before Cloud fallback.
+                let terminalDeadline = Date().addingTimeInterval(6)
+                while Date() < terminalDeadline && !Task.isCancelled {
+                    if let result = bridge.lastControlResult,
+                       result.commandID == command.id {
+                        if result.status == .completed {
+                            controlMessage = result.message
+                            bridge.requestStatus()
+                            return
+                        }
+                        if result.status == .failed || result.status == .expired {
+                            controlMessage = result.message
+                            bridge.requestStatus()
+                            return
+                        }
+                    }
+                    try? await Task.sleep(for: .milliseconds(150))
+                }
+
+                controlMessage = "LAN confirmation missing; retrying the same safety command through Cloud…"
+            }
+
             do {
                 let cloud = TravisCloudControlPlane.shared
                 guard let target = try await cloud.devices().first(where: { $0.platform.lowercased() == "macos" && $0.cloud_online }) else {
-                    controlMessage = "No reachable Mac via LAN or Cloud."
+                    controlMessage = sentOverLAN
+                        ? "No terminal LAN confirmation and no reachable Cloud Mac; final safety state is unknown."
+                        : "No reachable Mac via LAN or Cloud."
                     return
                 }
+
                 _ = try await cloud.sendCommand(command, targetDeviceID: target.id)
                 controlMessage = enabled
                     ? "Emergency stop sent via Cloud; waiting for Mac confirmation…"
@@ -58,14 +109,15 @@ struct iOSAlwaysOnWorkspace:View{
                     if let remote = try await cloud.commandStatus(commandID: command.id) {
                         switch remote.status.lowercased() {
                         case "completed":
-                            let detail = remote.result?["message"]
-                            controlMessage = detail ?? (enabled
+                            controlMessage = remote.result?["message"] ?? (enabled
                                 ? "Emergency stop confirmed by Mac."
                                 : "Emergency stop cleared by Mac; jobs remain paused.")
+                            bridge.requestStatus()
                             return
                         case "failed", "expired":
                             controlMessage = remote.result?["message"]
                                 ?? "Mac rejected or could not complete the safety command."
+                            bridge.requestStatus()
                             return
                         default:
                             break
