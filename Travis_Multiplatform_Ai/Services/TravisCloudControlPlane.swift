@@ -409,8 +409,38 @@ final class TravisCloudControlPlane {
     private var decoder:JSONDecoder{let d=JSONDecoder();d.dateDecodingStrategy = .iso8601;return d}
     private func preparedRequest(path:String,method:String,prefer:String?) throws -> URLRequest{guard let token=accessToken,!token.isEmpty else{state = .unauthorized;throw CloudError.unauthorized};guard let url=URL(string:path,relativeTo:base) else{throw CloudError.invalidResponse};var r=URLRequest(url:url);r.httpMethod=method;r.setValue(publishableKey,forHTTPHeaderField:"apikey");r.setValue("Bearer \(token)",forHTTPHeaderField:"Authorization");r.setValue("application/json",forHTTPHeaderField:"Content-Type");if let prefer{r.setValue(prefer,forHTTPHeaderField:"Prefer")};return r}
     private func perform(_ r:URLRequest) async throws -> Data{let(data,response)=try await URLSession.shared.data(for:r);guard let h=response as? HTTPURLResponse else{throw CloudError.invalidResponse};guard 200..<300 ~= h.statusCode else{throw CloudError.http(h.statusCode,String(data:data,encoding:.utf8) ?? "")};return data}
-    private func request(path:String,method:String,prefer:String?=nil) async throws -> Data{try await perform(preparedRequest(path:path,method:method,prefer:prefer))}
-    private func request<B:Encodable>(path:String,method:String,body:B,prefer:String?=nil) async throws -> Data{var r=try preparedRequest(path:path,method:method,prefer:prefer);r.httpBody=try JSONEncoder().encode(body);return try await perform(r)}
+
+    /// Executes an authenticated Control Plane request. A JWT can expire or be
+    /// revoked between the proactive heartbeat refresh and the actual REST
+    /// request, so a 401 gets exactly one forced refresh + retry. Never retry
+    /// other HTTP failures automatically: command POSTs must not be duplicated.
+    private func authenticatedRequest(_ makeRequest:(String)throws->URLRequest) async throws -> Data {
+        let token = try await TravisCloudAuthService.shared.validAccessToken()
+        self.accessToken = token
+        do {
+            return try await perform(makeRequest(token))
+        } catch CloudError.http(let status, _) where status == 401 {
+            let refreshed = try await TravisCloudAuthService.shared.refreshSession()
+            self.accessToken = refreshed.accessToken
+            return try await perform(makeRequest(refreshed.accessToken))
+        }
+    }
+
+    private func request(path:String,method:String,prefer:String?=nil) async throws -> Data{
+        try await authenticatedRequest { token in
+            self.accessToken = token
+            return try self.preparedRequest(path:path,method:method,prefer:prefer)
+        }
+    }
+    private func request<B:Encodable>(path:String,method:String,body:B,prefer:String?=nil) async throws -> Data{
+        let encodedBody = try JSONEncoder().encode(body)
+        return try await authenticatedRequest { token in
+            self.accessToken = token
+            var r=try self.preparedRequest(path:path,method:method,prefer:prefer)
+            r.httpBody=encodedBody
+            return r
+        }
+    }
     enum CloudError: LocalizedError {
         case unauthorized
         case invalidResponse
