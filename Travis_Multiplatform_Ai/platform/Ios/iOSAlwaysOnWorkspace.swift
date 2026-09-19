@@ -15,17 +15,32 @@ struct iOSAlwaysOnWorkspace:View{
     private func sendKillSwitch(_ enabled:Bool){
         controlMessage = enabled ? "Sending emergency stop…" : "Clearing emergency stop…"
 
-        // LAN is the primary transport. Do not also enqueue a second Cloud
-        // command when the Mac is already reachable locally: that would create
-        // two independent command identities for one user action.
+        // Create one logical command identity for this user action. The same
+        // ID + nonce is preserved whether delivery uses LAN or Cloud, so the
+        // Mac receipt ledger can suppress duplicate delivery across transports.
+        let now = Date()
+        let command = TravisControlCommand(
+            id: UUID(),
+            deviceID: bridge.localDeviceID,
+            type: .killSwitch,
+            payload: ["enabled": enabled ? "true" : "false"],
+            createdAt: now,
+            expiresAt: now.addingTimeInterval(30),
+            nonce: UUID(),
+            status: .queued,
+            acknowledgedAt: nil,
+            completedAt: nil,
+            result: nil
+        )
+
         if bridge.isConnected {
-            bridge.sendCommandToMac(enabled ? "/alwayson-kill" : "/alwayson-clear-kill")
-            controlMessage = enabled ? "Emergency stop sent over LAN." : "Clear sent over LAN; jobs remain paused."
+            bridge.sendControlCommand(command)
+            controlMessage = enabled
+                ? "Emergency stop sent over secure LAN Control Plane."
+                : "Clear sent over secure LAN Control Plane; jobs remain paused."
             return
         }
 
-        // Cloud is the fallback when there is no active LAN session. Cloud
-        // delivery has its own durable command ID/nonce and receipt ledger.
         Task {
             do {
                 let cloud = TravisCloudControlPlane.shared
@@ -33,8 +48,10 @@ struct iOSAlwaysOnWorkspace:View{
                     controlMessage = "No reachable Mac via LAN or Cloud."
                     return
                 }
-                _ = try await cloud.sendCommand(targetDeviceID: target.id,type: "killSwitch",payload: ["enabled": enabled ? "true" : "false"])
-                controlMessage = enabled ? "Emergency stop sent via Cloud Control Plane." : "Clear sent via Cloud Control Plane; jobs remain paused."
+                _ = try await cloud.sendCommand(command, targetDeviceID: target.id)
+                controlMessage = enabled
+                    ? "Emergency stop sent via Cloud Control Plane."
+                    : "Clear sent via Cloud Control Plane; jobs remain paused."
             } catch {
                 controlMessage = "Cloud fallback failed: \(error.localizedDescription)"
             }
