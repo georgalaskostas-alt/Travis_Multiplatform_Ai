@@ -30,28 +30,43 @@ final class TravisCloudControlPlane {
 
                     #if os(macOS)
                     AlwaysOnWorkerMonitor.shared.refresh()
-                    guard let workerSnapshot = AlwaysOnWorkerMonitor.shared.snapshot else {
-                        throw CloudError.workerTelemetryUnavailable
-                    }
-                    let killSwitch = workerSnapshot.killSwitch
+                    let workerSnapshot = AlwaysOnWorkerMonitor.shared.snapshot
                     #else
-                    let killSwitch = false
+                    let workerSnapshot: AlwaysOnWorkerMonitor.Snapshot? = nil
                     #endif
 
-                    let id = try await self.upsertDevice(
-                        deviceKey: deviceKey,
-                        displayName: displayName,
-                        platform: "macos",
-                        worker: workerOnline(),
-                        gui: guiOnline(),
-                        lan: lanOnline(),
-                        killSwitch: killSwitch
-                    )
-                    self.deviceID = id
+                    let id: UUID
+                    if let workerSnapshot {
+                        id = try await self.upsertDevice(
+                            deviceKey: deviceKey,
+                            displayName: displayName,
+                            platform: "macos",
+                            worker: workerOnline(),
+                            gui: guiOnline(),
+                            lan: lanOnline(),
+                            killSwitch: workerSnapshot.killSwitch
+                        )
+                        self.deviceID = id
+                    } else if let knownID = self.deviceID ?? (try await self.existingDeviceID(deviceKey: deviceKey)) {
+                        // Never invent kill-switch telemetry. Still keep the
+                        // command channel alive so a remote safety command can
+                        // reach the Mac while worker telemetry is unavailable.
+                        id = knownID
+                        self.deviceID = knownID
+                    } else {
+                        throw CloudError.workerTelemetryUnavailable
+                    }
+
                     try await self.processCommands(for: id)
-                    self.state = .online
-                    self.lastError = nil
-                    self.lastSyncAt = Date()
+
+                    if workerSnapshot == nil {
+                        self.state = .degraded
+                        self.lastError = CloudError.workerTelemetryUnavailable.localizedDescription
+                    } else {
+                        self.state = .online
+                        self.lastError = nil
+                        self.lastSyncAt = Date()
+                    }
                 } catch {
                     self.state = .degraded
                     self.lastError = error.localizedDescription
@@ -61,6 +76,20 @@ final class TravisCloudControlPlane {
         }
     }
     func stop(){loop?.cancel();loop=nil;state = .disabled}
+
+    private func existingDeviceID(deviceKey:String) async throws -> UUID? {
+        struct Row: Decodable { let id: UUID }
+        guard let encoded = deviceKey.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            throw CloudError.invalidResponse
+        }
+        let data = try await request(
+            path: "/rest/v1/travis_devices?device_key=eq.\(encoded)&select=id&limit=2",
+            method: "GET"
+        )
+        let rows = try decoder.decode([Row].self, from: data)
+        guard rows.count <= 1 else { throw CloudError.invalidResponse }
+        return rows.first?.id
+    }
 
     private func upsertDevice(deviceKey:String,displayName:String,platform:String,worker:Bool,gui:Bool,lan:Bool,killSwitch:Bool) async throws -> UUID{
         struct Body:Encodable{let device_key:String;let display_name:String;let platform:String;let worker_online:Bool;let gui_online:Bool;let lan_online:Bool;let cloud_online:Bool;let kill_switch:Bool;let last_seen_at:String}
