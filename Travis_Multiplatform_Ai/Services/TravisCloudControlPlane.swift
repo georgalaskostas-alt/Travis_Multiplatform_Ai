@@ -308,15 +308,28 @@ final class TravisCloudControlPlane {
 
             let enabled = rawEnabled == "true"
 
-            do {
-                try AlwaysOnWorkerMonitor.shared.setKillSwitch(enabled)
-                return (
-                    true,
-                    enabled ? "Kill switch enabled" : "Kill switch cleared"
-                )
-            } catch {
-                return (false, error.localizedDescription)
+            // Use the same canonical safety handler as LAN/local commands.
+            // Enabling the kill switch stops the headless worker AND pauses
+            // enabled GUI-runtime jobs. Clearing only releases the kill switch;
+            // paused jobs are deliberately not resumed automatically.
+            let coordinator = AlwaysOnRuntimeCoordinator.shared
+            if enabled {
+                coordinator.emergencyStop()
+            } else {
+                coordinator.clearEmergencyStop()
             }
+            coordinator.worker.refresh()
+
+            if let error = coordinator.lastError {
+                return (false, error)
+            }
+            guard coordinator.worker.snapshot?.killSwitch == enabled else {
+                return (false, "Kill switch state verification failed")
+            }
+            return (
+                true,
+                enabled ? "Kill switch enabled" : "Kill switch cleared"
+            )
 
         case "worker_job":
             guard let action = c.payload?["action"],
