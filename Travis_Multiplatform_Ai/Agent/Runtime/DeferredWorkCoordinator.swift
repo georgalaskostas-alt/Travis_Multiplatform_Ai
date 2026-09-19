@@ -28,8 +28,9 @@ final class DeferredWorkCoordinator {
             recurrence: recurrence
         )
         item.nextRunAt = runAt
+        let previous = items
         items.append(item)
-        persist()
+        persistOrRollback(to: previous)
         return item
     }
 
@@ -187,8 +188,19 @@ final class DeferredWorkCoordinator {
 
     private func mutate(_ id: UUID, _ body: (inout DeferredWorkItem) -> Void) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        let previous = items
         body(&items[index])
-        persist()
+        persistOrRollback(to: previous)
+    }
+
+    private func persistOrRollback(to previous: [DeferredWorkItem]) {
+        do {
+            try store.save(items)
+            persistenceError = nil
+        } catch {
+            items = previous
+            persistenceError = error.localizedDescription
+        }
     }
 
     private func persist() {
