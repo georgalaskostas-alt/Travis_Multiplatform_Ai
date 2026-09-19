@@ -24,7 +24,14 @@ final class AlwaysOnRuntimeEngine {
     func schedule(_ job:AlwaysOnJob){ jobs.removeAll{$0.id==job.id}; jobs.append(job); persistUpsert(job) }
     func pause(_ id:UUID){ mutate(id){$0.state = .paused;$0.isEnabled=false} }
     func resume(_ id:UUID){ mutate(id){$0.state = .scheduled;$0.isEnabled=true;$0.nextRunAt=Date()} }
-    func delete(_ id:UUID){jobs.removeAll{$0.id==id};Task{[weak self] in do{try await AlwaysOnJobStore.shared.remove(id);await MainActor.run{self?.lastPersistenceError=nil}}catch{await MainActor.run{self?.lastPersistenceError=error.localizedDescription}}}}
+    func delete(_ id:UUID){
+        guard let removed=jobs.first(where:{$0.id==id}) else{return}
+        jobs.removeAll{$0.id==id}
+        Task{[weak self] in
+            do{try await AlwaysOnJobStore.shared.remove(id);await MainActor.run{self?.lastPersistenceError=nil}}
+            catch{await MainActor.run{self?.jobs.removeAll{$0.id==id};self?.jobs.append(removed);self?.lastPersistenceError=error.localizedDescription}}
+        }
+    }
 
     private func mutate(_ id:UUID,_ body:(inout AlwaysOnJob)->Void){guard let i=jobs.firstIndex(where:{$0.id==id})else{return};body(&jobs[i]);jobs[i].updatedAt=Date();persistUpsert(jobs[i])}
     private func persistUpsert(_ job:AlwaysOnJob){Task{[weak self] in do{try await AlwaysOnJobStore.shared.upsert(job);await MainActor.run{self?.lastPersistenceError=nil}}catch{await MainActor.run{self?.lastPersistenceError=error.localizedDescription}}}}
