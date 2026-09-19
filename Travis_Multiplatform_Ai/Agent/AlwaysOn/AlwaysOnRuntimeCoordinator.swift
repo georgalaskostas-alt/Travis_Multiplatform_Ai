@@ -19,7 +19,20 @@ final class AlwaysOnRuntimeCoordinator {
             }
         }
         engine.onDueJob={ [weak appState] job in guard let appState else{throw CoordinatorError.appUnavailable};guard AlwaysOnWorkerMonitor.shared.snapshot?.killSwitch != true else{throw CoordinatorError.killSwitch};switch job.kind{case .mission:await MainActor.run{appState.runAutonomousMissionV2(goal:job.payload)};case .watcher:await MainActor.run{appState.chatInput=job.payload;appState.sendChat()};case .tradingPaper,.tradingTestnet:await MainActor.run{appState.chatInput=job.payload;appState.sendChat()}}}
-        Task{[weak self] in let stored=await AlwaysOnJobStore.shared.load();let recovered=AlwaysOnRecoveryPolicy.recover(stored);for job in recovered{self?.engine.schedule(job)};self?.engine.start()}
+        Task{[weak self] in
+            guard let self else{return}
+            do{
+                let stored=try await AlwaysOnJobStore.shared.load()
+                let recovered=AlwaysOnRecoveryPolicy.recover(stored)
+                for job in recovered{self.engine.schedule(job)}
+                self.engine.start()
+                self.lastError=nil
+            }catch{
+                // Never start from an invented empty state when the persisted
+                // job store exists but cannot be decoded/read.
+                self.lastError="Always-On recovery blocked: \(error.localizedDescription)"
+            }
+        }
     }
     func emergencyStop(){do{try worker.setKillSwitch(true);for job in engine.jobs where job.isEnabled{engine.pause(job.id)};lastError=nil}catch{lastError=error.localizedDescription}}
     func clearEmergencyStop(){do{try worker.setKillSwitch(false);lastError=nil}catch{lastError=error.localizedDescription}}
