@@ -205,7 +205,7 @@ final class TravisCloudControlPlane {
         // Server-side atomic claim already transitioned this command
         // from queued to acknowledged. Reaching this point means this
         // consumer owns execution of this cloud delivery.
-        let output = execute(normalized)
+        let output = await execute(normalized)
 
         let terminalStatus: TravisControlCommandStatus =
             output.ok ? .completed : .failed
@@ -298,7 +298,7 @@ final class TravisCloudControlPlane {
         }
     }
 
-    private func execute(_ c: Command) -> (ok: Bool, message: String) {
+    private func execute(_ c: Command) async -> (ok: Bool, message: String) {
         switch c.command_type.lowercased() {
         case "killswitch":
             guard let rawEnabled = c.payload?["enabled"]?.lowercased(),
@@ -318,18 +318,28 @@ final class TravisCloudControlPlane {
             } else {
                 coordinator.clearEmergencyStop()
             }
-            coordinator.worker.refresh()
-
             if let error = coordinator.lastError {
                 return (false, error)
             }
-            guard coordinator.worker.snapshot?.killSwitch == enabled else {
-                return (false, "Kill switch state verification failed")
-            }
-            return (
-                true,
-                enabled ? "Kill switch enabled" : "Kill switch cleared"
-            )
+
+            // The control file is written synchronously, but the independent
+            // worker updates its heartbeat asynchronously. Give it a short,
+            // bounded window to confirm the requested state instead of
+            // falsely failing an otherwise accepted safety command.
+            let deadline = Date().addingTimeInterval(2.5)
+            repeat {
+                coordinator.worker.refresh()
+                if coordinator.worker.snapshot?.killSwitch == enabled {
+                    return (
+                        true,
+                        enabled ? "Kill switch enabled" : "Kill switch cleared"
+                    )
+                }
+                if Date() >= deadline { break }
+                try? await Task.sleep(for: .milliseconds(150))
+            } while !Task.isCancelled
+
+            return (false, "Kill switch command was accepted but worker confirmation timed out")
 
         case "worker_job":
             guard let action = c.payload?["action"],
