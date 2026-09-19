@@ -204,19 +204,29 @@ extension TRAVISAppState {
             // kill-switch state is published asynchronously by the headless
             // worker in worker-heartbeat.json.
             let verificationDeadline = Date().addingTimeInterval(5)
-            var actualState = coordinator.worker.snapshot?.killSwitch ?? false
+            var actualState: Bool?
 
-            while actualState != enabled && Date() < verificationDeadline {
-                try? await Task.sleep(for: .milliseconds(250))
+            repeat {
                 coordinator.worker.refresh()
-                actualState = coordinator.worker.snapshot?.killSwitch ?? false
-            }
+                actualState = coordinator.worker.snapshot?.killSwitch
+
+                if actualState == enabled {
+                    break
+                }
+
+                if Date() >= verificationDeadline || Task.isCancelled {
+                    break
+                }
+
+                try? await Task.sleep(for: .milliseconds(250))
+            } while true
 
             guard actualState == enabled else {
+                let reportedState = actualState.map(String.init) ?? "unknown"
                 return TravisControlCommandResult(
                     commandID: command.id,
                     status: .failed,
-                    message: "Kill switch verification timed out. Requested \(enabled), worker reports \(actualState)."
+                    message: "Kill switch verification timed out. Requested \(enabled), worker reports \(reportedState)."
                 )
             }
 
