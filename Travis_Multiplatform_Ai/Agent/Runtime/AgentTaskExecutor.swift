@@ -3,8 +3,8 @@ import Observation
 
 enum AgentTaskExecutorError: LocalizedError {
     case taskNotFound, taskNotRunning, noRunnableStep
-    case taskAlreadyExecuting(UUID), missingCapability(String), unassignedCapability, verificationFailed(String), emptyCapabilityResult, capabilityTimedOut(seconds:Int), taskBudgetExceeded(String)
-    var errorDescription:String?{switch self{case .taskNotFound:return "Το runtime task δεν βρέθηκε.";case .taskNotRunning:return "Το task δεν βρίσκεται σε running state.";case .noRunnableStep:return "Δεν υπάρχει runnable step αυτή τη στιγμή.";case .taskAlreadyExecuting(let id):return "Το autonomous task \(id.uuidString) εκτελείται ήδη.";case .missingCapability(let id):return "Δεν βρέθηκε capability με id \(id).";case .unassignedCapability:return "Το planner δεν ανέθεσε capability σε αυτό το step.";case .verificationFailed(let r):return "Η επαλήθευση του step απέτυχε: \(r)";case .emptyCapabilityResult:return "Το capability δεν επέστρεψε αποτέλεσμα που μπορεί να επαληθευτεί.";case .capabilityTimedOut(let s):return "Το capability ξεπέρασε το execution deadline των \(s) δευτερολέπτων.";case .taskBudgetExceeded(let r):return "Το autonomous task σταμάτησε επειδή εξαντλήθηκε το execution budget: \(r)"}}
+    case taskAlreadyExecuting(UUID), missingCapability(String), unassignedCapability, verificationFailed(String), emptyCapabilityResult, capabilityTimedOut(seconds:Int), taskBudgetExceeded(String), persistenceUnavailable(String)
+    var errorDescription:String?{switch self{case .taskNotFound:return "Το runtime task δεν βρέθηκε.";case .taskNotRunning:return "Το task δεν βρίσκεται σε running state.";case .noRunnableStep:return "Δεν υπάρχει runnable step αυτή τη στιγμή.";case .taskAlreadyExecuting(let id):return "Το autonomous task \(id.uuidString) εκτελείται ήδη.";case .missingCapability(let id):return "Δεν βρέθηκε capability με id \(id).";case .unassignedCapability:return "Το planner δεν ανέθεσε capability σε αυτό το step.";case .verificationFailed(let r):return "Η επαλήθευση του step απέτυχε: \(r)";case .emptyCapabilityResult:return "Το capability δεν επέστρεψε αποτέλεσμα που μπορεί να επαληθευτεί.";case .capabilityTimedOut(let s):return "Το capability ξεπέρασε το execution deadline των \(s) δευτερολέπτων.";case .taskBudgetExceeded(let r):return "Το autonomous task σταμάτησε επειδή εξαντλήθηκε το execution budget: \(r)";case .persistenceUnavailable(let r):return "Η ασφαλής αποθήκευση του runtime απέτυχε: \(r)"}}
 }
 enum StepVerificationVerdict:String,Codable,Hashable{case pass,retry;case insufficientEvidence="insufficient_evidence"}
 struct StepVerificationResult:Codable,Hashable{let verdict:StepVerificationVerdict;let confidence:Double;let reason:String;let unmetCriteria:[String];var passed:Bool{verdict == .pass}}
@@ -27,7 +27,10 @@ struct AutonomousRunReport:Codable,Hashable{let taskId:UUID;let stopReason:Auton
         if step.requiresApproval && step.status != .ready{runtime.markStepWaitingForApproval(taskId:taskId,stepId:step.id);let m="Το step #\(step.order) περιμένει έγκριση: \(step.title)";lastExecutionSummary=m;onProgress?(m);return step}
         guard let capabilityId=step.capabilityId else{runtime.markStepFailed(taskId:taskId,stepId:step.id,error:AgentTaskExecutorError.unassignedCapability.localizedDescription);throw AgentTaskExecutorError.unassignedCapability}
         guard orchestrator.capabilities.contains(where:{$0.id==capabilityId})else{let e=AgentTaskExecutorError.missingCapability(capabilityId);runtime.markStepFailed(taskId:taskId,stepId:step.id,error:e.localizedDescription);throw e}
-        runtime.markStepRunning(taskId:taskId,stepId:step.id);runtime.checkpoint(taskId:taskId,summary:"Executing step #\(step.order): \(step.title)",nextAction:"Run capability \(capabilityId)")
+        runtime.markStepRunning(taskId:taskId,stepId:step.id)
+        if let persistenceError=runtime.persistenceError{throw AgentTaskExecutorError.persistenceUnavailable(persistenceError)}
+        runtime.checkpoint(taskId:taskId,summary:"Executing step #\(step.order): \(step.title)",nextAction:"Run capability \(capabilityId)")
+        if let persistenceError=runtime.persistenceError{throw AgentTaskExecutorError.persistenceUnavailable(persistenceError)}
         let trace="[TRAVIS \(Self.runtimeFingerprint) | capability=\(capabilityId) | step=\(step.order)]";onProgress?("\(trace)\nΕκτελώ step #\(step.order): \(step.title)")
         let projectId=ProjectWorkspaceStore.shared.project(containingTask:taskId)?.id
         do{
