@@ -4,8 +4,10 @@ actor AlwaysOnJobStore {
     static let shared = AlwaysOnJobStore()
     private struct Snapshot: Codable { var version=1; var savedAt=Date(); var jobs:[AlwaysOnJob] }
     private let url: URL
+    private let fileManager: FileManager
 
     init(fileManager: FileManager = .default) {
+        self.fileManager=fileManager
         let base=(try? fileManager.url(for:.applicationSupportDirectory,in:.userDomainMask,appropriateFor:nil,create:true)) ?? fileManager.temporaryDirectory
         let dir=base.appendingPathComponent("TRAVIS/AlwaysOn",isDirectory:true)
         try? fileManager.createDirectory(at:dir,withIntermediateDirectories:true)
@@ -13,7 +15,7 @@ actor AlwaysOnJobStore {
     }
 
     func load() throws -> [AlwaysOnJob] {
-        guard FileManager.default.fileExists(atPath:url.path) else{return []}
+        guard fileManager.fileExists(atPath:url.path) else{return []}
         let data=try Data(contentsOf:url)
         let d=JSONDecoder(); d.dateDecodingStrategy = .iso8601
         return try d.decode(Snapshot.self,from:data).jobs
