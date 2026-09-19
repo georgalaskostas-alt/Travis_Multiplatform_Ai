@@ -155,6 +155,27 @@ extension TRAVISAppState {
 
         let taskID = command.payload["taskID"]
 
+        // Reject malformed payloads before any runtime mutation. Unknown keys
+        // are not tolerated on safety/control commands.
+        let allowedKeys: Set<String>
+        switch command.type {
+        case .pauseTask, .resumeTask, .cancelTask, .deleteTask:
+            allowedKeys = ["taskID"]
+        case .deleteFinished, .requestStatus:
+            allowedKeys = []
+        case .killSwitch:
+            allowedKeys = ["enabled"]
+        case .mission:
+            allowedKeys = ["goal"]
+        }
+        guard Set(command.payload.keys).isSubset(of: allowedKeys) else {
+            return TravisControlCommandResult(
+                commandID: command.id,
+                status: .failed,
+                message: "Control command contains unsupported payload fields."
+            )
+        }
+
         let legacyCommand: String?
 
         switch command.type {
