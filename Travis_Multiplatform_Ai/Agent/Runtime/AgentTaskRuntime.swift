@@ -85,5 +85,37 @@ final class AgentTaskRuntime {
         catch{tasks=previous;persistenceError=error.localizedDescription;print("TRAVIS runtime persistence failed; mutation rolled back: \(error.localizedDescription)")}
     }
     private func persist(){do{try store.save(tasks);persistenceError=nil}catch{persistenceError=error.localizedDescription;print("TRAVIS runtime persistence failed: \(error.localizedDescription)")}}
-    private func restorePersistedTasks(){do{var restored=try store.load();for ti in restored.indices{restored[ti].plan=applyPolicy(to:restored[ti].plan);guard restored[ti].status == .running else{continue};if let sid=restored[ti].executionState.currentStepId,let si=restored[ti].plan.steps.firstIndex(where:{$0.id==sid}),restored[ti].plan.steps[si].status == .running{restored[ti].plan.steps[si].status = .pending;restored[ti].plan.steps[si].lastError="Recovered after process interruption before verified completion."};restored[ti].executionState.currentStepId=nil;restored[ti].status = .paused;restored[ti].events.append(TaskEvent(type:.paused,message:"Recovered from durable snapshot after process interruption"));restored[ti].updatedAt=Date()};tasks=restored;persistenceError=nil;if !restored.isEmpty{persist()}}catch{tasks=[];persistenceError=error.localizedDescription;print("TRAVIS runtime recovery failed: \(error.localizedDescription)")}}
+    private func restorePersistedTasks(){
+        do{
+            let durable=try store.load()
+            var recovered=durable
+            for ti in recovered.indices{
+                recovered[ti].plan=applyPolicy(to:recovered[ti].plan)
+                guard recovered[ti].status == .running else{continue}
+                if let sid=recovered[ti].executionState.currentStepId,
+                   let si=recovered[ti].plan.steps.firstIndex(where:{$0.id==sid}),
+                   recovered[ti].plan.steps[si].status == .running{
+                    recovered[ti].plan.steps[si].status = .pending
+                    recovered[ti].plan.steps[si].lastError="Recovered after process interruption before verified completion."
+                }
+                recovered[ti].executionState.currentStepId=nil
+                recovered[ti].status = .paused
+                recovered[ti].events.append(TaskEvent(type:.paused,message:"Recovered from durable snapshot after process interruption"))
+                recovered[ti].updatedAt=Date()
+            }
+
+            // Recovery is accepted in memory only after the recovered snapshot
+            // is durably committed. If that write fails, keep the original
+            // durable state visible and block further mutation with an error.
+            if recovered != durable {
+                try store.save(recovered)
+            }
+            tasks=recovered
+            persistenceError=nil
+        }catch{
+            tasks=[]
+            persistenceError=error.localizedDescription
+            print("TRAVIS runtime recovery blocked: \(error.localizedDescription)")
+        }
+    }
 }
