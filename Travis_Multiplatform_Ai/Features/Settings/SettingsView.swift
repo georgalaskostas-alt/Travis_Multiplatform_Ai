@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var voiceReferenceConfigured = false
     @State private var cloudAuthBusy = false
     @State private var cloudAuthMessage: String?
+    @State private var lanPairingCode = ""
 
     @AppStorage("ai.openrouter.economyModel") private var openRouterEconomyModel = ""
     @AppStorage("ai.openrouter.standardModel") private var openRouterStandardModel = ""
@@ -192,6 +193,43 @@ struct SettingsView: View {
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                }
+
+                Section("Secure Mac ↔ iPhone LAN Pairing") {
+#if os(macOS)
+                    Text("Pairing code")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(TravisDeviceBridgeService.shared.lanPairingCode)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                    Button("Generate New Pairing Code", role: .destructive) {
+                        TravisDeviceBridgeService.shared.rotateLANPairingCode()
+                    }
+                    Text("Enter this code once on your iPhone. Generating a new code immediately invalidates the previous LAN trust.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+#elseif os(iOS)
+                    SecureField("Pairing code from Mac", text: $lanPairingCode)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    HStack {
+                        Button(TravisDeviceBridgeService.shared.isLANPaired ? "Update Pairing" : "Pair with Mac") {
+                            TravisDeviceBridgeService.shared.pairLAN(with: lanPairingCode)
+                            lanPairingCode = ""
+                        }
+                        .disabled(lanPairingCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Spacer()
+                        if TravisDeviceBridgeService.shared.isLANPaired {
+                            Button("Forget Mac", role: .destructive) {
+                                TravisDeviceBridgeService.shared.forgetLANPairing()
+                            }
+                        }
+                    }
+                    Text(TravisDeviceBridgeService.shared.isLANPaired ? "This iPhone has a trusted LAN pairing secret in Keychain." : "Pair once using the code shown in TRAVIS Settings on the Mac.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+#endif
                 }
 
                 Section("Assistant") {
