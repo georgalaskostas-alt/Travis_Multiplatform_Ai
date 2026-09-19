@@ -30,7 +30,10 @@ final class TravisCloudControlPlane {
 
                     #if os(macOS)
                     AlwaysOnWorkerMonitor.shared.refresh()
-                    let killSwitch = AlwaysOnWorkerMonitor.shared.snapshot?.killSwitch ?? false
+                    guard let workerSnapshot = AlwaysOnWorkerMonitor.shared.snapshot else {
+                        throw CloudError.workerTelemetryUnavailable
+                    }
+                    let killSwitch = workerSnapshot.killSwitch
                     #else
                     let killSwitch = false
                     #endif
@@ -455,6 +458,7 @@ final class TravisCloudControlPlane {
         case unauthorized
         case invalidResponse
         case invalidCommand(String)
+        case workerTelemetryUnavailable
         case http(Int, String)
 
         var errorDescription: String? {
@@ -465,6 +469,8 @@ final class TravisCloudControlPlane {
                 return "Invalid cloud response"
             case .invalidCommand(let message):
                 return message
+            case .workerTelemetryUnavailable:
+                return "Always-On worker telemetry unavailable; cloud state was not updated."
             case let .http(code, msg):
                 return "Cloud HTTP \(code): \(msg)"
             }
