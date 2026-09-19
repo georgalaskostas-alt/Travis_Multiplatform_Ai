@@ -12,12 +12,17 @@ final class AlwaysOnRuntimeEngine {
     var onDueJob: ((AlwaysOnJob) async throws -> Void)?
     private var loopTask:Task<Void,Never>?
 
-    func start() {
+    func start(initialJobs:[AlwaysOnJob]? = nil) {
         guard !isRunning else{return}; isRunning=true; startedAt=Date()
         loopTask=Task { [weak self] in
             guard let self else{return}
-            do{self.jobs=try await AlwaysOnJobStore.shared.load();self.lastPersistenceError=nil}
-            catch{self.lastPersistenceError=error.localizedDescription;self.isRunning=false;return}
+            if let initialJobs {
+                self.jobs=initialJobs
+                self.lastPersistenceError=nil
+            } else {
+                do{self.jobs=try await AlwaysOnJobStore.shared.load();self.lastPersistenceError=nil}
+                catch{self.lastPersistenceError=error.localizedDescription;self.isRunning=false;return}
+            }
             while !Task.isCancelled && self.isRunning { await self.tick(); try? await Task.sleep(for:.seconds(1)) }
         }
     }

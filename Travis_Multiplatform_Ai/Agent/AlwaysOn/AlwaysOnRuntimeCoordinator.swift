@@ -24,8 +24,13 @@ final class AlwaysOnRuntimeCoordinator {
             do{
                 let stored=try await AlwaysOnJobStore.shared.load()
                 let recovered=AlwaysOnRecoveryPolicy.recover(stored)
-                for job in recovered{self.engine.schedule(job)}
-                self.engine.start()
+
+                // Recovery is a single durable transition. Persist the whole
+                // recovered snapshot before execution starts, then seed the
+                // engine from that exact snapshot. This avoids per-job async
+                // upserts racing a second store load during startup.
+                try await AlwaysOnJobStore.shared.save(recovered)
+                self.engine.start(initialJobs:recovered)
                 self.lastError=nil
             }catch{
                 // Never start from an invented empty state when the persisted
