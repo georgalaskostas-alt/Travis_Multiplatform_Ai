@@ -38,6 +38,9 @@ actor TravisControlCommandReceiptStore {
         var receipts: [String: Receipt] = [:]
     }
 
+    private let retentionInterval: TimeInterval = 7 * 24 * 60 * 60
+    private let maximumReceipts = 2_000
+
     enum ReceiptStoreError: LocalizedError {
         case initializationFailed(String)
 
@@ -210,6 +213,7 @@ actor TravisControlCommandReceiptStore {
         }
 
         let now = Date()
+        prune(now: now)
 
         ledger.receipts[key] = Receipt(
             commandID: commandID,
@@ -289,6 +293,27 @@ actor TravisControlCommandReceiptStore {
 
     func receipt(for commandID: UUID) -> Receipt? {
         ledger.receipts[commandID.uuidString.lowercased()]
+    }
+
+    private func prune(now: Date) {
+        let cutoff = now.addingTimeInterval(-retentionInterval)
+
+        ledger.receipts = ledger.receipts.filter { _, receipt in
+            receipt.status == .executing || receipt.updatedAt >= cutoff
+        }
+
+        guard ledger.receipts.count > maximumReceipts else { return }
+
+        let removable = ledger.receipts.values
+            .filter { $0.status != .executing }
+            .sorted { $0.updatedAt < $1.updatedAt }
+
+        let overflow = ledger.receipts.count - maximumReceipts
+        for receipt in removable.prefix(overflow) {
+            ledger.receipts.removeValue(
+                forKey: receipt.commandID.uuidString.lowercased()
+            )
+        }
     }
 
     private func persist() throws {
