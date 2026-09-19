@@ -14,7 +14,11 @@ final class AgentTaskRuntime {
     @discardableResult
     func createTask(goal: String, title: String? = nil, priority: AgentTaskPriority = .medium, dueDate: Date? = nil, budget: TaskExecutionBudget = TaskExecutionBudget()) -> AgentTask {
         var task = AgentTask(goal: goal, title: title, priority: priority, dueDate: dueDate, budget: budget)
-        task.events.append(TaskEvent(type: .created, message: "Task created")); tasks.append(task); persist(); return task
+        task.events.append(TaskEvent(type: .created, message: "Task created"))
+        let previous = tasks
+        tasks.append(task)
+        persistOrRollback(to: previous)
+        return task
     }
     func task(id: UUID) -> AgentTask? { tasks.first { $0.id == id } }
 
@@ -24,16 +28,23 @@ final class AgentTaskRuntime {
     func deleteTerminalTask(id: UUID) -> Bool {
         guard let index = tasks.firstIndex(where: { $0.id == id }) else { return false }
         guard [.completed, .failed, .cancelled].contains(tasks[index].status) else { return false }
-        tasks.remove(at: index); persist(); return true
+        let previous = tasks
+        tasks.remove(at: index)
+        persistOrRollback(to: previous)
+        return persistenceError == nil
     }
 
     /// Deletes only terminal history. Running, planning, approval, dependency and paused missions survive untouched.
     @discardableResult
     func deleteAllTerminalTasks() -> Int {
         let before = tasks.count
+        let previous = tasks
         tasks.removeAll { [.completed, .failed, .cancelled].contains($0.status) }
         let deleted = before - tasks.count
-        if deleted > 0 { persist() }
+        if deleted > 0 {
+            persistOrRollback(to: previous)
+            if persistenceError != nil { return 0 }
+        }
         return deleted
     }
 
@@ -63,7 +74,16 @@ final class AgentTaskRuntime {
     private func applyPolicy(to plan:TaskPlan)->TaskPlan{var plan=plan;for i in plan.steps.indices{guard let capabilityId=plan.steps[i].capabilityId else{continue};switch policyEngine.evaluate(step:plan.steps[i],capabilityId:capabilityId){case .allow:break;case .requireApproval:plan.steps[i].requiresApproval=true;plan.steps[i].canRunInBackground=false;case .deny(let reason):plan.steps[i].requiresApproval=true;plan.steps[i].canRunInBackground=false;plan.steps[i].lastError="Policy denied autonomous execution: \(reason)"}};return plan}
     private func schedulerPrecedes(_ lhs:AgentTask,_ rhs:AgentTask)->Bool{let lp=priorityRank(lhs.priority),rp=priorityRank(rhs.priority);if lp != rp{return lp>rp};switch(lhs.dueDate,rhs.dueDate){case let(left?,right?) where left != right:return left<right;case(_?,nil):return true;case(nil,_?):return false;default:break};if lhs.updatedAt != rhs.updatedAt{return lhs.updatedAt<rhs.updatedAt};return lhs.id.uuidString<rhs.id.uuidString}
     private func priorityRank(_ p:AgentTaskPriority)->Int{switch p{case .low:return 0;case .medium:return 1;case .high:return 2;case .critical:return 3}}
-    private func mutate(_ taskId:UUID,_ body:(inout AgentTask)->Void){guard let i=tasks.firstIndex(where:{$0.id==taskId}) else{return};body(&tasks[i]);tasks[i].updatedAt=Date();tasks[i].plan.updatedAt=Date();persist()}
+    private func mutate(_ taskId:UUID,_ body:(inout AgentTask)->Void){
+        guard let i=tasks.firstIndex(where:{$0.id==taskId}) else{return}
+        let previous=tasks
+        body(&tasks[i]);tasks[i].updatedAt=Date();tasks[i].plan.updatedAt=Date()
+        persistOrRollback(to:previous)
+    }
+    private func persistOrRollback(to previous:[AgentTask]){
+        do{try store.save(tasks);persistenceError=nil}
+        catch{tasks=previous;persistenceError=error.localizedDescription;print("TRAVIS runtime persistence failed; mutation rolled back: \(error.localizedDescription)")}
+    }
     private func persist(){do{try store.save(tasks);persistenceError=nil}catch{persistenceError=error.localizedDescription;print("TRAVIS runtime persistence failed: \(error.localizedDescription)")}}
     private func restorePersistedTasks(){do{var restored=try store.load();for ti in restored.indices{restored[ti].plan=applyPolicy(to:restored[ti].plan);guard restored[ti].status == .running else{continue};if let sid=restored[ti].executionState.currentStepId,let si=restored[ti].plan.steps.firstIndex(where:{$0.id==sid}),restored[ti].plan.steps[si].status == .running{restored[ti].plan.steps[si].status = .pending;restored[ti].plan.steps[si].lastError="Recovered after process interruption before verified completion."};restored[ti].executionState.currentStepId=nil;restored[ti].status = .paused;restored[ti].events.append(TaskEvent(type:.paused,message:"Recovered from durable snapshot after process interruption"));restored[ti].updatedAt=Date()};tasks=restored;persistenceError=nil;if !restored.isEmpty{persist()}}catch{tasks=[];persistenceError=error.localizedDescription;print("TRAVIS runtime recovery failed: \(error.localizedDescription)")}}
 }
