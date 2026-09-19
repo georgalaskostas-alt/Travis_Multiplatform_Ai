@@ -84,18 +84,32 @@ struct TravisControlCommandResult: Codable, Equatable, Sendable, Identifiable {
     @ObservationIgnored private lazy var session:MCSession={let s=MCSession(peer:peerID,securityIdentity:nil,encryptionPreference:.required);s.delegate=self;return s}()
 #if os(macOS)
     @ObservationIgnored private lazy var advertiser:MCNearbyServiceAdvertiser={let a=MCNearbyServiceAdvertiser(peer:peerID,discoveryInfo:["role":"mac"],serviceType:serviceType);a.delegate=self;return a}()
-    @ObservationIgnored private let pairingToken:String = {
-        let key="travis.bridge.pairingToken"
-        if let existing=UserDefaults.standard.string(forKey:key),!existing.isEmpty{return existing}
+    @ObservationIgnored private lazy var pairingToken:String = {
+        if let existing=TravisCloudCredentialStore.loadBridgePairingToken(),!existing.isEmpty{return existing}
         let created=UUID().uuidString.lowercased()
-        UserDefaults.standard.set(created,forKey:key)
+        try? TravisCloudCredentialStore.saveBridgePairingToken(created)
         return created
     }()
 #else
     @ObservationIgnored private lazy var browser:MCNearbyServiceBrowser={let b=MCNearbyServiceBrowser(peer:peerID,serviceType:serviceType);b.delegate=self;return b}()
-    @ObservationIgnored private var trustedPairingToken:String?{UserDefaults.standard.string(forKey:"travis.bridge.trustedPairingToken")}
+    @ObservationIgnored private var trustedPairingToken:String?{TravisCloudCredentialStore.loadBridgePairingToken()}
     @ObservationIgnored private var invitedPeers=Set<MCPeerID>(); @ObservationIgnored private var reconnectWorkItem:DispatchWorkItem?
 #endif
+#endif
+    var isLANPaired:Bool{TravisCloudCredentialStore.loadBridgePairingToken()?.isEmpty == false}
+#if os(macOS)
+    var lanPairingCode:String{pairingToken}
+    func rotateLANPairingCode(){
+        let created=UUID().uuidString.lowercased()
+        do{try TravisCloudCredentialStore.saveBridgePairingToken(created);pairingToken=created;session.disconnect();lastError="LAN pairing code rotated. Pair iPhone again."}catch{lastError=error.localizedDescription}
+    }
+#elseif os(iOS)
+    func pairLAN(with code:String){
+        let normalized=code.trimmingCharacters(in:.whitespacesAndNewlines).lowercased()
+        guard UUID(uuidString:normalized) != nil else{lastError="Invalid TRAVIS pairing code.";return}
+        do{try TravisCloudCredentialStore.saveBridgePairingToken(normalized);lastError=nil;invitedPeers.removeAll();session.disconnect();if isRunning{browser.stopBrowsingForPeers();browser.startBrowsingForPeers()}}catch{lastError=error.localizedDescription}
+    }
+    func forgetLANPairing(){TravisCloudCredentialStore.clearBridgePairingToken();session.disconnect();invitedPeers.removeAll();lastError="LAN pairing removed."}
 #endif
     private override init(){super.init()}
     func start(){guard !isRunning else{return};isRunning=true;lastError=nil
