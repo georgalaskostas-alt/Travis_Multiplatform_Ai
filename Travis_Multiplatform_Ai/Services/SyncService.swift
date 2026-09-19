@@ -84,8 +84,16 @@ struct TravisControlCommandResult: Codable, Equatable, Sendable, Identifiable {
     @ObservationIgnored private lazy var session:MCSession={let s=MCSession(peer:peerID,securityIdentity:nil,encryptionPreference:.required);s.delegate=self;return s}()
 #if os(macOS)
     @ObservationIgnored private lazy var advertiser:MCNearbyServiceAdvertiser={let a=MCNearbyServiceAdvertiser(peer:peerID,discoveryInfo:["role":"mac"],serviceType:serviceType);a.delegate=self;return a}()
+    @ObservationIgnored private let pairingToken:String = {
+        let key="travis.bridge.pairingToken"
+        if let existing=UserDefaults.standard.string(forKey:key),!existing.isEmpty{return existing}
+        let created=UUID().uuidString.lowercased()
+        UserDefaults.standard.set(created,forKey:key)
+        return created
+    }()
 #else
     @ObservationIgnored private lazy var browser:MCNearbyServiceBrowser={let b=MCNearbyServiceBrowser(peer:peerID,serviceType:serviceType);b.delegate=self;return b}()
+    @ObservationIgnored private var trustedPairingToken:String?{UserDefaults.standard.string(forKey:"travis.bridge.trustedPairingToken")}
     @ObservationIgnored private var invitedPeers=Set<MCPeerID>(); @ObservationIgnored private var reconnectWorkItem:DispatchWorkItem?
 #endif
 #endif
@@ -202,8 +210,8 @@ extension TravisDeviceBridgeService:MCSessionDelegate{
     func session(_ session:MCSession,didFinishReceivingResourceWithName resourceName:String,fromPeer peerID:MCPeerID,at localURL:URL?,withError error:Error?){}
 }
 #if os(macOS)
-extension TravisDeviceBridgeService:MCNearbyServiceAdvertiserDelegate{func advertiser(_ advertiser:MCNearbyServiceAdvertiser,didReceiveInvitationFromPeer peerID:MCPeerID,withContext context:Data?,invitationHandler:@escaping(Bool,MCSession?)->Void){invitationHandler(true,session)};func advertiser(_ advertiser:MCNearbyServiceAdvertiser,didNotStartAdvertisingPeer error:Error){DispatchQueue.main.async{[weak self] in self?.lastError=error.localizedDescription}}}
+extension TravisDeviceBridgeService:MCNearbyServiceAdvertiserDelegate{func advertiser(_ advertiser:MCNearbyServiceAdvertiser,didReceiveInvitationFromPeer peerID:MCPeerID,withContext context:Data?,invitationHandler:@escaping(Bool,MCSession?)->Void){guard let context,let token=String(data:context,encoding:.utf8),token==pairingToken else{invitationHandler(false,nil);return};invitationHandler(true,session)};func advertiser(_ advertiser:MCNearbyServiceAdvertiser,didNotStartAdvertisingPeer error:Error){DispatchQueue.main.async{[weak self] in self?.lastError=error.localizedDescription}}}
 #elseif os(iOS)
-extension TravisDeviceBridgeService:MCNearbyServiceBrowserDelegate{func browser(_ browser:MCNearbyServiceBrowser,foundPeer peerID:MCPeerID,withDiscoveryInfo info:[String:String]?){guard info?["role"]=="mac",!invitedPeers.contains(peerID) else{return};invitedPeers.insert(peerID);browser.invitePeer(peerID,to:session,withContext:nil,timeout:12)};func browser(_ browser:MCNearbyServiceBrowser,lostPeer peerID:MCPeerID){invitedPeers.remove(peerID)};func browser(_ browser:MCNearbyServiceBrowser,didNotStartBrowsingForPeers error:Error){DispatchQueue.main.async{[weak self] in self?.lastError=error.localizedDescription;self?.scheduleReconnect(reason:"browser failed")}}}
+extension TravisDeviceBridgeService:MCNearbyServiceBrowserDelegate{func browser(_ browser:MCNearbyServiceBrowser,foundPeer peerID:MCPeerID,withDiscoveryInfo info:[String:String]?){guard info?["role"]=="mac",!invitedPeers.contains(peerID) else{return};guard let token=trustedPairingToken,!token.isEmpty else{DispatchQueue.main.async{[weak self] in self?.lastError="Mac pairing required before LAN control can connect."};return};invitedPeers.insert(peerID);browser.invitePeer(peerID,to:session,withContext:Data(token.utf8),timeout:12)};func browser(_ browser:MCNearbyServiceBrowser,lostPeer peerID:MCPeerID){invitedPeers.remove(peerID)};func browser(_ browser:MCNearbyServiceBrowser,didNotStartBrowsingForPeers error:Error){DispatchQueue.main.async{[weak self] in self?.lastError=error.localizedDescription;self?.scheduleReconnect(reason:"browser failed")}}}
 #endif
 #endif
