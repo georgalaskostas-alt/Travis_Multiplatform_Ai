@@ -15,7 +15,9 @@ final class AlwaysOnRuntimeEngine {
     func start() {
         guard !isRunning else{return}; isRunning=true; startedAt=Date()
         loopTask=Task { [weak self] in
-            guard let self else{return}; self.jobs=await AlwaysOnJobStore.shared.load()
+            guard let self else{return}
+            do{self.jobs=try await AlwaysOnJobStore.shared.load();self.lastPersistenceError=nil}
+            catch{self.lastPersistenceError=error.localizedDescription;self.isRunning=false;return}
             while !Task.isCancelled && self.isRunning { await self.tick(); try? await Task.sleep(for:.seconds(1)) }
         }
     }
