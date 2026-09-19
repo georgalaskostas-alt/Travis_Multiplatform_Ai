@@ -106,8 +106,8 @@ struct TravisPremiumCommandCenterView: View {
                 workerMetric("HEARTBEAT", healthy ? String(format: "%.1fs", age) : "STALE")
             }
             HStack(spacing: 8) {
-                workerMetric("JOBS", "\\(active) ACTIVE")
-                workerMetric("FAILED", "\\(failed)")
+                workerMetric("JOBS", "\(active) ACTIVE")
+                workerMetric("FAILED", "\(failed)")
             }
             HStack {
                 Label(killSwitch ? "KILL SWITCH ON" : "KILL SWITCH OFF", systemImage: killSwitch ? "exclamationmark.octagon.fill" : "checkmark.shield.fill")
