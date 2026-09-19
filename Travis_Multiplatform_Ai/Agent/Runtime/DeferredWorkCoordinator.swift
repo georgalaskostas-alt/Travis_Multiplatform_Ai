@@ -108,6 +108,13 @@ final class DeferredWorkCoordinator {
                 value.lastError = nil
             }
 
+            // Never execute external side effects unless the durable scheduler
+            // state successfully records that this item entered running.
+            if persistenceError != nil {
+                report.failedIds.append(item.id)
+                continue
+            }
+
             do {
                 let runReport = try await executor.executeUntilBlocked(
                     taskId: task.id,
