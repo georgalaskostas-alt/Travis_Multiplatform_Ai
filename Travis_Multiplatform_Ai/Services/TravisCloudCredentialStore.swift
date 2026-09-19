@@ -24,6 +24,7 @@ enum TravisCloudCredentialStore {
     // exists on a developer machine, can be migrated without exposing it.
     private static let legacyAccessTokenAccount = "supabase-user-access-token"
     private static let sessionAccount = "supabase-user-session-v1"
+    private static let bridgePairingAccount = "lan-bridge-pairing-token-v1"
 
     static func save(session: Session) throws {
         let data = try JSONEncoder().encode(session)
@@ -56,6 +57,19 @@ enum TravisCloudCredentialStore {
     static func clear() {
         delete(account: sessionAccount)
         delete(account: legacyAccessTokenAccount)
+    }
+
+    static func saveBridgePairingToken(_ token: String) throws {
+        try write(Data(token.utf8), account: bridgePairingAccount)
+    }
+
+    static func loadBridgePairingToken() -> String? {
+        guard let data = read(account: bridgePairingAccount) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func clearBridgePairingToken() {
+        delete(account: bridgePairingAccount)
     }
 
     private static func write(_ data: Data, account: String) throws {
