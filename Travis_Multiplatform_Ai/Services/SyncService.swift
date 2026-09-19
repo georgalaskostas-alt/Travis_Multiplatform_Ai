@@ -70,7 +70,7 @@ struct TravisControlCommandResult: Codable, Equatable, Sendable, Identifiable {
     }
 
     static let shared=TravisDeviceBridgeService()
-    private(set) var isRunning=false; private(set) var isConnected=false; private(set) var connectedPeerName:String?; private(set) var lastStatus:TravisBridgeStatusSnapshot?; private(set) var lastError:String?; private(set) var lastStatusReceivedAt:Date?
+    private(set) var isRunning=false; private(set) var isConnected=false; private(set) var connectedPeerName:String?; private(set) var lastStatus:TravisBridgeStatusSnapshot?; private(set) var lastControlResult:TravisControlCommandResult?; private(set) var lastError:String?; private(set) var lastStatusReceivedAt:Date?
     var statusProvider:(()->TravisBridgeStatusSnapshot)?
     var onRemoteCommand:((String)->Void)?
     var onControlCommand:((TravisControlCommand)->Void)?
@@ -166,6 +166,7 @@ struct TravisControlCommandResult: Codable, Equatable, Sendable, Identifiable {
                 self.onControlCommand?(controlCommand)
 
             case .controlResult(let result):
+                self.lastControlResult = result
                 self.onControlResult?(result)
             }
         }
