@@ -11,6 +11,7 @@ final class AlwaysOnRuntimeEngine {
     private(set) var lastPersistenceError:String?
     var onDueJob: ((AlwaysOnJob) async throws -> Void)?
     private var loopTask:Task<Void,Never>?
+    private var mutationGeneration:[UUID:UInt64]=[:]
 
     func start(initialJobs:[AlwaysOnJob]? = nil) {
         guard !isRunning else{return}; isRunning=true; startedAt=Date()
@@ -34,28 +35,44 @@ final class AlwaysOnRuntimeEngine {
     func delete(_ id:UUID){
         guard let removed=jobs.first(where:{$0.id==id}) else{return}
         jobs.removeAll{$0.id==id}
+        let generation=nextGeneration(for:id)
         Task{[weak self] in
-            do{try await AlwaysOnJobStore.shared.remove(id);await MainActor.run{self?.lastPersistenceError=nil}}
-            catch{await MainActor.run{self?.jobs.removeAll{$0.id==id};self?.jobs.append(removed);self?.lastPersistenceError=error.localizedDescription}}
+            do{try await AlwaysOnJobStore.shared.remove(id);await MainActor.run{
+                guard let self,self.mutationGeneration[id] == generation else{return}
+                self.lastPersistenceError=nil
+            }}
+            catch{await MainActor.run{
+                guard let self,self.mutationGeneration[id] == generation else{return}
+                self.jobs.removeAll{$0.id==id};self.jobs.append(removed);self.lastPersistenceError=error.localizedDescription
+            }}
         }
     }
 
     private func mutateOrInsert(_ job:AlwaysOnJob){
         let previous=jobs.first(where:{$0.id==job.id})
         jobs.removeAll{$0.id==job.id};jobs.append(job)
-        persistUpsert(job,rollback:previous)
+        persistUpsert(job,rollback:previous,generation:nextGeneration(for:job.id))
     }
     private func mutate(_ id:UUID,_ body:(inout AlwaysOnJob)->Void){
         guard let i=jobs.firstIndex(where:{$0.id==id})else{return}
         let previous=jobs[i]
         body(&jobs[i]);jobs[i].updatedAt=Date()
-        persistUpsert(jobs[i],rollback:previous)
+        persistUpsert(jobs[i],rollback:previous,generation:nextGeneration(for:id))
     }
-    private func persistUpsert(_ job:AlwaysOnJob,rollback:AlwaysOnJob?){
+    private func nextGeneration(for id:UUID)->UInt64{
+        let next=(mutationGeneration[id] ?? 0) &+ 1
+        mutationGeneration[id]=next
+        return next
+    }
+
+    private func persistUpsert(_ job:AlwaysOnJob,rollback:AlwaysOnJob?,generation:UInt64){
         Task{[weak self] in
-            do{try await AlwaysOnJobStore.shared.upsert(job);await MainActor.run{self?.lastPersistenceError=nil}}
+            do{try await AlwaysOnJobStore.shared.upsert(job);await MainActor.run{
+                guard let self,self.mutationGeneration[job.id] == generation else{return}
+                self.lastPersistenceError=nil
+            }}
             catch{await MainActor.run{
-                guard let self else{return}
+                guard let self,self.mutationGeneration[job.id] == generation else{return}
                 self.jobs.removeAll{$0.id==job.id}
                 if let rollback{self.jobs.append(rollback)}
                 self.lastPersistenceError=error.localizedDescription
