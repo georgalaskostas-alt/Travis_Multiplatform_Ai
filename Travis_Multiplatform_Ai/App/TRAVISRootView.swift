@@ -86,18 +86,22 @@ struct TRAVISRootView: View {
 #if os(macOS)
             guard let appState, let bridge else { return }
 
-            // Immediate transport-level acknowledgement.
-            bridge.sendControlResult(
-                TravisControlCommandResult(
-                    commandID: command.id,
-                    status: .acknowledged,
-                    message: "Command acknowledged by Mac TRAVIS."
-                )
-            )
-
-            // Execute through the Control Plane dispatcher.
+            // ACK is emitted only after the persistent receipt ledger has
+            // durably claimed this command. A transport receipt alone is not
+            // enough to promise that Mac owns execution.
             Task { @MainActor in
-                let result = await appState.handleControlPlaneCommand(command)
+                let result = await appState.handleControlPlaneCommand(
+                    command,
+                    onDurableClaim: {
+                        bridge.sendControlResult(
+                            TravisControlCommandResult(
+                                commandID: command.id,
+                                status: .acknowledged,
+                                message: "Command durably claimed by Mac TRAVIS."
+                            )
+                        )
+                    }
+                )
                 bridge.sendControlResult(result)
             }
 #endif
