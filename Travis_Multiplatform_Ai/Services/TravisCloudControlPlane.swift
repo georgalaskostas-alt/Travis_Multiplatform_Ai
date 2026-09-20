@@ -47,14 +47,23 @@ final class TravisCloudControlPlane {
                             killSwitch: workerSnapshot.killSwitch
                         )
                         self.deviceID = id
-                    } else if let knownID = self.deviceID ?? (try await self.existingDeviceID(deviceKey: deviceKey)) {
+                    } else {
+                        let knownID: UUID?
+                        if let cachedID = self.deviceID {
+                            knownID = cachedID
+                        } else {
+                            knownID = try await self.existingDeviceID(deviceKey: deviceKey)
+                        }
+
+                        guard let knownID else {
+                            throw CloudError.workerTelemetryUnavailable
+                        }
+
                         // Never invent kill-switch telemetry. Still keep the
                         // command channel alive so a remote safety command can
                         // reach the Mac while worker telemetry is unavailable.
                         id = knownID
                         self.deviceID = knownID
-                    } else {
-                        throw CloudError.workerTelemetryUnavailable
                     }
 
                     try await self.processCommands(for: id)
