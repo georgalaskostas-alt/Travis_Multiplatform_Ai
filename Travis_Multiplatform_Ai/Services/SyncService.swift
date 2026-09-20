@@ -89,8 +89,15 @@ struct TravisControlCommandResult: Codable, Equatable, Sendable, Identifiable {
     @ObservationIgnored private lazy var pairingToken:String = {
         if let existing=TravisCloudCredentialStore.loadBridgePairingToken(),!existing.isEmpty{return existing}
         let created=UUID().uuidString.lowercased()
-        try? TravisCloudCredentialStore.saveBridgePairingToken(created)
-        return created
+        do{
+            try TravisCloudCredentialStore.saveBridgePairingToken(created)
+            return created
+        }catch{
+            // Fail closed: never advertise a usable in-memory pairing secret
+            // that was not durably protected by Keychain.
+            self.lastError="Secure LAN pairing unavailable: \(error.localizedDescription)"
+            return ""
+        }
     }()
 #else
     @ObservationIgnored private lazy var browser:MCNearbyServiceBrowser={let b=MCNearbyServiceBrowser(peer:peerID,serviceType:serviceType);b.delegate=self;return b}()
@@ -100,7 +107,7 @@ struct TravisControlCommandResult: Codable, Equatable, Sendable, Identifiable {
 #endif
     var isLANPaired:Bool{TravisCloudCredentialStore.loadBridgePairingToken()?.isEmpty == false}
 #if os(macOS)
-    var lanPairingCode:String{pairingToken}
+    var lanPairingCode:String{pairingToken.isEmpty ? "PAIRING UNAVAILABLE" : pairingToken}
     func rotateLANPairingCode(){
         let created=UUID().uuidString.lowercased()
         do{try TravisCloudCredentialStore.saveBridgePairingToken(created);pairingToken=created;session.disconnect();lastError="LAN pairing code rotated. Pair iPhone again."}catch{lastError=error.localizedDescription}
