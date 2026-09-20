@@ -218,13 +218,14 @@ final class TravisCloudControlPlane {
                     result: resultMessage
                 )
             } else {
-                // Never re-execute an unresolved receipt. The original
-                // execution may still be running or may have produced its
-                // side effect before a crash.
+                // Never turn an unresolved duplicate into a terminal failure.
+                // The original LAN/Cloud invocation may still be executing.
+                // Keep the server command acknowledged so clients know that
+                // Mac owns it, while preventing any second side effect.
                 try await patchCommand(
                     command.id,
-                    status: "failed",
-                    result: "Duplicate command suppressed: prior execution is unresolved; reconciliation required."
+                    status: "acknowledged",
+                    result: "Duplicate command suppressed: original execution is still unresolved."
                 )
             }
 
