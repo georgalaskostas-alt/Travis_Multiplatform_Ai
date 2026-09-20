@@ -75,6 +75,8 @@ struct TravisControlCommandResult: Codable, Equatable, Sendable, Identifiable {
     var onRemoteCommand:((String)->Void)?
     var onControlCommand:((TravisControlCommand)->Void)?
     var onControlResult:((TravisControlCommandResult)->Void)?
+    @ObservationIgnored private var controlResultsByCommandID:[UUID:TravisControlCommandResult]=[:]
+    @ObservationIgnored private var controlResultOrder:[UUID]=[]
     var onSystemScan:(()->Void)?
     var onOpenFCC:(()->Void)?
     var onSpeak:((String)->Void)?
@@ -141,6 +143,21 @@ struct TravisControlCommandResult: Codable, Equatable, Sendable, Identifiable {
     func sendControlResult(_ result: TravisControlCommandResult) {
         send(.controlResult(result))
     }
+
+    func controlResult(for commandID: UUID) -> TravisControlCommandResult? {
+        controlResultsByCommandID[commandID]
+    }
+
+    private func retainControlResult(_ result: TravisControlCommandResult) {
+        controlResultsByCommandID[result.commandID] = result
+        controlResultOrder.removeAll { $0 == result.commandID }
+        controlResultOrder.append(result.commandID)
+
+        while controlResultOrder.count > 64 {
+            let oldest = controlResultOrder.removeFirst()
+            controlResultsByCommandID.removeValue(forKey: oldest)
+        }
+    }
     func sendCommandToMac(_ text:String){let t=text.trimmingCharacters(in:.whitespacesAndNewlines);guard !t.isEmpty else{return};send(.runCommand(t))}
     func speakOnMac(_ text:String){let t=text.trimmingCharacters(in:.whitespacesAndNewlines);guard !t.isEmpty else{return};send(.speak(t))}
     private func send(_ command:TravisBridgeCommand){
@@ -189,6 +206,7 @@ struct TravisControlCommandResult: Codable, Equatable, Sendable, Identifiable {
 
             case .controlResult(let result):
                 self.lastControlResult = result
+                self.retainControlResult(result)
                 self.onControlResult?(result)
             }
         }
