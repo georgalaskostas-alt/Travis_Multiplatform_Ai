@@ -310,7 +310,8 @@ final class TravisCloudControlPlane {
                 nonce: command.nonce,
                 status: command.status,
                 created_at: command.created_at,
-                expires_at: command.expires_at
+                expires_at: command.expires_at,
+                result: command.result
             )
 
         case "killswitch", "kill_switch":
@@ -333,7 +334,8 @@ final class TravisCloudControlPlane {
                 nonce: command.nonce,
                 status: command.status,
                 created_at: command.created_at,
-                expires_at: command.expires_at
+                expires_at: command.expires_at,
+                result: command.result
             )
 
         default:
