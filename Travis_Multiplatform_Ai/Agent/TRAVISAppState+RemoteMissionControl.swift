@@ -6,7 +6,10 @@ extension TRAVISAppState {
     // MARK: - Control Plane V2
 
     @discardableResult
-    func handleControlPlaneCommand(_ command: TravisControlCommand) async -> TravisControlCommandResult {
+    func handleControlPlaneCommand(
+        _ command: TravisControlCommand,
+        onDurableClaim: (() -> Void)? = nil
+    ) async -> TravisControlCommandResult {
         let receipts = TravisControlCommandReceiptStore.shared
 
         // Expired commands never receive permission to execute.
@@ -93,7 +96,7 @@ extension TRAVISAppState {
             )
 
         case .execute:
-            break
+            onDurableClaim?()
         }
 
         // From this point onward this invocation is the only invocation
@@ -139,8 +142,8 @@ extension TRAVISAppState {
         // persisting the terminal result.
         return TravisControlCommandResult(
             commandID: commandID,
-            status: .failed,
-            message: "Duplicate command suppressed: prior execution is unresolved; reconciliation required."
+            status: .executing,
+            message: "Duplicate command suppressed: the original execution is still unresolved."
         )
     }
 
