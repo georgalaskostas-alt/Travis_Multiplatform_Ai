@@ -46,10 +46,10 @@ struct iOSAlwaysOnWorkspace:View{
             // command promptly, deliver the SAME ID + nonce through Cloud.
             // The Mac receipt ledger then guarantees cross-transport deduplication.
             if sentOverLAN {
+                var lanAcknowledged = false
                 let acknowledgementDeadline = Date().addingTimeInterval(2)
                 while Date() < acknowledgementDeadline && !Task.isCancelled {
-                    if let result = bridge.lastControlResult,
-                       result.commandID == command.id {
+                    if let result = bridge.controlResult(for: command.id) {
                         if result.status == .completed {
                             controlMessage = result.message
                             bridge.requestStatus()
@@ -61,18 +61,20 @@ struct iOSAlwaysOnWorkspace:View{
                             return
                         }
                         if result.status == .acknowledged || result.status == .executing {
+                            lanAcknowledged = true
                             break
                         }
                     }
                     try? await Task.sleep(for: .milliseconds(100))
                 }
 
-                // An acknowledgement proves receipt, but not completion.
-                // Give the LAN execution a bounded window before Cloud fallback.
+                // Once LAN has acknowledged this exact command, never enqueue
+                // a second transport copy while the original execution may
+                // still be running. Wait for terminal state and fail unknown
+                // rather than creating a cross-transport execution race.
                 let terminalDeadline = Date().addingTimeInterval(6)
                 while Date() < terminalDeadline && !Task.isCancelled {
-                    if let result = bridge.lastControlResult,
-                       result.commandID == command.id {
+                    if let result = bridge.controlResult(for: command.id) {
                         if result.status == .completed {
                             controlMessage = result.message
                             bridge.requestStatus()
@@ -87,7 +89,13 @@ struct iOSAlwaysOnWorkspace:View{
                     try? await Task.sleep(for: .milliseconds(150))
                 }
 
-                controlMessage = "LAN confirmation missing; retrying the same safety command through Cloud…"
+                if lanAcknowledged {
+                    controlMessage = "Mac acknowledged the LAN safety command, but terminal confirmation is still missing; final safety state is unknown."
+                    bridge.requestStatus()
+                    return
+                }
+
+                controlMessage = "No LAN acknowledgement; retrying the same safety command through Cloud…"
             }
 
             do {
