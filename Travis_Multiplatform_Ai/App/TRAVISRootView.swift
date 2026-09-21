@@ -7,6 +7,7 @@ import UIKit
 struct TRAVISRootView: View {
     @Bindable var appState: TRAVISAppState
     @State private var observedMacTaskStatuses:[UUID:String]=[:]
+    @State private var headlessReconciliationTask: Task<Void, Never>?
     var body:some View { Group {
 #if os(macOS)
         MacAppShell(appState:appState)
@@ -14,6 +15,9 @@ struct TRAVISRootView: View {
         iOSAppShell(appState:appState)
 #endif
     }.onAppear{configureRuntimeAndBridge()}
+#if os(macOS)
+    .onDisappear{headlessReconciliationTask?.cancel();headlessReconciliationTask=nil}
+#endif
 #if os(iOS)
     .task{await synchronizeMacMissionState()}
 #endif
@@ -23,6 +27,7 @@ struct TRAVISRootView: View {
         let bridge=TravisDeviceBridgeService.shared
 #if os(macOS)
         AlwaysOnRuntimeCoordinator.shared.configure(appState:appState)
+        startHeadlessMissionReconciliation()
 
         // Cloud Control Plane is the WAN fallback for the existing LAN bridge.
         // Restore the renewable Supabase session first. If the access token
@@ -121,6 +126,19 @@ struct TRAVISRootView: View {
 #if os(iOS)
     private func synchronizeMacMissionState() async { let bridge=TravisDeviceBridgeService.shared;let active:Set<String>=["pending","planning","running","waitingforapproval","waitingfordependency","paused","headless"];TRAVISInlineMissionNotifier.prepare();while !Task.isCancelled{if bridge.isConnected{bridge.requestStatus()};if bridge.isConnected,let status=bridge.lastStatus{let tasks=status.runtimeTasks.sorted{$0.updatedAt>$1.updatedAt};let a=tasks.first{active.contains(normalizedStatus($0.status))};appState.isBusy=a != nil || status.isBusy;appState.isProcessing=a.map{let k=normalizedStatus($0.status);return k=="planning" || k=="running" || k=="headless"} ?? status.isBusy;if let a{let p=a.totalSteps>0 ? "\(a.completedSteps)/\(a.totalSteps) steps · \(Int(Double(a.completedSteps)/Double(max(a.totalSteps,1))*100))%":a.status.uppercased();appState.lastResponseSummary="\(a.title) · \(p) · \(a.currentStep ?? a.checkpoint ?? a.goal)"}else if let h=status.alwaysOn?.jobs.first(where:{$0.state=="running" || $0.state=="scheduled"}){appState.lastResponseSummary="\(h.title) · \(h.progressPercent)% · \(h.checkpoint ?? h.lastSummary ?? h.state.uppercased())"}else if !status.lastSummary.isEmpty{appState.lastResponseSummary=status.lastSummary};for task in tasks{let current=normalizedStatus(task.status),previous=observedMacTaskStatuses[task.id];if previous != nil && previous != current && (current=="completed" || current=="failed"){TRAVISInlineMissionNotifier.notify(task:task)};if current=="completed",let previous,previous != "completed",let report=task.finalReport,!report.isEmpty{appState.addAssistantMessage("MISSION COMPLETED\n\n\(task.title)\n\nFINAL REPORT\n\(report)")}else if current=="failed",let previous,previous != "failed"{appState.addAssistantMessage("MISSION NEEDS ATTENTION\n\n\(task.title)\n\n\(task.failureReason ?? task.checkpoint ?? "Mission failed.")")};observedMacTaskStatuses[task.id]=current};let ids=Set(tasks.map(\.id));observedMacTaskStatuses=observedMacTaskStatuses.filter{ids.contains($0.key)}};try? await Task.sleep(for:.seconds(1))}}
     private func normalizedStatus(_ s:String)->String{s.lowercased().filter{$0.isLetter}}
+    private func startHeadlessMissionReconciliation() {
+        guard headlessReconciliationTask == nil else { return }
+        headlessReconciliationTask = Task { @MainActor [weak appState] in
+            while !Task.isCancelled {
+                guard let appState else { return }
+                AlwaysOnWorkerMonitor.shared.refresh()
+                _ = HeadlessMissionReconciler.reconcile(runtime: appState.taskRuntime)
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+#endif
+#if os(iOS)
 #endif
     private var platformName:String{
 #if os(macOS)
