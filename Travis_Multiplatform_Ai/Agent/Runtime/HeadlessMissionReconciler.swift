@@ -47,13 +47,9 @@ enum HeadlessMissionReconciler {
                 if let done=result.completedSteps,let total=result.totalSteps,done==total{
                     let current=runtime.task(id:taskID)
                     for step in current?.plan.steps ?? [] where exportedIDs.contains(step.id) && step.status != .completed && step.status != .skipped{runtime.markStepCompleted(taskId:taskID,stepId:step.id,resultSummary:result.finalReport ?? result.summary ?? "Completed by Always-On worker");changed += 1}
-                    if let current=runtime.task(id:taskID),current.status != .completed {
-                        // The worker is authoritative for a full headless mission. Once every exported
-                        // step has durably completed, mirror that terminal success into the GUI runtime
-                        // instead of leaving the source task paused at 4/4.
-                        runtime.start(taskId:taskID)
-                        if runtime.persistenceError == nil { runtime.completeTask(taskId:taskID) }
-                    }
+                    // markStepCompleted is the runtime's canonical terminal transition:
+                    // when the last unfinished step is completed it sets the task to .completed.
+                    // Do not resume foreground execution here; headless ownership remains exclusive.
                 }
             }
         }
