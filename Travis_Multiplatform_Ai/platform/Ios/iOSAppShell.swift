@@ -61,7 +61,7 @@ struct iOSAppShell: View {
 
     private var bottomDock: some View { HStack(spacing: 6) { dockButton("HOME", "square.grid.2x2.fill") { activeSheet = nil }; dockButton("CHAT", "message.fill") { activeSheet = .chat }; dockButton("VOICE", appState.isListening ? "waveform" : "mic.fill") { appState.toggleListening() }; dockButton("HISTORY", "clock.arrow.circlepath") { activeSheet = .history }; dockButton("SETTINGS", "gearshape.fill") { activeSheet = .settings } }.padding(.horizontal, 10).padding(.vertical, 9).background(.ultraThinMaterial).overlay(alignment: .top) { LinearGradient(colors: [.clear, cyan.opacity(0.7), .clear], startPoint: .leading, endPoint: .trailing).frame(height: 1) } }
 
-    @ViewBuilder private func sheetContent(_ sheet: MobileSheet) -> some View { switch sheet { case .chat: iOSPremiumChatWorkspace(appState: appState); case .tasks: iOSLiveMacTasksWorkspace(appState: appState); case .mission: iOSPremiumMissionWorkspace(appState: appState); case .alwaysOn: iOSAlwaysOnWorkspace(); case .history: ChatHistoryView(appState: appState).navigationTitle("History"); case .permissions: PermissionsView(appState: appState).navigationTitle("Permissions"); case .settings: SettingsView(appState: appState).navigationTitle("Settings") } }
+    @ViewBuilder private func sheetContent(_ sheet: MobileSheet) -> some View { switch sheet { case .chat: iOSPremiumChatWorkspace(appState: appState); case .tasks: iOSLiveMacTasksWorkspace(appState: appState); case .mission: iOSPremiumMissionWorkspace(appState: appState); case .alwaysOn: iOSAlwaysOnWorkspace(); case .history: ChatHistoryView(appState: appState).navigationTitle("History"); case .permissions: PermissionsView(appState: appState).navigationTitle("Permissions"); case .settings: iOSSettingsWorkspace(appState: appState) } }
     private func sectionTitle(_ title: String, _ icon: String) -> some View { HStack(spacing: 7) { Image(systemName: icon).foregroundStyle(cyan); Text(title).font(.system(size: 11, weight: .bold, design: .rounded)).tracking(0.8); Spacer() } }
     private func statusPill(_ text: String, _ color: Color) -> some View { HStack(spacing: 5) { Circle().fill(color).frame(width: 6, height: 6); Text(text).font(.system(size: 8, weight: .bold, design: .rounded)) }.padding(.horizontal, 8).padding(.vertical, 5).background(Capsule().fill(color.opacity(0.10))).overlay(Capsule().stroke(color.opacity(0.55), lineWidth: 0.8)) }
     private func coreMini(_ title: String, _ icon: String, _ status: String, _ color: Color) -> some View { VStack(spacing: 4) { Image(systemName: icon).foregroundStyle(color).font(.system(size: 14, weight: .bold)); Text(title).font(.system(size: 8, weight: .bold, design: .rounded)); Text(status).font(.system(size: 7, weight: .semibold, design: .rounded)).foregroundStyle(color) }.frame(maxWidth: .infinity).padding(.vertical, 9).background(RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.28))).overlay(RoundedRectangle(cornerRadius: 10).stroke(color.opacity(0.28), lineWidth: 0.8)) }
@@ -69,6 +69,91 @@ struct iOSAppShell: View {
     private func quickButton(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View { Button(action: action) { HStack(spacing: 8) { Image(systemName: icon).foregroundStyle(cyan); Text(title).font(.system(size: 10, weight: .bold, design: .rounded)).foregroundStyle(.white); Spacer(minLength: 0) }.padding(.horizontal, 11).padding(.vertical, 12).background(RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.28))).overlay(RoundedRectangle(cornerRadius: 10).stroke(cyan.opacity(0.26), lineWidth: 0.8)) }.buttonStyle(.plain).accessibilityLabel(title) }
     private func dockButton(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View { Button(action: action) { VStack(spacing: 3) { Image(systemName: icon).font(.system(size: 16, weight: .bold)).foregroundStyle(cyan); Text(title).font(.system(size: 7, weight: .bold, design: .rounded)).foregroundStyle(.white.opacity(0.82)) }.frame(maxWidth: .infinity) }.buttonStyle(.plain).accessibilityLabel(title) }
     private func module(_ title: String, _ icon: String, _ color: Color) -> some View { VStack(spacing: 6) { Image(systemName: icon).font(.system(size: 18, weight: .bold)).foregroundStyle(color).shadow(color: color.opacity(0.45), radius: 5); Text(title).font(.system(size: 8, weight: .bold, design: .rounded)).foregroundStyle(.white) }.frame(maxWidth: .infinity).padding(.vertical, 13).background(RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.28))).overlay(RoundedRectangle(cornerRadius: 10).stroke(color.opacity(0.25), lineWidth: 0.8)) }
+}
+
+private struct iOSSettingsWorkspace: View {
+    @Bindable var appState: TRAVISAppState
+    @State private var bridge = TravisDeviceBridgeService.shared
+    @State private var pairingCode = ""
+    private let cyan = Color(red: 0.04, green: 0.82, blue: 1)
+    private let panel = Color(red: 0.004, green: 0.042, blue: 0.125)
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("SETTINGS")
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .tracking(1.5)
+                    .foregroundStyle(.white)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("SECURE MAC ↔ iPHONE LAN PAIRING", systemImage: "lock.shield.fill")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(cyan)
+
+                    SecureField("Pairing code from Mac", text: $pairingCode)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textContentType(.oneTimeCode)
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.35)))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(cyan.opacity(0.35), lineWidth: 1))
+
+                    Button {
+                        bridge.pairLAN(with: pairingCode)
+                        pairingCode = ""
+                    } label: {
+                        Label(bridge.isLANPaired ? "UPDATE PAIRING" : "PAIR WITH MAC", systemImage: "link")
+                            .font(.system(size: 12, weight: .heavy, design: .rounded))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(cyan)
+                    .disabled(pairingCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    if bridge.isLANPaired {
+                        Button(role: .destructive) {
+                            bridge.forgetLANPairing()
+                        } label: {
+                            Label("FORGET MAC", systemImage: "trash")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(bridge.isConnected ? Color.green : (bridge.isLANPaired ? Color.orange : Color.secondary))
+                            .frame(width: 8, height: 8)
+                        Text(bridge.isConnected ? "MAC CONNECTED" : (bridge.isLANPaired ? "PAIRED — SEARCHING FOR MAC" : "NOT PAIRED"))
+                            .font(.caption.bold())
+                            .foregroundStyle(bridge.isConnected ? .green : (bridge.isLANPaired ? .orange : .secondary))
+                    }
+
+                    if let error = bridge.lastError, !error.isEmpty {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+
+                    Text("Use the current pairing code shown in TRAVIS Settings on your Mac. The code is stored securely in this iPhone's Keychain.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 14).fill(panel.opacity(0.88)))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(cyan.opacity(0.35), lineWidth: 1))
+
+                SettingsView(appState: appState)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 54)
+            .padding(.bottom, 28)
+        }
+        .background(Color.black.ignoresSafeArea())
+    }
 }
 
 private enum MobileSheet: String, Identifiable { case chat, tasks, mission, alwaysOn, history, permissions, settings; var id: String { rawValue } }
