@@ -364,8 +364,8 @@ struct iOSPremiumTasksWorkspace: View {
                     task.plan.steps.first(where: { step in step.id == stepID })?.title
                 },
                 checkpoint: task.executionState.lastCheckpoint?.summary,
-                failureReason: task.failureReason,
                 finalReport: nil,
+                failureReason: task.failureReason,
                 updatedAt: task.updatedAt
             )
         }
