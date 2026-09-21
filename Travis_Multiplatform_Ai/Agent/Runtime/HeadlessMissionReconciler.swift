@@ -1,4 +1,7 @@
 import Foundation
+#if os(macOS)
+import Darwin
+#endif
 
 @MainActor
 enum HeadlessMissionReconciler {
@@ -55,5 +58,25 @@ enum HeadlessMissionReconciler {
         }
         return changed
     }
-    private static func load()->Document?{let fm=FileManager.default;guard let base=try? fm.url(for:.applicationSupportDirectory,in:.userDomainMask,appropriateFor:nil,create:true)else{return nil};let url=base.appendingPathComponent("TRAVIS/AlwaysOn/service-jobs-v1.json");guard let data=try? Data(contentsOf:url)else{return nil};return try? JSONDecoder().decode(Document.self,from:data)}
+    private static func load()->Document? {
+        let fm = FileManager.default
+        #if os(macOS)
+        // The launchd Python worker writes outside the app sandbox. Resolve the
+        // real POSIX home exactly like AlwaysOnWorkerMonitor so reconciliation
+        // reads the worker's canonical service-jobs file, not the sandbox copy.
+        let home: URL
+        if let passwd = getpwuid(getuid()), let raw = passwd.pointee.pw_dir {
+            home = URL(fileURLWithPath: String(cString: raw), isDirectory: true)
+        } else {
+            home = fm.homeDirectoryForCurrentUser
+        }
+        let base = home.appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+        #else
+        guard let base = try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true) else { return nil }
+        #endif
+        let url = base.appendingPathComponent("TRAVIS/AlwaysOn/service-jobs-v1.json")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(Document.self, from: data)
+    }
 }
