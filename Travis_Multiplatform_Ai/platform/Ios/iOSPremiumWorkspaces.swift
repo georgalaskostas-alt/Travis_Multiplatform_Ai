@@ -329,7 +329,8 @@ struct iOSPremiumMissionWorkspace: View {
         if bridge.isConnected {
             bridge.sendCommandToMac(command)
             appState.appendMessage(role: .user, text: command)
-            appState.addAssistantMessage("Mission sent to the connected Mac TRAVIS runtime.")
+            appState.addAssistantMessage("Mission sent to the connected Mac TRAVIS runtime: \(goal)")
+            bridge.requestStatus()
         } else {
             appState.chatInput = command
             appState.sendChat()
