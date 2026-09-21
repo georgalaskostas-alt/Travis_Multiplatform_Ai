@@ -72,11 +72,13 @@ struct TRAVISRootView: View {
                 let completed=task.plan.steps.filter{$0.status == .completed || $0.status == .skipped}.count
                 let current=task.executionState.currentStepId.flatMap{id in task.plan.steps.first{$0.id==id}?.title}
                 let checkpoint=task.executionState.lastCheckpoint?.summary
-                let workerJob=AlwaysOnWorkerMonitor.shared.serviceJobs.first{$0.sourceTaskID?.caseInsensitiveCompare(task.id.uuidString) == .orderedSame}
-                let workerActive=workerJob.map{["running","scheduled","sleeping"].contains($0.state.lowercased()) && $0.enabled} ?? false
-                let workerPaused=workerJob?.state.lowercased()=="paused"
+                let workerJob=AlwaysOnWorkerMonitor.shared.serviceJobs.filter{$0.kind=="headlessMission" && $0.sourceTaskID?.caseInsensitiveCompare(task.id.uuidString) == .orderedSame}.max{($0.updatedAt ?? 0) < ($1.updatedAt ?? 0)}
+                let workerState=workerJob?.state.lowercased()
+                let workerActive=workerJob.map{["running","scheduled","sleeping"].contains(workerState ?? "") && $0.enabled} ?? false
+                let workerPaused=workerState=="paused"
+                let workerStopped=workerState=="stopped"
                 let headlessOwned=task.status == .paused && (checkpoint?.localizedCaseInsensitiveContains("ALWAYS-ON HEADLESS") == true || workerJob != nil)
-                let bridgedStatus=headlessOwned ? (workerActive ? "running":workerPaused ? "paused":"headless"):task.status.rawValue
+                let bridgedStatus=headlessOwned ? (workerActive ? "running":workerPaused ? "paused":workerStopped ? "headless":workerState ?? "headless"):task.status.rawValue
                 let report=task.plan.steps.filter{$0.status == .completed}.sorted{$0.order<$1.order}.compactMap{s->String? in guard let r=s.resultSummary?.trimmingCharacters(in:.whitespacesAndNewlines),!r.isEmpty else{return nil};return "#\(s.order) \(s.title)\n\(r)"}.joined(separator:"\n\n")
                 let steps=task.plan.steps.sorted{$0.order<$1.order}.map{s in TravisBridgeStepSnapshot(id:s.id,order:s.order,title:s.title,status:s.status.rawValue,capability:s.capabilityId,attemptCount:s.attemptCount,maxAttempts:s.maxAttempts,requiresApproval:s.requiresApproval,lastError:s.lastError)}
                 return TravisBridgeTaskSnapshot(id:task.id,title:task.title,goal:task.goal,status:bridgedStatus,priority:task.priority.rawValue,completedSteps:completed,totalSteps:task.plan.steps.count,currentStep:current,checkpoint:checkpoint,finalReport:task.status == .completed && !report.isEmpty ? String(report.prefix(8000)):nil,failureReason:task.failureReason,steps:steps,updatedAt:task.updatedAt)
