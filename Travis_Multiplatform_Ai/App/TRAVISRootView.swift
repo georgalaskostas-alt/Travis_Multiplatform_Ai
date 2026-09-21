@@ -68,7 +68,7 @@ struct TRAVISRootView: View {
                 let completed=task.plan.steps.filter{$0.status == .completed || $0.status == .skipped}.count
                 let current=task.executionState.currentStepId.flatMap{id in task.plan.steps.first{$0.id==id}?.title}
                 let checkpoint=task.executionState.lastCheckpoint?.summary
-                let workerJob=AlwaysOnWorkerMonitor.shared.serviceJobs.first{$0.sourceTaskID?.uuidString.caseInsensitiveCompare(task.id.uuidString) == .orderedSame}
+                let workerJob=AlwaysOnWorkerMonitor.shared.serviceJobs.first{$0.sourceTaskID?.caseInsensitiveCompare(task.id.uuidString) == .orderedSame}
                 let workerActive=workerJob.map{["running","scheduled","sleeping"].contains($0.state.lowercased()) && $0.enabled} ?? false
                 let workerPaused=workerJob?.state.lowercased()=="paused"
                 let headlessOwned=task.status == .paused && (checkpoint?.localizedCaseInsensitiveContains("ALWAYS-ON HEADLESS") == true || workerJob != nil)
