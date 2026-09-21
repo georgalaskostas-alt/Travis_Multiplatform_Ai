@@ -307,7 +307,22 @@ extension TRAVISAppState {
         if lower == "/remote-delete-all-tasks"{remoteDeleteAllTasks();return true};return false
     }
     private func remoteTaskID(from command:String,prefix:String)->UUID?{let raw=String(command.dropFirst(prefix.count)).trimmingCharacters(in:.whitespacesAndNewlines);if let full=UUID(uuidString:raw){return full};let normalized=raw.lowercased();let matches=taskRuntime.tasks.filter{$0.id.uuidString.lowercased().hasPrefix(normalized)};guard matches.count==1 else{lastResponseSummary=matches.isEmpty ? "Remote task not found":"Remote task reference is ambiguous";return nil};return matches[0].id}
-    private func headlessJobID(for taskID:UUID)->UUID?{AlwaysOnWorkerMonitor.shared.serviceJobID(forSourceTaskID:taskID)}
+    private func headlessJobID(for taskID:UUID)->UUID?{
+        // Prefer the worker's currently controllable job for this mission.
+        // A mission can have older stopped worker jobs with the same sourceTaskID;
+        // selecting one of those makes RESUME look successful while nothing runs.
+        AlwaysOnWorkerMonitor.shared.refresh()
+        let sourceID=taskID.uuidString
+        let matches=AlwaysOnWorkerMonitor.shared.serviceJobs.filter{
+            $0.kind=="headlessMission" &&
+            $0.sourceTaskID?.caseInsensitiveCompare(sourceID) == .orderedSame
+        }
+        let controllable=matches.last{
+            let state=$0.state.lowercased()
+            return ["running","scheduled","sleeping","paused","failed"].contains(state) || $0.enabled
+        }
+        return controllable?.id ?? matches.last?.id ?? AlwaysOnWorkerMonitor.shared.serviceJobID(forSourceTaskID:taskID)
+    }
     private func remotePauseTask(_ id:UUID){guard let task=taskRuntime.task(id:id) else{lastResponseSummary="Task not found";return};if let workerID=headlessJobID(for:id){do{try AlwaysOnWorkerMonitor.shared.sendServiceJobCommand(action:"pause",jobID:workerID);if task.status == .running{taskRuntime.pause(taskId:id,reason:"Paused with Always-On worker from iPhone")};lastResponseSummary="Pausing headless mission \(String(task.id.uuidString.prefix(8)))"}catch{lastResponseSummary="Headless pause failed: \(error.localizedDescription)"};return};if taskExecutor.isTaskExecuting(id){_=taskExecutor.requestCancellation(taskId:id,reason:"Paused from iPhone")}else{taskRuntime.pause(taskId:id,reason:"Paused from iPhone")};lastResponseSummary="Paused \(String(task.id.uuidString.prefix(8))) — \(task.title)"}
     private func remoteResumeTask(_ id:UUID){guard let task=taskRuntime.task(id:id) else{lastResponseSummary="Task not found";return};if let workerID=headlessJobID(for:id){do{try AlwaysOnWorkerMonitor.shared.sendServiceJobCommand(action:"resume",jobID:workerID);/* Headless ownership is exclusive. Keep the GUI runtime paused so AUTO/foreground execution can never race the worker over the same mission. Worker state is authoritative until reconciliation completes. */lastResponseSummary="Resuming Always-On worker mission \(String(task.id.uuidString.prefix(8)))"}catch{lastResponseSummary="Headless resume failed: \(error.localizedDescription)"};return};guard task.status == .paused else{lastResponseSummary="Task \(String(id.uuidString.prefix(8))) is not paused";return};taskRuntime.resume(taskId:id);if let persistenceError=taskRuntime.persistenceError{lastResponseSummary="Resume failed because runtime persistence is unavailable: \(persistenceError)";return};lastResponseSummary="Resuming \(String(id.uuidString.prefix(8))) — \(task.title)";runAutonomousTask(reference:id.uuidString,continuous:true)}
     private func remoteRetryTask(_ id:UUID){guard let task=taskRuntime.task(id:id) else{lastResponseSummary="Task not found";return};if let workerID=headlessJobID(for:id){do{try AlwaysOnWorkerMonitor.shared.sendServiceJobCommand(action:"retry",jobID:workerID);lastResponseSummary="Retrying Always-On worker mission \(String(task.id.uuidString.prefix(8)))"}catch{lastResponseSummary="Headless retry failed: \(error.localizedDescription)"};return};guard task.status == .failed else{lastResponseSummary="Task \(String(id.uuidString.prefix(8))) is not failed";return};guard taskRuntime.prepareRetry(taskId:id) else{lastResponseSummary="No failed step is available to retry";return};lastResponseSummary="Retrying \(String(id.uuidString.prefix(8))) — \(task.title)";runAutonomousTask(reference:id.uuidString,continuous:true)}
