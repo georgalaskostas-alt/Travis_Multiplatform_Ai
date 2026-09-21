@@ -47,7 +47,7 @@ enum HeadlessMissionReconciler {
                 if let done=result.completedSteps,let total=result.totalSteps,done==total{
                     let current=runtime.task(id:taskID)
                     for step in current?.plan.steps ?? [] where exportedIDs.contains(step.id) && step.status != .completed && step.status != .skipped{runtime.markStepCompleted(taskId:taskID,stepId:step.id,resultSummary:result.finalReport ?? result.summary ?? "Completed by Always-On worker");changed += 1}
-                    if let current=runtime.task(id:taskID),current.status == .running{runtime.pause(taskId:taskID,reason:"Headless reconciliation completed exported subset; foreground ownership requires explicit resume")}
+                    if let current=runtime.task(id:taskID),current.status != .completed {\n                        // The worker is authoritative for a full headless mission. Once every exported\n                        // step has durably completed, mirror that terminal success into the GUI runtime\n                        // instead of leaving the source task paused at 4/4.\n                        runtime.start(taskId:taskID)\n                        if runtime.persistenceError == nil { runtime.completeTask(taskId:taskID) }\n                    }
                 }
             }
         }
