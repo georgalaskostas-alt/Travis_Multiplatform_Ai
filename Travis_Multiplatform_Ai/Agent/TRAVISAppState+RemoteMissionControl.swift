@@ -290,6 +290,28 @@ extension TRAVISAppState {
             )
         }
 
+        // Legacy remote-control helpers report operational failures through
+        // lastResponseSummary. Do not turn those failures into a successful
+        // Control Plane receipt.
+        let normalizedSummary = lastResponseSummary.lowercased()
+        let failureMarkers = [
+            "not found",
+            "ambiguous",
+            "failed",
+            "not paused",
+            "not failed",
+            "no failed step",
+            "cannot be deleted",
+            "persistence is unavailable"
+        ]
+        if failureMarkers.contains(where: { normalizedSummary.contains($0) }) {
+            return TravisControlCommandResult(
+                commandID: command.id,
+                status: .failed,
+                message: lastResponseSummary
+            )
+        }
+
         return TravisControlCommandResult(
             commandID: command.id,
             status: .completed,
