@@ -367,8 +367,19 @@ extension TRAVISAppState {
     private func remoteDeleteTask(_ id:UUID){
         guard let task=taskRuntime.task(id:id) else{lastResponseSummary="Task already removed";return}
         guard [.completed,.failed,.cancelled].contains(task.status) else{lastResponseSummary="Active missions cannot be deleted. Cancel or finish the mission first.";return}
-        if let workerID=headlessJobID(for:id){try? AlwaysOnWorkerMonitor.shared.sendServiceJobCommand(action:"delete",jobID:workerID)}
+        if let workerID=headlessJobID(for:id){
+            do {
+                try AlwaysOnWorkerMonitor.shared.sendServiceJobCommand(action:"delete",jobID:workerID)
+            } catch {
+                lastResponseSummary="Headless delete failed: \(error.localizedDescription)"
+                return
+            }
+        }
         let deleted=taskRuntime.deleteTerminalTask(id:id)
+        if let persistenceError=taskRuntime.persistenceError {
+            lastResponseSummary="Delete failed because runtime persistence is unavailable: \(persistenceError)"
+            return
+        }
         lastResponseSummary=deleted ? "Deleted \(String(task.id.uuidString.prefix(8))) — \(task.title)":"Task already removed"
     }
 
