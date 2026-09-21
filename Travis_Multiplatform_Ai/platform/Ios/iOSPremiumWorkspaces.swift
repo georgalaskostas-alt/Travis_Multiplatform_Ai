@@ -357,6 +357,7 @@ struct iOSPremiumTasksWorkspace: View {
                 title: task.title,
                 goal: task.goal,
                 status: task.status.rawValue,
+                priority: task.priority.rawValue,
                 completedSteps: task.plan.steps.filter { $0.status == .completed || $0.status == .skipped }.count,
                 totalSteps: task.plan.steps.count,
                 currentStep: task.executionState.currentStepId.flatMap { stepID in
