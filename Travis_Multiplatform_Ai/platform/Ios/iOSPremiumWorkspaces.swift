@@ -351,21 +351,21 @@ struct iOSPremiumTasksWorkspace: View {
         if bridge.isConnected, let status = bridge.lastStatus {
             return status.runtimeTasks.sorted { $0.updatedAt > $1.updatedAt }
         }
-        return appState.taskRuntime.tasks.sorted { $0.updatedAt > $1.updatedAt }.map {
+        return appState.taskRuntime.tasks.sorted { $0.updatedAt > $1.updatedAt }.map { task in
             TravisBridgeRuntimeTaskSnapshot(
-                id: $0.id,
-                title: $0.title,
-                goal: $0.goal,
-                status: $0.status.rawValue,
-                completedSteps: $0.plan.steps.filter { $0.status == .completed || $0.status == .skipped }.count,
-                totalSteps: $0.plan.steps.count,
-                currentStep: $0.executionState.currentStepId.flatMap { stepID in
-                    $0.plan.steps.first(where: { step in step.id == stepID })?.title
+                id: task.id,
+                title: task.title,
+                goal: task.goal,
+                status: task.status.rawValue,
+                completedSteps: task.plan.steps.filter { $0.status == .completed || $0.status == .skipped }.count,
+                totalSteps: task.plan.steps.count,
+                currentStep: task.executionState.currentStepId.flatMap { stepID in
+                    task.plan.steps.first(where: { step in step.id == stepID })?.title
                 },
-                checkpoint: $0.executionState.lastCheckpoint?.summary,
-                failureReason: $0.failureReason,
+                checkpoint: task.executionState.lastCheckpoint?.summary,
+                failureReason: task.failureReason,
                 finalReport: nil,
-                updatedAt: $0.updatedAt
+                updatedAt: task.updatedAt
             )
         }
     }
