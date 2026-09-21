@@ -158,6 +158,19 @@ extension TRAVISAppState {
 
         let taskID = command.payload["taskID"]
 
+        // Task-scoped commands require a non-empty task reference. Validate
+        // this before translating into the legacy command surface so malformed
+        // Control Plane requests can never be reported as successful.
+        if [.pauseTask, .resumeTask, .cancelTask, .deleteTask].contains(command.type) {
+            guard let taskID, !taskID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return TravisControlCommandResult(
+                    commandID: command.id,
+                    status: .failed,
+                    message: "Control command requires a non-empty taskID."
+                )
+            }
+        }
+
         // Reject malformed payloads before any runtime mutation. Unknown keys
         // are not tolerated on safety/control commands.
         let allowedKeys: Set<String>
