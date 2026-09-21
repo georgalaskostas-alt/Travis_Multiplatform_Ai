@@ -386,6 +386,10 @@ extension TRAVISAppState {
     private func remoteDeleteAllTasks(){
         let activeCount=taskRuntime.tasks.filter{![AgentTaskStatus.completed,.failed,.cancelled].contains($0.status)}.count
         let deleted=taskRuntime.deleteAllTerminalTasks()
+        if let persistenceError=taskRuntime.persistenceError {
+            lastResponseSummary="Delete finished failed because runtime persistence is unavailable: \(persistenceError)"
+            return
+        }
         lastResponseSummary=activeCount==0 ? "Deleted \(deleted) finished tasks":"Deleted \(deleted) finished tasks; kept \(activeCount) active mission(s)"
     }
 }
