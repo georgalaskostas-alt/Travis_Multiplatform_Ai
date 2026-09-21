@@ -63,6 +63,10 @@ struct TRAVISRootView: View {
 #endif
         bridge.statusProvider={ [weak appState] in
             guard let appState else{return TravisBridgeStatusSnapshot(deviceName:"TRAVIS",platform:platformName,isBusy:false,activeRuntimeTasks:0,lastSummary:"Unavailable",fccAvailable:false)}
+#if os(macOS)
+            // Refresh external worker state before deriving the bridged task status.
+            AlwaysOnWorkerMonitor.shared.refresh()
+#endif
             let all=appState.taskRuntime.tasks.sorted{$0.updatedAt>$1.updatedAt};let active:Set<AgentTaskStatus>=[.pending,.planning,.running,.waitingForApproval,.waitingForDependency,.paused]
             let snapshots=all.prefix(30).map{task in
                 let completed=task.plan.steps.filter{$0.status == .completed || $0.status == .skipped}.count
