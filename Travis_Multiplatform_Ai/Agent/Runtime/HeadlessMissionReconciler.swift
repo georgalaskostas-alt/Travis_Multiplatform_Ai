@@ -19,7 +19,13 @@ enum HeadlessMissionReconciler {
     struct Document:Codable{var version:Int?;var jobs:[WorkerJob]}
 
     static func reconcile(runtime:AgentTaskRuntime)->Int{
-        guard let doc=load()else{return 0};var changed=0
+        // The heartbeat snapshot is already the canonical, successfully decoded
+        // public view of the external worker. Reconcile terminal headless jobs
+        // from it first so GUI completion never depends on decoding the worker's
+        // private persistence schema.
+        AlwaysOnWorkerMonitor.shared.refresh()
+        var changed = reconcileTerminalSnapshot(runtime: runtime, jobs: AlwaysOnWorkerMonitor.shared.serviceJobs)
+        guard let doc=load()else{return changed}
         for job in doc.jobs where job.kind=="headlessMission"{
             guard let raw=job.payload?.sourceTaskID,let taskID=UUID(uuidString:raw),let original=runtime.task(id:taskID)else{continue}
             guard ![AgentTaskStatus.completed,.cancelled].contains(original.status)else{continue}
@@ -58,6 +64,43 @@ enum HeadlessMissionReconciler {
         }
         return changed
     }
+    private static func reconcileTerminalSnapshot(runtime: AgentTaskRuntime, jobs: [AlwaysOnWorkerMonitor.ServiceJob]) -> Int {
+        var changed = 0
+        for job in jobs where job.kind == "headlessMission" && job.state.lowercased() == "stopped" {
+            guard let raw = job.sourceTaskID,
+                  let taskID = UUID(uuidString: raw),
+                  let task = runtime.task(id: taskID),
+                  task.status != .completed,
+                  task.status != .cancelled,
+                  let done = job.completedSteps,
+                  let total = job.totalSteps,
+                  total > 0,
+                  done == total else { continue }
+
+            if let report = job.finalReport, !report.isEmpty {
+                runtime.checkpoint(
+                    taskId: taskID,
+                    summary: "HEADLESS FINAL REPORT\n\(String(report.prefix(8000)))",
+                    nextAction: nil
+                )
+            }
+
+            // A stopped headlessMission with done == total is the worker's
+            // durable terminal proof for this exact source task. The handoff
+            // owns the full exported plan, so complete every remaining step
+            // through AgentTaskRuntime's canonical transition.
+            for step in task.plan.steps where step.status != .completed && step.status != .skipped {
+                runtime.markStepCompleted(
+                    taskId: taskID,
+                    stepId: step.id,
+                    resultSummary: job.finalReport ?? job.summary ?? "Completed by Always-On worker"
+                )
+                changed += 1
+            }
+        }
+        return changed
+    }
+
     private static func load()->Document? {
         let fm = FileManager.default
         #if os(macOS)
