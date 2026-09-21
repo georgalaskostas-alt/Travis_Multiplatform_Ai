@@ -293,6 +293,9 @@ extension TRAVISAppState {
             )
         }
 
+        // Clear any previous UI summary so this command can only be
+        // judged from the result it produces now.
+        lastResponseSummary = ""
         let handled = handleRemoteMissionControlCommand(legacyCommand)
 
         guard handled else {
