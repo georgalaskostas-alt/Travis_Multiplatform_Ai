@@ -246,6 +246,18 @@ def capability(cap,args,ctx):
 def execute_headless(jid,token,j):
  p=j.get("payload") or {};goal=str(p.get("goal") or "TRAVIS mission")[:1000];plan=p.get("plan") or [{"order":1,"title":"Identity","capability":"runtime.identity"},{"order":2,"title":"Health","capability":"runtime.health"},{"order":3,"title":"Safety","capability":"runtime.safety"},{"order":4,"title":"Report","capability":"report.synthesize"}]
  completed=list((j.get("missionState") or {}).get("completedSteps") or []);done={int(x.get("order",0)) for x in completed};ctx=[{"goal":goal}]+completed
+ monitor=p.get("monitoring") if isinstance(p.get("monitoring"),dict) else None
+ if monitor and not completed:
+  duration=max(1.0,min(float(monitor.get("durationSeconds") or 0),86400.0));interval=max(1.0,min(float(monitor.get("intervalSeconds") or 5),duration));started=time.time();deadline=started+duration;observations=[]
+  while time.time()<deadline:
+   pulse(jid,token,{"order":0,"title":"Monitoring runtime health","capability":"runtime.health","status":"running","at":time.time()})
+   observations.append({"at":time.time(),"health":health(),"safety":{"killSwitch":killed(),"arbitraryShell":False,"liveTrading":False,"withdrawals":False,"credentialsPersistedToDisk":False}})
+   remaining=deadline-time.time()
+   if remaining<=0:break
+   until=time.time()+min(interval,remaining)
+   while time.time()<until:
+    time.sleep(min(1.0,max(0.05,until-time.time())));pulse(jid,token)
+  ctx.append({"capability":"runtime.monitor","result":{"durationSeconds":duration,"intervalSeconds":interval,"observations":observations}})
  for s in sorted(plan,key=lambda x:int(x.get("order",0))):
   order=int(s.get("order",0))
   if order in done:continue
