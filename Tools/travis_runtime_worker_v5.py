@@ -229,7 +229,19 @@ def capability(cap,args,ctx):
  if cap=="ai.reason":
   if headless_ai is None:raise RuntimeError("Headless AI unavailable")
   return headless_ai.generate(str(args.get("prompt") or "Analyze verified mission evidence."),int(args.get("maxTokens",1800)))
- if cap=="report.synthesize":return {"report":"TRAVIS Always-On mission completed with %d verified evidence steps."%len([x for x in ctx if x.get("result")])}
+ if cap=="report.synthesize":
+  evidence=[x for x in ctx if isinstance(x,dict) and x.get("result")]
+  identity=next((x.get("result") for x in evidence if x.get("capability")=="runtime.identity"),{}) or {}
+  health_e=next((x.get("result") for x in evidence if x.get("capability")=="runtime.health"),{}) or {}
+  safety=next((x.get("result") for x in evidence if x.get("capability")=="runtime.safety"),{}) or {}
+  report={
+   "verifiedEvidenceSteps":len(evidence),
+   "identity":identity,
+   "health":health_e,
+   "safety":safety,
+   "summary":"TRAVIS Always-On runtime identity, health and safety evidence verified and synthesized."
+  }
+  return {"report":json.dumps(report,sort_keys=True),"evidence":report}
  raise RuntimeError("Unsupported mission capability: "+cap)
 def execute_headless(jid,token,j):
  p=j.get("payload") or {};goal=str(p.get("goal") or "TRAVIS mission")[:1000];plan=p.get("plan") or [{"order":1,"title":"Identity","capability":"runtime.identity"},{"order":2,"title":"Health","capability":"runtime.health"},{"order":3,"title":"Safety","capability":"runtime.safety"},{"order":4,"title":"Report","capability":"report.synthesize"}]
