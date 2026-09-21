@@ -347,8 +347,25 @@ struct iOSPremiumTasksWorkspace: View {
     private let navy = Color(red: 0.001, green: 0.018, blue: 0.072)
     private let panel = Color(red: 0.004, green: 0.042, blue: 0.125)
 
-    private var runtimeTasks: [AgentTask] {
-        appState.taskRuntime.tasks.sorted { $0.updatedAt > $1.updatedAt }
+    private var runtimeTasks: [TravisBridgeRuntimeTaskSnapshot] {
+        if bridge.isConnected, let status = bridge.lastStatus {
+            return status.runtimeTasks.sorted { $0.updatedAt > $1.updatedAt }
+        }
+        return appState.taskRuntime.tasks.sorted { $0.updatedAt > $1.updatedAt }.map {
+            TravisBridgeRuntimeTaskSnapshot(
+                id: $0.id,
+                title: $0.title,
+                goal: $0.goal,
+                status: $0.status.rawValue,
+                completedSteps: $0.plan.steps.filter { $0.status == .completed || $0.status == .skipped }.count,
+                totalSteps: $0.plan.steps.count,
+                currentStep: $0.executionState.currentStepId.flatMap { id in $0.plan.steps.first { $0.id == id }?.title },
+                checkpoint: $0.executionState.lastCheckpoint?.summary,
+                failureReason: $0.failureReason,
+                finalReport: nil,
+                updatedAt: $0.updatedAt
+            )
+        }
     }
 
     var body: some View {
@@ -398,10 +415,10 @@ struct iOSPremiumTasksWorkspace: View {
     }
 
     private var summaryGrid: some View {
-        let running = runtimeTasks.filter { [.running, .planning].contains($0.status) }.count
-        let waiting = runtimeTasks.filter { [.waitingForApproval, .waitingForDependency, .paused, .pending].contains($0.status) }.count
-        let completed = runtimeTasks.filter { $0.status == .completed }.count
-        let failed = runtimeTasks.filter { $0.status == .failed }.count
+        let running = runtimeTasks.filter { ["running", "planning"].contains(normalizedStatus($0.status)) }.count
+        let waiting = runtimeTasks.filter { ["waitingforapproval", "waitingfordependency", "paused", "pending", "headless"].contains(normalizedStatus($0.status)) }.count
+        let completed = runtimeTasks.filter { normalizedStatus($0.status) == "completed" }.count
+        let failed = runtimeTasks.filter { normalizedStatus($0.status) == "failed" }.count
 
         return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
             summaryTile("RUNNING", "\(running)", .green)
@@ -423,7 +440,7 @@ struct iOSPremiumTasksWorkspace: View {
         .mobileHUD(cyan: cyan, panel: panel)
     }
 
-    private func taskCard(_ task: AgentTask) -> some View {
+    private func taskCard(_ task: TravisBridgeRuntimeTaskSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -434,14 +451,14 @@ struct iOSPremiumTasksWorkspace: View {
                 statusBadge(task.status)
             }
 
-            if !task.plan.steps.isEmpty {
-                let completed = task.plan.steps.filter { $0.status == .completed }.count
-                ProgressView(value: Double(completed), total: Double(max(task.plan.steps.count, 1)))
+            if task.totalSteps > 0 {
+                ProgressView(value: Double(task.completedSteps), total: Double(max(task.totalSteps, 1)))
                     .tint(cyan)
                 HStack {
-                    Text("\(completed)/\(task.plan.steps.count) STEPS")
+                    Text("\(task.completedSteps)/\(task.totalSteps) STEPS")
                     Spacer()
-                    Text(task.priority.rawValue.uppercased())
+                    Text(task.currentStep ?? task.checkpoint ?? "MAC RUNTIME")
+                        .lineLimit(1)
                 }
                 .font(.system(size: 8, weight: .bold, design: .rounded))
                 .foregroundStyle(.secondary)
@@ -489,22 +506,29 @@ struct iOSPremiumTasksWorkspace: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.24), lineWidth: 0.8))
     }
 
-    private func statusBadge(_ status: AgentTaskStatus) -> some View {
-        let color: Color = switch status {
-        case .completed: .green
-        case .failed, .cancelled: .red
-        case .running, .planning: cyan
-        case .waitingForApproval, .waitingForDependency, .paused: .orange
-        case .pending: .secondary
+    private func statusBadge(_ rawStatus: String) -> some View {
+        let status = normalizedStatus(rawStatus)
+        let color: Color
+        switch status {
+        case "completed": color = .green
+        case "failed", "cancelled": color = .red
+        case "running", "planning": color = cyan
+        case "waitingforapproval", "waitingfordependency", "paused", "headless": color = .orange
+        default: color = .secondary
         }
 
-        return Text(status.rawValue.replacingOccurrences(of: "waitingFor", with: "WAIT ").uppercased())
+        let label = status == "headless" ? "HEADLESS" : rawStatus.uppercased()
+        return Text(label)
             .font(.system(size: 7, weight: .heavy, design: .rounded))
             .foregroundStyle(color)
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
             .background(Capsule().fill(color.opacity(0.10)))
             .overlay(Capsule().stroke(color.opacity(0.35), lineWidth: 0.7))
+    }
+
+    private func normalizedStatus(_ value: String) -> String {
+        value.lowercased().filter { $0.isLetter }
     }
 }
 
