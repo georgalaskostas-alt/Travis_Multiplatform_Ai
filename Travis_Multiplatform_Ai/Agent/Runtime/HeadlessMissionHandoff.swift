@@ -30,9 +30,14 @@ import Foundation
             if let args{item["arguments"]=args};plan.append(item)
         }
         let id=UUID(),mode=analysis.isFullyHeadless ? "full":"hybrid"
-        let payload:[String:Any]=["goal":task.goal,"sourceTaskID":task.id.uuidString,"sourcePlanVersion":task.plan.version,"executionMode":mode,"plan":plan]
+        var payload:[String:Any]=["goal":task.goal,"sourceTaskID":task.id.uuidString,"sourcePlanVersion":task.plan.version,"executionMode":mode,"plan":plan]
+        if let monitoring=monitoringContract(from:task.goal){payload["monitoring"]=monitoring}
         do{try monitor.enqueueCreateJob(id:id,title:"Mission V2 · \(task.title)",kind:"headlessMission",payload:payload)}catch{throw HandoffError.writeFailed(error.localizedDescription)}
         return .init(jobID:id,exportedSteps:plan.count,mode:mode)
+    }
+    private static func monitoringContract(from goal:String)->[String:Any]?{
+        let normalized=goal.lowercased();let intent=["monitor","monitoring","continuously","periodically","παρακολουθ","συνεχ","περιοδικ"].contains(where:normalized.contains);guard intent else{return nil}
+        let words=normalized.replacingOccurrences(of:",",with:" ").split(whereSeparator:{$0.isWhitespace});for i in words.indices{guard let value=Double(words[i])else{continue};let next=i+1;guard next<words.count else{continue};let unit=String(words[next]);let seconds:Double;if unit.hasPrefix("hour") || unit.hasPrefix("hr") || unit.hasPrefix("ωρ"){seconds=value*3600}else if unit.hasPrefix("min") || unit.hasPrefix("λεπτ"){seconds=value*60}else if unit.hasPrefix("sec") || unit.hasPrefix("δευτερολεπτ"){seconds=value}else{continue};let duration=min(max(seconds,1),86400);return ["durationSeconds":duration,"intervalSeconds":min(5.0,duration)]};return nil
     }
     private static func mappedCapability(_ id:String?)->String?{switch id{case "repository_context":return "repository.snapshot";case "runtime_health","system_scan":return "runtime.health";case "runtime_identity":return "runtime.identity";case "runtime_safety":return "runtime.safety";case "filesystem_inventory":return "filesystem.inventory";case "http_probe","network_probe":return "network.http_probe";case "report_synthesis":return "report.synthesize";case "market_intelligence":return "market.analyze";case "self_audit":return "repository.audit";case "headless_reasoning":return "ai.reason";default:return nil}}
     private static func arguments(for step:PlanStep,capability:String)->[String:String]?{
