@@ -347,12 +347,12 @@ struct iOSPremiumTasksWorkspace: View {
     private let navy = Color(red: 0.001, green: 0.018, blue: 0.072)
     private let panel = Color(red: 0.004, green: 0.042, blue: 0.125)
 
-    private var runtimeTasks: [TravisBridgeRuntimeTaskSnapshot] {
+    private var runtimeTasks: [TravisBridgeTaskSnapshot] {
         if bridge.isConnected, let status = bridge.lastStatus {
             return status.runtimeTasks.sorted { $0.updatedAt > $1.updatedAt }
         }
         return appState.taskRuntime.tasks.sorted { $0.updatedAt > $1.updatedAt }.map { task in
-            TravisBridgeRuntimeTaskSnapshot(
+            TravisBridgeTaskSnapshot(
                 id: task.id,
                 title: task.title,
                 goal: task.goal,
@@ -442,7 +442,7 @@ struct iOSPremiumTasksWorkspace: View {
         .mobileHUD(cyan: cyan, panel: panel)
     }
 
-    private func taskCard(_ task: TravisBridgeRuntimeTaskSnapshot) -> some View {
+    private func taskCard(_ task: TravisBridgeTaskSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
