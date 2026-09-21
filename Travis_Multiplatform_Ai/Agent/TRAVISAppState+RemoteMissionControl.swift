@@ -315,7 +315,8 @@ extension TRAVISAppState {
             "not failed",
             "no failed step",
             "cannot be deleted",
-            "persistence is unavailable"
+            "persistence is unavailable",
+            "cancellation was not accepted"
         ]
         if failureMarkers.contains(where: { normalizedSummary.contains($0) }) {
             return TravisControlCommandResult(
