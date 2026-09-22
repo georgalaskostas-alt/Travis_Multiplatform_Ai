@@ -193,13 +193,34 @@ final class AlwaysOnWorkerMonitor {
 
     func refresh() {
         guard let data = try? Data(contentsOf: heartbeatURL),
-              let value = try? JSONDecoder().decode(Snapshot.self, from: data) else {
+              var value = try? JSONDecoder().decode(Snapshot.self, from: data) else {
             snapshot = nil
             isHealthy = false
             return
         }
+        let now = Date().timeIntervalSince1970
+        // Long synchronous headless monitoring intentionally does not rewrite the
+        // heartbeat until execution returns. The worker does, however, renew its
+        // canonical job lease/checkpoint on every pulse. Treat a fresh active lease
+        // as authoritative liveness so Mission V2 cannot fall back to foreground
+        // halfway through a healthy timed handoff.
+        var canonicalLeaseIsFresh = false
+        if let serviceData = try? Data(contentsOf: serviceJobsURL),
+           let root = try? JSONSerialization.jsonObject(with: serviceData) as? [String: Any],
+           let jobs = root["jobs"] as? [[String: Any]] {
+            canonicalLeaseIsFresh = jobs.contains { job in
+                guard (job["state"] as? String)?.lowercased() == "running",
+                      job["enabled"] as? Bool == true,
+                      let lease = job["lease"] as? [String: Any],
+                      let expiresAt = lease["expiresAt"] as? Double else { return false }
+                return expiresAt > now
+            }
+            // Prefer canonical state over a stale heartbeat while a synchronous job
+            // is executing. Public job details will refresh again on the next beat.
+            if canonicalLeaseIsFresh { value.state = "running" }
+        }
         snapshot = value
-        isHealthy = Date().timeIntervalSince1970 - value.lastBeatAt < 8
+        isHealthy = now - value.lastBeatAt < 8 || canonicalLeaseIsFresh
     }
 
     func setKillSwitch(_ enabled: Bool) throws {
