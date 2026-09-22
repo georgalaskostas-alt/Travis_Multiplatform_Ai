@@ -53,7 +53,7 @@ struct SettingsView: View {
                         .onChange(of: openAIAPIKey) { _, newValue in
                             let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                             if trimmed.isEmpty { KeychainService.shared.deleteOpenAIAPIKey() }
-                            else { KeychainService.shared.saveOpenAIAPIKey(trimmed) }
+                            else { try? KeychainService.shared.saveOpenAIAPIKey(trimmed) }
                         }
 
                     Text("Direct strong-provider path. Ο cost router μπορεί να χρησιμοποιεί φθηνότερο local/OpenRouter tier πρώτα και να κλιμακώνει εδώ όταν χρειάζεται.")
@@ -66,7 +66,7 @@ struct SettingsView: View {
                         .onChange(of: openRouterAPIKey) { _, newValue in
                             let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                             if trimmed.isEmpty { KeychainService.shared.deleteOpenRouterAPIKey() }
-                            else { KeychainService.shared.saveOpenRouterAPIKey(trimmed) }
+                            else { try? KeychainService.shared.saveOpenRouterAPIKey(trimmed) }
                         }
 
                     TextField("Economy model ID", text: $openRouterEconomyModel)
@@ -118,7 +118,7 @@ struct SettingsView: View {
                         .onChange(of: githubToken) { _, newValue in
                             let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                             if trimmed.isEmpty { KeychainService.shared.deleteGitHubToken() }
-                            else { KeychainService.shared.saveGitHubToken(trimmed) }
+                            else { try? KeychainService.shared.saveGitHubToken(trimmed) }
                         }
 
                     Text("Χρησιμοποιείται μόνο για approved source-code commits από το coding_repository capability. Read-only repository analysis δεν χρειάζεται write token.")
