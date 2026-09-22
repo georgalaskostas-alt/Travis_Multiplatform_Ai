@@ -17,7 +17,10 @@ extension TRAVISAppState {
         if trimmed.lowercased().hasPrefix("/plan ") {
             let goal = String(trimmed.dropFirst("/plan ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !goal.isEmpty else { addAssistantMessage("Χρήση: /plan <στόχος>"); return }
-            createAutonomousPlan(goal: goal, projectId: boundProject()?.id)
+            // Explicit /plan is the Mission V2 debug/force route. Keep it aligned
+            // with iPhone and the Always-On headless planner instead of the legacy
+            // createAutonomousPlan workflow router.
+            runAutonomousMissionV2(goal: goal)
             return
         }
 
