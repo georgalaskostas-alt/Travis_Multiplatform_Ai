@@ -11,9 +11,9 @@ final class TRAVISAppState {
     var chatInput:String=""{didSet{if chatInput.trimmingCharacters(in:.whitespacesAndNewlines)=="Έλεγξε την κατάσταση του συστήματος"{chatInput="";runLocalSystemScan()}}}
     var chatMessages:[ChatMessage]=[];var pendingCommands:[TravisCommand]=[];var activeTasks:[TravisTask]=[];var permissions:[TravisPermission]=[]
     var assistantName="TRAVIS";var preferredLanguage:AppLanguage = .greek;var currentDeviceState:DeviceState = .idle;var isListening=false;var isProcessing=false;var isInternetEnabled=true;var isBusy=false;var lastResponseSummary="Ready"
-    var anthropicAPIKey:String=""{didSet{anthropicAPIKey.isEmpty ? KeychainService.shared.deleteAnthropicAPIKey():KeychainService.shared.saveAnthropicAPIKey(anthropicAPIKey)}}
-    var binanceTestnetAPIKey:String=""{didSet{binanceTestnetAPIKey.isEmpty ? KeychainService.shared.deleteBinanceTestnetAPIKey():KeychainService.shared.saveBinanceTestnetAPIKey(binanceTestnetAPIKey)}}
-    var binanceTestnetAPISecret:String=""{didSet{binanceTestnetAPISecret.isEmpty ? KeychainService.shared.deleteBinanceTestnetAPISecret():KeychainService.shared.saveBinanceTestnetAPISecret(binanceTestnetAPISecret)}}
+    var anthropicAPIKey:String=""{didSet{if anthropicAPIKey.isEmpty { KeychainService.shared.deleteAnthropicAPIKey() } else { try? KeychainService.shared.saveAnthropicAPIKey(anthropicAPIKey) }}}
+    var binanceTestnetAPIKey:String=""{didSet{if binanceTestnetAPIKey.isEmpty { KeychainService.shared.deleteBinanceTestnetAPIKey() } else { try? KeychainService.shared.saveBinanceTestnetAPIKey(binanceTestnetAPIKey) }}}
+    var binanceTestnetAPISecret:String=""{didSet{if binanceTestnetAPISecret.isEmpty { KeychainService.shared.deleteBinanceTestnetAPISecret() } else { try? KeychainService.shared.saveBinanceTestnetAPISecret(binanceTestnetAPISecret) }}}
     let approvalGate:ApprovalGateService;let orchestrator:AgentOrchestrator;let taskRuntime:AgentTaskRuntime;let taskExecutor:AgentTaskExecutor
     private(set)var currentSessionId=UUID();private(set)var viewedSessionId=UUID()
 
