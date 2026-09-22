@@ -12,7 +12,8 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
 
  /// Hard deterministic routes are authoritative contracts. They must outrank learned plans so stale memory can never override current safety/tool semantics.
  func deterministicPlanIfAvailable(goal:String,capabilities:[AgentCapability])->TaskPlan?{
-  deterministicRuntimeDiagnosticsPlan(goal:goal,available:Set(capabilities.map(\.id)))
+  let available=Set(capabilities.map(\.id))
+  return deterministicRuntimeMonitoringPlan(goal:goal,available:available) ?? deterministicRuntimeDiagnosticsPlan(goal:goal,available:available)
  }
 
  func makePlan(goal:String,capabilities:[AgentCapability],priorKnowledge:String?=nil)async throws->TaskPlan{
@@ -70,6 +71,19 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
   Choose a materially different route when the previous approach failed. Reuse completed evidence. Respect all descriptor policies. Preserve explicit path=/..., url=..., asset=TICKER requirements. Never invent unavailable facts. Code/trading mutations stay approval/risk gated. Use exact IDs, 1-8 steps, maxAttempts 1...5. JSON only.
   """
   let p=try materialize(draft:try await requestDraft(prompt:prompt,workload:planningWorkload(task.goal)),allowed:Set(capabilities.map(\.id)),registry:registry);return TaskPlan(version:task.plan.version+1,summary:"Recovery v\(task.plan.version+1): \(p.summary)",steps:p.steps)
+ }
+ private func deterministicRuntimeMonitoringPlan(goal:String,available:Set<String>)->TaskPlan?{
+  let normalized=goal.folding(options:[.diacriticInsensitive,.caseInsensitive],locale:Locale(identifier:"el_GR")).lowercased()
+  let monitoringIntent=["monitor","monitoring","periodically","continuously","παρακολουθ","περιοδικ","συνεχ"].contains(where:normalized.contains)
+  let runtimeIntent=normalized.contains("runtime") || normalized.contains("system status") || normalized.contains("cpu") || normalized.contains("memory") || normalized.contains("μνημ")
+  let required:Set<String>=["runtime_health","report_synthesis"]
+  guard monitoringIntent && runtimeIntent && required.isSubset(of:available) else{return nil}
+  let healthID=UUID(),reportID=UUID()
+  let steps=[
+   PlanStep(id:healthID,order:1,title:"Monitor runtime health",instructions:"Periodically collect deterministic read-only runtime, CPU and memory health evidence for the duration requested in the mission goal.",capabilityId:"runtime_health",successCriteria:["Runtime health observations are collected for the requested monitoring duration."],riskLevel:.low,requiresApproval:false,canRunInBackground:true,estimatedEffort:.medium,maxAttempts:2),
+   PlanStep(id:reportID,order:2,title:"Produce monitoring report",instructions:"Synthesize the verified monitoring observations into a concise deterministic final report.",capabilityId:"report_synthesis",dependencyStepIds:[healthID],successCriteria:["Final report summarizes the verified monitoring observations."],riskLevel:.low,requiresApproval:false,canRunInBackground:true,estimatedEffort:.short,maxAttempts:2)
+  ]
+  return TaskPlan(version:1,summary:"Deterministic read-only timed runtime monitoring → verified final report.",steps:steps)
  }
  private func deterministicRuntimeDiagnosticsPlan(goal:String,available:Set<String>)->TaskPlan?{
   let normalized=goal.folding(options:[.diacriticInsensitive,.caseInsensitive],locale:Locale(identifier:"el_GR")).lowercased();let runtimeIntent=normalized.contains("runtime") || normalized.contains("travis runtime");let diagnosticIntent=["identity","ταυτοτητα","health","υγεια","safety","ασφαλ","report","αναφορα","status","κατασταση"].contains(where:normalized.contains);let required:Set<String>=["runtime_identity","runtime_health","runtime_safety","report_synthesis"];guard runtimeIntent && diagnosticIntent && required.isSubset(of:available) else{return nil}
