@@ -74,11 +74,30 @@ struct TRAVISRootView: View {
                 let checkpoint=task.executionState.lastCheckpoint?.summary
                 let workerJob=AlwaysOnWorkerMonitor.shared.serviceJobs.last{$0.kind=="headlessMission" && $0.sourceTaskID?.caseInsensitiveCompare(task.id.uuidString) == .orderedSame}
                 let workerState=workerJob?.state.lowercased()
+                // A newly exported headless mission is durably queued before the external
+                // worker's next heartbeat publishes it. During that short handoff window
+                // the GUI task is intentionally PAUSED for exclusive ownership. Report
+                // RUNNING to the Control Plane as soon as headless ownership is established
+                // instead of leaking the internal PAUSED state to iPhone.
                 let workerActive=workerJob.map{["running","scheduled","sleeping"].contains(workerState ?? "") && $0.enabled} ?? false
                 let workerPaused=workerState=="paused"
                 let workerStopped=workerState=="stopped"
-                let headlessOwned=task.status == .paused && (checkpoint?.localizedCaseInsensitiveContains("ALWAYS-ON HEADLESS") == true || workerJob != nil)
-                let bridgedStatus=headlessOwned ? (workerActive ? "running":workerPaused ? "paused":workerStopped ? "headless":workerState ?? "headless"):task.status.rawValue
+                let headlessCheckpoint=checkpoint?.localizedCaseInsensitiveContains("ALWAYS-ON HEADLESS") == true
+                let headlessOwned=task.status == .paused && (headlessCheckpoint || workerJob != nil)
+                let bridgedStatus:String
+                if headlessOwned {
+                    if workerPaused {
+                        bridgedStatus="paused"
+                    } else if workerStopped {
+                        bridgedStatus="headless"
+                    } else if workerActive || (workerJob == nil && headlessCheckpoint) {
+                        bridgedStatus="running"
+                    } else {
+                        bridgedStatus=workerState ?? "headless"
+                    }
+                } else {
+                    bridgedStatus=task.status.rawValue
+                }
                 let report=task.plan.steps.filter{$0.status == .completed}.sorted{$0.order<$1.order}.compactMap{s->String? in guard let r=s.resultSummary?.trimmingCharacters(in:.whitespacesAndNewlines),!r.isEmpty else{return nil};return "#\(s.order) \(s.title)\n\(r)"}.joined(separator:"\n\n")
                 let steps=task.plan.steps.sorted{$0.order<$1.order}.map{s in TravisBridgeStepSnapshot(id:s.id,order:s.order,title:s.title,status:s.status.rawValue,capability:s.capabilityId,attemptCount:s.attemptCount,maxAttempts:s.maxAttempts,requiresApproval:s.requiresApproval,lastError:s.lastError)}
                 return TravisBridgeTaskSnapshot(id:task.id,title:task.title,goal:task.goal,status:bridgedStatus,priority:task.priority.rawValue,completedSteps:completed,totalSteps:task.plan.steps.count,currentStep:current,checkpoint:checkpoint,finalReport:task.status == .completed && !report.isEmpty ? String(report.prefix(8000)):nil,failureReason:task.failureReason,steps:steps,updatedAt:task.updatedAt)
