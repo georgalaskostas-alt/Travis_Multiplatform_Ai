@@ -29,8 +29,13 @@ enum HeadlessMissionReconciler {
         for job in doc.jobs where job.kind=="headlessMission"{
             guard let raw=job.payload?.sourceTaskID,let taskID=UUID(uuidString:raw),let original=runtime.task(id:taskID)else{continue}
             guard ![AgentTaskStatus.completed,.cancelled].contains(original.status)else{continue}
-            if let v=job.payload?.sourcePlanVersion,v != original.plan.version{continue}
             let state=job.state.lowercased()
+            // A stopped worker result is durable terminal proof for the exact
+            // source task. Do not discard that proof merely because foreground
+            // recovery/replanning incremented the GUI plan version while the
+            // headless worker still owned the originally exported plan.
+            let terminalProof = state=="stopped" && job.lastResult?.completedSteps == job.lastResult?.totalSteps && (job.lastResult?.totalSteps ?? 0) > 0
+            if let v=job.payload?.sourcePlanVersion,v != original.plan.version,!terminalProof{continue}
             if original.status == .failed {
                 let workerFailure = original.failureReason?.hasPrefix("Always-On worker failed:") == true
                 guard workerFailure else{continue}
@@ -55,7 +60,8 @@ enum HeadlessMissionReconciler {
                 if let report=result.finalReport,!report.isEmpty{runtime.checkpoint(taskId:taskID,summary:"HEADLESS FINAL REPORT\n\(String(report.prefix(8000)))",nextAction:nil)}
                 if let done=result.completedSteps,let total=result.totalSteps,done==total{
                     let current=runtime.task(id:taskID)
-                    for step in current?.plan.steps ?? [] where exportedIDs.contains(step.id) && step.status != .completed && step.status != .skipped{runtime.markStepCompleted(taskId:taskID,stepId:step.id,resultSummary:result.finalReport ?? result.summary ?? "Completed by Always-On worker");changed += 1}
+                    let exactExportedPlan = job.payload?.sourcePlanVersion == current?.plan.version
+                    for step in current?.plan.steps ?? [] where (exactExportedPlan ? exportedIDs.contains(step.id) : true) && step.status != .completed && step.status != .skipped{runtime.markStepCompleted(taskId:taskID,stepId:step.id,resultSummary:result.finalReport ?? result.summary ?? "Completed by Always-On worker");changed += 1}
                     // markStepCompleted is the runtime's canonical terminal transition:
                     // when the last unfinished step is completed it sets the task to .completed.
                     // Do not resume foreground execution here; headless ownership remains exclusive.
