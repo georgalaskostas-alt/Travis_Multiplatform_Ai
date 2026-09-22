@@ -30,6 +30,17 @@ extension TRAVISAppState {
             if await handleSchedulingIntent(trimmed, recentHistory: recentHistory) { return }
             if await handleSystemIntent(trimmed, recentHistory: recentHistory) { return }
 
+            // Natural-language autonomous missions should use the same Mission V2
+            // path as the explicit /plan debug command. Deterministic Mission V2
+            // contracts are intentionally checked before legacy workflow routers so
+            // phrases such as "monitor ... for 2 minutes" cannot be misclassified
+            // as project/scaffold work.
+            let missionV2Planner = AutonomousMissionPlannerV2()
+            if missionV2Planner.deterministicPlanIfAvailable(goal: trimmed, capabilities: orchestrator.capabilities) != nil {
+                runAutonomousMissionV2(goal: trimmed)
+                return
+            }
+
             if LocalBatchWorkflowIntentRouter.shared.plan(for: trimmed, capabilities: orchestrator.capabilities) != nil ||
                 LocalWorkflowIntentRouter.shared.plan(for: trimmed, capabilities: orchestrator.capabilities) != nil {
                 createAutonomousPlan(goal: trimmed, projectId: boundProject()?.id)
