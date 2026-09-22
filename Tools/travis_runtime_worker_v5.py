@@ -117,7 +117,12 @@ def recover():
   d=load_document();now=time.time();changed=False
   for j in d["jobs"]:
    lease=j.get("lease") if isinstance(j.get("lease"),dict) else {}
-   if j.get("state")=="running" and float(lease.get("expiresAt",0) or 0)<now:
+   if j.get("state")=="running" and not j.get("enabled",False):
+    # A disabled job cannot legitimately remain running. This can be left
+    # behind when an old worker execution is interrupted after a pause/cancel.
+    # Fail closed into PAUSED instead of publishing a permanent ghost RUNNING.
+    j.update(state="paused",lease=None,lastError=None,updatedAt=now,cancelRequested=False);changed=True;recovered.append((j.get("id"),j.get("checkpoint")))
+   elif j.get("state")=="running" and float(lease.get("expiresAt",0) or 0)<now:
     j.update(state="scheduled",nextRunAt=now,lease=None,lastError="Recovered expired or legacy execution lease",updatedAt=now,recoveryCount=int(j.get("recoveryCount",0))+1,cancelRequested=False);changed=True;recovered.append((j.get("id"),j.get("checkpoint")))
   if changed or d.get("version")!=SCHEMA:save_document(d)
  for jid,checkpoint in recovered:journal("job_recovered",jobID=jid,checkpoint=checkpoint)
