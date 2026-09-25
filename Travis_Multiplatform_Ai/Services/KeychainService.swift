@@ -57,13 +57,21 @@ final class KeychainService {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
-        SecItemDelete(query as CFDictionary)
+        let replacement: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        let replacementStatus = SecItemUpdate(query as CFDictionary, replacement as CFDictionary)
+        if replacementStatus == errSecSuccess { return }
+        guard replacementStatus == errSecItemNotFound else {
+            throw KeychainError.status(replacementStatus)
+        }
+
         var attributes = query
         attributes[kSecValueData as String] = data
-        attributes[kSecAttrAccessible as String] =
-            kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(attributes as CFDictionary, nil)
-        guard status == errSecSuccess else { throw KeychainError.status(status) }
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let creationStatus = SecItemAdd(attributes as CFDictionary, nil)
+        guard creationStatus == errSecSuccess else { throw KeychainError.status(creationStatus) }
     }
 
     enum KeychainError: LocalizedError {
