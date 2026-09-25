@@ -42,7 +42,13 @@ final class GitHubCodingService {
     }
 
     private func decorate(_ request:inout URLRequest,requiresToken:Bool,token:String?=nil){request.setValue("application/vnd.github+json",forHTTPHeaderField:"Accept");request.setValue("application/json",forHTTPHeaderField:"Content-Type");request.setValue("2022-11-28",forHTTPHeaderField:"X-GitHub-Api-Version");let credential=token ?? Self.token();if let credential{request.setValue("Bearer \(credential)",forHTTPHeaderField:"Authorization")}else if requiresToken{return}}
-    private func validate(response:URLResponse,data:Data)throws{guard let http=response as? HTTPURLResponse else{throw GitHubCodingServiceError.invalidResponse};guard (200..<300).contains(http.statusCode)else{let msg=(try? JSONSerialization.jsonObject(with:data) as? [String:Any])?["message"] as? String ?? String(data:data,encoding:.utf8) ?? "unknown error";throw GitHubCodingServiceError.http(status:http.statusCode,message:msg)}}
+    private func validate(response:URLResponse,data:Data)throws{guard let http=response as? HTTPURLResponse else{throw GitHubCodingServiceError.invalidResponse};guard (200..<300).contains(http.statusCode)else{let raw=(try? JSONSerialization.jsonObject(with:data) as? [String:Any])?["message"] as? String ?? "GitHub request failed";let msg=Self.sanitizedServerMessage(raw);throw GitHubCodingServiceError.http(status:http.statusCode,message:msg)}}
+    private static func sanitizedServerMessage(_ raw:String)->String{
+        var value=String(raw.prefix(500))
+        let patterns=["ghp_[A-Za-z0-9_]+","github_pat_[A-Za-z0-9_]+","Bearer\\s+[A-Za-z0-9._~+\\-/]+=*"]
+        for pattern in patterns{if let re=try? NSRegularExpression(pattern:pattern,options:[.caseInsensitive]){let range=NSRange(value.startIndex..<value.endIndex,in:value);value=re.stringByReplacingMatches(in:value,options:[],range:range,withTemplate:"[REDACTED]")}}
+        return value
+    }
     private static func token()->String?{let v=KeychainService.shared.githubToken?.trimmingCharacters(in:.whitespacesAndNewlines);return v?.isEmpty==false ? v:nil}
     private static func encoded(_ path:String)->String{path.split(separator:"/").map{String($0).addingPercentEncoding(withAllowedCharacters:.urlPathAllowed) ?? String($0)}.joined(separator:"/")}
     private static func encodedBranch(_ branch:String)->String{branch.split(separator:"/").map{String($0).addingPercentEncoding(withAllowedCharacters:.urlPathAllowed) ?? String($0)}.joined(separator:"/")}
