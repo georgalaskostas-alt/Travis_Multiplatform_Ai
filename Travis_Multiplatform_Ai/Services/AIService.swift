@@ -544,10 +544,28 @@ final class AIService {
 
     private static func genericErrorMessage(_ data: Data) -> String {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "" }
+        let raw: String
         if let error = json["error"] as? [String: Any] {
-            return error["message"] as? String ?? ""
+            raw = error["message"] as? String ?? ""
+        } else {
+            raw = json["message"] as? String ?? ""
         }
-        return json["message"] as? String ?? ""
+        return sanitizedErrorMessage(raw)
+    }
+
+    private static func sanitizedErrorMessage(_ raw: String) -> String {
+        var value = String(raw.prefix(500))
+        let patterns = [
+            "sk-[A-Za-z0-9_-]+",
+            "sk-ant-[A-Za-z0-9_-]+",
+            "Bearer\\s+[A-Za-z0-9._~+\\-/]+=*"
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            let range = NSRange(value.startIndex..<value.endIndex, in: value)
+            value = regex.stringByReplacingMatches(in: value, options: [], range: range, withTemplate: "[REDACTED]")
+        }
+        return value
     }
 
     private static func localChatCompletionsEndpoint(_ baseURL: URL) -> URL {
