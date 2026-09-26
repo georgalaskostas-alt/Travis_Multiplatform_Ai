@@ -33,6 +33,26 @@ enum MissionCriticV6 {
             }
         }
         if task.failureReason != nil { findings.append(.init(severity:.blocker,message:"Task still carries a failure reason despite completion review.")) }
+
+        // Goal-closure gate: a mission is not complete merely because every step
+        // reached a terminal state. At least one completed step must provide
+        // durable evidence that plausibly addresses the user's original goal.
+        let goalTerms=meaningfulTerms(task.goal)
+        let completedEvidence=steps.compactMap { step -> String? in
+            guard step.status == .completed else { return nil }
+            let result=step.resultSummary?.trimmingCharacters(in:.whitespacesAndNewlines) ?? ""
+            guard !result.isEmpty else { return nil }
+            return (step.title+" "+step.instructions+" "+result).folding(options:[.diacriticInsensitive,.caseInsensitive],locale:.current).lowercased()
+        }
+        if completedEvidence.isEmpty {
+            findings.append(.init(severity:.blocker,message:"Mission has no durable completed evidence supporting goal closure."))
+        } else if !goalTerms.isEmpty {
+            let matched=goalTerms.filter { term in completedEvidence.contains(where:{$0.contains(term)}) }
+            let required=min(2,goalTerms.count)
+            if matched.count < required {
+                findings.append(.init(severity:.blocker,message:"Completed evidence does not sufficiently connect back to the original goal ((matched.count)/(required) goal terms evidenced)."))
+            }
+        }
         let blockers=findings.filter{$0.severity == .blocker}.count
         let warnings=findings.filter{$0.severity == .warning}.count
         let evidence=steps.filter{$0.status == .completed && !($0.resultSummary?.isEmpty ?? true)}.count
@@ -40,5 +60,12 @@ enum MissionCriticV6 {
         let confidence=max(0,min(1,0.70+coverage*0.30-Double(warnings)*0.04-Double(blockers)*0.25))
         let passed=blockers==0
         return .init(passed:passed,confidence:confidence,findings:findings,summary:passed ? "Mission closure is structurally verified; evidence coverage \(Int(coverage*100))%.":"Mission closure has \(blockers) blocker(s) and must not be treated as fully verified.")
+    }
+
+    private static func meaningfulTerms(_ text:String)->[String] {
+        let stop:Set<String>=["the","and","for","with","from","that","this","στο","στη","στην","του","της","των","και","για","απο","από","ένα","μια","την","τον","τα","το","σε","με"]
+        let normalized=text.folding(options:[.diacriticInsensitive,.caseInsensitive],locale:.current).lowercased()
+        var seen=Set<String>()
+        return normalized.split{!$0.isLetter && !$0.isNumber}.map(String.init).filter{$0.count>=4 && !stop.contains($0)}.filter{seen.insert($0).inserted}
     }
 }
