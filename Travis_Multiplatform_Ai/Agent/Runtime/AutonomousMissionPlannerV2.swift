@@ -58,16 +58,18 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
   """
   return try materialize(draft:try await requestDraft(prompt:prompt,workload:planningWorkload(g)),allowed:Set(capabilities.map(\.id)),registry:registry)
  }
- func makeRecoveryPlan(task:AgentTask,capabilities:[AgentCapability])async throws->TaskPlan{
+ func makeRecoveryPlan(task:AgentTask,capabilities:[AgentCapability],closureDiagnosis:String?=nil)async throws->TaskPlan{
   let completed=task.plan.steps.filter{$0.status == .completed}.sorted{$0.order<$1.order}.map{"STEP #\($0.order) \($0.title): \(String(($0.resultSummary ?? "No result").prefix(4000)))"}.joined(separator:"\n"),failed=task.plan.steps.first{$0.status == .failed},failure=failed.map{"STEP #\($0.order) \($0.title): \($0.lastError ?? task.failureReason ?? "Unknown")"} ?? (task.failureReason ?? "Unknown"),registry=CapabilityRegistry(capabilities:capabilities),headless=Self.headlessCatalog(capabilities),reflection=CognitiveReflectionStore.shared.compactContext(goal:task.goal,projectId:AIExecutionScope.context.projectId)
   if let localPlan=deterministicPlanIfAvailable(goal:task.goal,capabilities:capabilities){return TaskPlan(version:task.plan.version+1,summary:"Deterministic recovery v\(task.plan.version+1): \(localPlan.summary)",steps:localPlan.steps)}
   let prompt="""
   You are TRAVIS Self-Correction Planner V2 under V6 cognitive economy. Diagnose the failure and produce only the remaining work for ORIGINAL GOAL: \(task.goal)
   COMPLETED VERIFIED WORK:\n\(String(completed.prefix(16000)).isEmpty ? "None":String(completed.prefix(16000)))
   FAILURE:\n\(failure)
+  GOAL-CLOSURE DIAGNOSIS:\n\(closureDiagnosis?.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty == false ? String(closureDiagnosis!.prefix(7000)):"No separate goal-closure diagnosis.")
   VERIFIED REFLECTIONS:\n\(reflection.isEmpty ? "None":String(reflection.prefix(5000)))
   CAPABILITY REGISTRY:\n\(registry.promptCatalog())
   HEADLESS MAP:\n\(headless)
+  If GOAL-CLOSURE DIAGNOSIS is present, treat its blockers and missing goal concepts as the authoritative recovery target. Add only work that closes those gaps; do not repeat already verified work merely to generate a new plan.
   Choose a materially different route when the previous approach failed. Reuse completed evidence. Respect all descriptor policies. Preserve explicit path=/..., url=..., asset=TICKER requirements. Never invent unavailable facts. Code/trading mutations stay approval/risk gated. Use exact IDs, 1-8 steps, maxAttempts 1...5. JSON only.
   """
   let p=try materialize(draft:try await requestDraft(prompt:prompt,workload:planningWorkload(task.goal)),allowed:Set(capabilities.map(\.id)),registry:registry);return TaskPlan(version:task.plan.version+1,summary:"Recovery v\(task.plan.version+1): \(p.summary)",steps:p.steps)
