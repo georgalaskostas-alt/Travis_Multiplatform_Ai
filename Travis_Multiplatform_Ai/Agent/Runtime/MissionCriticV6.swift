@@ -50,7 +50,7 @@ enum MissionCriticV6 {
             let matched=goalTerms.filter { term in completedEvidence.contains(where:{$0.contains(term)}) }
             let required=min(2,goalTerms.count)
             if matched.count < required {
-                findings.append(.init(severity:.blocker,message:"Completed evidence does not sufficiently connect back to the original goal ((matched.count)/(required) goal terms evidenced)."))
+                findings.append(.init(severity:.blocker,message:"Completed evidence does not sufficiently connect back to the original goal (\(matched.count)/\(required) goal terms evidenced)."))
             }
         }
         let blockers=findings.filter{$0.severity == .blocker}.count
@@ -60,6 +60,31 @@ enum MissionCriticV6 {
         let confidence=max(0,min(1,0.70+coverage*0.30-Double(warnings)*0.04-Double(blockers)*0.25))
         let passed=blockers==0
         return .init(passed:passed,confidence:confidence,findings:findings,summary:passed ? "Mission closure is structurally verified; evidence coverage \(Int(coverage*100))%.":"Mission closure has \(blockers) blocker(s) and must not be treated as fully verified.")
+    }
+
+    static func recoveryContext(_ task:AgentTask)->String {
+        let report=review(task)
+        let blockers=report.findings.filter{$0.severity == .blocker}.map{"- "+$0.message}
+        let warnings=report.findings.filter{$0.severity == .warning}.map{"- "+$0.message}
+        let missing=meaningfulTerms(task.goal).filter { term in
+            !task.plan.steps.contains { step in
+                guard step.status == .completed,let result=step.resultSummary,!result.isEmpty else{return false}
+                let evidence=(step.title+" "+step.instructions+" "+result).folding(options:[.diacriticInsensitive,.caseInsensitive],locale:.current).lowercased()
+                return evidence.contains(term)
+            }
+        }
+        return """
+        GOAL-CLOSURE DIAGNOSIS
+        Original goal: \(task.goal)
+        Critic confidence: \(Int(report.confidence*100))%
+        Blockers:
+        \(blockers.isEmpty ? "- None":blockers.joined(separator:"\n"))
+        Warnings:
+        \(warnings.isEmpty ? "- None":warnings.joined(separator:"\n"))
+        Goal concepts without durable evidence:
+        \(missing.isEmpty ? "- None":missing.prefix(12).map{"- "+$0}.joined(separator:"\n"))
+        Recovery requirement: preserve verified completed work and add only the minimum evidence/action needed to close these specific gaps.
+        """
     }
 
     private static func meaningfulTerms(_ text:String)->[String] {
