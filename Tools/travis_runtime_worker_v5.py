@@ -35,8 +35,15 @@ def atomic(path,obj):
 def read(path,default):
  try:return json.loads(path.read_text(encoding="utf-8"))
  except Exception:return default
+def safe_text(value,limit=500):
+ text=str(value or "")[:limit]
+ import re
+ patterns=(r"Bearer\s+[A-Za-z0-9._~+\-/]+=*",r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",r"sk-[A-Za-z0-9_-]+",r"ghp_[A-Za-z0-9_]+",r"github_pat_[A-Za-z0-9_]+")
+ for pattern in patterns:text=re.sub(pattern,"[REDACTED]",text,flags=re.IGNORECASE)
+ return text
 def journal(event,**fields):
- rec={"at":time.time(),"event":event,"workerPID":PID,"generation":GEN,"workerVersion":WORKER_VERSION,**fields}
+ clean={k:(safe_text(v) if k.lower() in {"error","summary","detail","message"} else v) for k,v in fields.items()}
+ rec={"at":time.time(),"event":event,"workerPID":PID,"generation":GEN,"workerVersion":WORKER_VERSION,**clean}
  try:
   with locked(ROOT/"service-journal.lock"):
    with JOURNAL.open("a",encoding="utf-8") as f:f.write(json.dumps(rec,sort_keys=True)+"\n")
