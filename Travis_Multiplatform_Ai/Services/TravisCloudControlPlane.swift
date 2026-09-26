@@ -469,7 +469,14 @@ final class TravisCloudControlPlane {
 
     private var decoder:JSONDecoder{let d=JSONDecoder();d.dateDecodingStrategy = .iso8601;return d}
     private func preparedRequest(path:String,method:String,prefer:String?) throws -> URLRequest{guard let token=accessToken,!token.isEmpty else{state = .unauthorized;throw CloudError.unauthorized};guard let url=URL(string:path,relativeTo:base) else{throw CloudError.invalidResponse};var r=URLRequest(url:url);r.httpMethod=method;r.setValue(publishableKey,forHTTPHeaderField:"apikey");r.setValue("Bearer \(token)",forHTTPHeaderField:"Authorization");r.setValue("application/json",forHTTPHeaderField:"Content-Type");if let prefer{r.setValue(prefer,forHTTPHeaderField:"Prefer")};return r}
-    private func perform(_ r:URLRequest) async throws -> Data{let(data,response)=try await URLSession.shared.data(for:r);guard let h=response as? HTTPURLResponse else{throw CloudError.invalidResponse};guard 200..<300 ~= h.statusCode else{throw CloudError.http(h.statusCode,String(data:data,encoding:.utf8) ?? "")};return data}
+    private func perform(_ r:URLRequest) async throws -> Data{let(data,response)=try await URLSession.shared.data(for:r);guard let h=response as? HTTPURLResponse else{throw CloudError.invalidResponse};guard 200..<300 ~= h.statusCode else{throw CloudError.http(h.statusCode,Self.sanitizedCloudError(data))};return data}
+    private static func sanitizedCloudError(_ data:Data)->String{
+        let raw=(try? JSONSerialization.jsonObject(with:data) as? [String:Any]).flatMap{($0["message"] as? String) ?? ($0["error_description"] as? String) ?? ($0["error"] as? String)} ?? "Cloud request failed"
+        var value=String(raw.prefix(500))
+        let patterns=["Bearer\\s+[A-Za-z0-9._~+\\-/]+=*","eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+"]
+        for pattern in patterns{if let regex=try? NSRegularExpression(pattern:pattern,options:[.caseInsensitive]){let range=NSRange(value.startIndex..<value.endIndex,in:value);value=regex.stringByReplacingMatches(in:value,options:[],range:range,withTemplate:"[REDACTED]")}}
+        return value
+    }
 
     /// Executes an authenticated Control Plane request. A JWT can expire or be
     /// revoked between the proactive heartbeat refresh and the actual REST
