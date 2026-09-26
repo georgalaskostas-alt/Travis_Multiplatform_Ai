@@ -475,6 +475,20 @@ final class TravisCloudAuthService {
         }
     }
 
+    private static func sanitizedAuthError(_ raw: String) -> String {
+        var value = String(raw.prefix(500))
+        let patterns = [
+            "Bearer\\s+[A-Za-z0-9._~+\\-/]+=*",
+            "eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+"
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            let range = NSRange(value.startIndex..<value.endIndex, in: value)
+            value = regex.stringByReplacingMatches(in: value, options: [], range: range, withTemplate: "[REDACTED]")
+        }
+        return value
+    }
+
     enum AuthError: LocalizedError {
         case invalidCredentials
         case noSession
