@@ -25,6 +25,8 @@ struct ProposedAction: Identifiable, Codable, Hashable {
     var location: String?
     var createdAt: Date
     var resolvedAt: Date?
+    var taskId: UUID?
+    var stepId: UUID?
 
     init(
         id: UUID = UUID(),
@@ -38,7 +40,9 @@ struct ProposedAction: Identifiable, Codable, Hashable {
         filename: String? = nil,
         location: String? = nil,
         createdAt: Date = Date(),
-        resolvedAt: Date? = nil
+        resolvedAt: Date? = nil,
+        taskId: UUID? = nil,
+        stepId: UUID? = nil
     ) {
         self.id = id
         self.capabilityId = capabilityId
@@ -52,5 +56,7 @@ struct ProposedAction: Identifiable, Codable, Hashable {
         self.location = location
         self.createdAt = createdAt
         self.resolvedAt = resolvedAt
+        self.taskId = taskId
+        self.stepId = stepId
     }
 }
