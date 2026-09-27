@@ -145,6 +145,20 @@ enum MissionCriticV6 {
         let stop:Set<String>=["the","and","for","with","from","that","this","στο","στη","στην","του","της","των","και","για","απο","από","ένα","μια","την","τον","τα","το","σε","με"]
         let normalized=text.folding(options:[.diacriticInsensitive,.caseInsensitive],locale:.current).lowercased()
         var seen=Set<String>()
-        return normalized.split{!$0.isLetter && !$0.isNumber}.map(String.init).filter{$0.count>=4 && !stop.contains($0)}.filter{seen.insert($0).inserted}
+        return normalized.split{!$0.isLetter && !$0.isNumber}
+            .map(String.init)
+            .map(stem)
+            .filter{$0.count>=4 && !stop.contains($0)}
+            .filter{seen.insert($0).inserted}
+    }
+
+    private static func stem(_ token:String)->String {
+        var value=token
+        let english=["ing","tion","ions","ment","ments","ed","es","s"]
+        let greek=["οντας","ωντας","ηση","ησεις","ηθηκε","ημενο","ημενη","ικος","ικη","ικο","ους","ων","ες","ος","η","α"]
+        for suffix in english+greek where value.count>suffix.count+3 && value.hasSuffix(suffix) {
+            value=String(value.dropLast(suffix.count));break
+        }
+        return value
     }
 }
