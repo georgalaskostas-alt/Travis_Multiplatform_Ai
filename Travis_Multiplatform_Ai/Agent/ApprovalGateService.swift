@@ -9,6 +9,7 @@ final class ApprovalGateService {
 
     private var capabilities: [String: WeakAgentCapabilityBox] = [:]
     private let persistence: PersistenceService
+    var onResolution: ((ProposedAction) -> Void)?
 
     init(persistence: PersistenceService = .shared) {
         self.persistence = persistence
@@ -48,6 +49,7 @@ final class ApprovalGateService {
         persistence.updateProposedAction(resolvedAction)
 
         capabilities[resolvedAction.capabilityId]?.value?.resolve(resolvedAction)
+        onResolution?(resolvedAction)
     }
 }
 
