@@ -23,6 +23,18 @@ final class TRAVISAppState {
         let runtimeIdentity=RuntimeDiagnosticsCapabilityV6(.identity),runtimeHealth=RuntimeDiagnosticsCapabilityV6(.health),runtimeSafety=RuntimeDiagnosticsCapabilityV6(.safety),runtimeReport=RuntimeDiagnosticsCapabilityV6(.report)
         let appCapabilities:[AgentCapability]=[TextTaskCapability(),market,audit,trading,SelfImprovementCapability(),evolution,fs,advancedFS,productivity,calculation,automation,document,fileSearch,textRead,textTransform,data,batch,artifact,visual,directory,delivery,scaffold,workspace,fcc,runtimeIdentity,runtimeHealth,runtimeSafety,runtimeReport]
         appCapabilities.forEach{orchestrator.register($0)}
+        approvalGate.onResolution={ [weak taskRuntime] action in
+            guard let taskRuntime,
+                  let task=taskRuntime.tasks.first(where:{$0.status == .waitingForApproval}),
+                  let stepId=task.executionState.currentStepId,
+                  let step=task.plan.steps.first(where:{$0.id == stepId}),
+                  step.capabilityId == action.capabilityId else{return}
+            if action.status == .approved {
+                taskRuntime.markStepApprovalGranted(taskId:task.id,stepId:stepId)
+            } else {
+                taskRuntime.markStepApprovalRejected(taskId:task.id,stepId:stepId,reason:"User rejected proposed action: \(action.summary)")
+            }
+        }
         orchestrator.onAssistantMessage={ [weak self] text in self?.addAssistantMessage(text)};orchestrator.onSessionRecall={ [weak self] id in self?.viewSession(id)}
         taskExecutor.onProgress={ [weak self] text in self?.addAssistantMessage(text);guard let self else{return};Task{@MainActor [weak self] in await self?.synchronizeCompletedKnowledge()}}
         trading.onTestnetExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)};evolution.onExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)};fs.onExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)};advancedFS.onExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)};productivity.onExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)};calculation.onExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)};automation.onExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)};document.onExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)};batch.onExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)};artifact.onExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)};visual.onExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)};delivery.onExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)};scaffold.onExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)};workspace.onExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)};fcc.onExecutionUpdate={ [weak self] in self?.addAssistantMessage($0)}
