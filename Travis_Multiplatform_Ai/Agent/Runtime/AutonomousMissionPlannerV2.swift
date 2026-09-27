@@ -46,6 +46,13 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
   - self_evolution_v6 and coding_repository are mutation-capable. Use only for explicit code/GUI changes, keep approval=true via descriptor, inspect before mutation and validate after mutation.
   - Never weaken an approval requirement from the descriptor.
   - Prefer evidence → action/reasoning → independent verification → artifact/report when the goal warrants it.
+  ADAPTIVE DELIVERY POLICY:
+  - Decide HOW the result should be delivered from the user's goal, intended use and available capability outputKinds. Delivery format is part of planning, not a fixed post-processing rule.
+  - Do not create a file merely because the mission has a final report step. A concise conversational result is valid when no durable/shareable artifact adds value.
+  - When a durable deliverable is useful or explicitly requested, select the capability/format that best fits the result: structured data should prefer data/file outputs; visual analysis should prefer chart/dashboard/presentation outputs; documents/reports should prefer document/file outputs; code work should deliver the actual repository/project artifact.
+  - If the user explicitly names a format, honor it only when a registered capability can safely produce it. Otherwise explain the supported alternative rather than pretending the requested artifact exists.
+  - A requested or planner-selected deliverable is part of mission success: its final step successCriteria must prove the artifact was actually created and identify its filename/path or durable reference.
+  - Never claim a PDF, spreadsheet, presentation, source file or other artifact was created unless the executing capability returns durable evidence of that artifact.
   PLAN RULES:
   - Prefer 2-10 steps; exceed that only when the goal genuinely requires decomposition.
   - Every step uses exactly one registered capabilityId.
@@ -74,6 +81,7 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
   HEADLESS MAP:\n\(headless)
   If GOAL-CLOSURE DIAGNOSIS is present, treat its blockers, mission success contract and missing goal concepts as the authoritative recovery target. Add only work that closes those gaps; do not repeat already verified work merely to generate a new plan.
   Every recovery successCriteria entry must name observable evidence that proves the diagnosed gap is closed. The final recovery step must explicitly close the remaining mission-contract obligations.
+  Re-evaluate delivery when recovery reveals that the mission result exists but was not delivered in a useful form. Choose the best registered output capability instead of assuming PDF or any other fixed format. If an artifact is selected, require durable filename/path/reference evidence before closure.
   Choose a materially different route when the previous approach failed. Reuse completed evidence. Respect all descriptor policies. Preserve explicit path=/..., url=..., asset=TICKER requirements. Never invent unavailable facts. Code/trading mutations stay approval/risk gated. Use exact IDs, 1-8 steps, maxAttempts 1...5. JSON only.
   """
   let p=try materialize(draft:try await requestDraft(prompt:prompt,workload:planningWorkload(task.goal)),allowed:Set(capabilities.map(\.id)),registry:registry);return TaskPlan(version:task.plan.version+1,summary:"Recovery v\(task.plan.version+1): \(p.summary)",steps:p.steps)
