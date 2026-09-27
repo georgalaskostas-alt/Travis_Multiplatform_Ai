@@ -42,6 +42,10 @@ final class SystemIntentRouter {
         if let explicit = explicitCommand(message) { return explicit }
         if let local = deterministicNaturalIntent(message) { return local }
         guard looksLikeRuntimeControl(message) else { return .none }
+        // A message that describes new work must never be reinterpreted as control
+        // of an old task merely because it contains words such as "runtime".
+        // Natural-language task control must carry an explicit control verb/reference.
+        guard looksLikeExplicitRuntimeControlRequest(message) else { return .none }
 
         let transcript = Array(recentHistory.suffix(6)).promptTranscript
         let prompt = """
@@ -126,6 +130,18 @@ final class SystemIntentRouter {
         if ["cancel it", "ακυρωσε το", "σταματα το task"].contains(text) { return .cancel(nil) }
 
         return nil
+    }
+
+    private func looksLikeExplicitRuntimeControlRequest(_ message: String) -> Bool {
+        let text = normalize(message)
+        let controls = [
+            "status task", "task status", "κατασταση task", "κατασταση του task",
+            "log task", "task log", "ιστορικο task",
+            "resume", "retry", "cancel", "run task", "auto task",
+            "συνεχισε το task", "ξανατρεξε το task", "ακυρωσε το task",
+            "σταματα το task", "τρεξε το task", "προηγουμενο task"
+        ]
+        return controls.contains { text.contains($0) }
     }
 
     private func looksLikeRuntimeControl(_ message: String) -> Bool {
