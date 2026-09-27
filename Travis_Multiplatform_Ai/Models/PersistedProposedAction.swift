@@ -18,6 +18,8 @@ final class PersistedProposedAction {
     var location: String?
     var createdAt: Date = Date()
     var resolvedAt: Date?
+    var taskId: UUID?
+    var stepId: UUID?
 
     init(from action: ProposedAction) {
         self.id = action.id
@@ -32,11 +34,15 @@ final class PersistedProposedAction {
         self.location = action.location
         self.createdAt = action.createdAt
         self.resolvedAt = action.resolvedAt
+        self.taskId = action.taskId
+        self.stepId = action.stepId
     }
 
     func apply(_ action: ProposedAction) {
         status = action.status.rawValue
         resolvedAt = action.resolvedAt
+        taskId = action.taskId
+        stepId = action.stepId
     }
 
     var asProposedAction: ProposedAction {
@@ -52,7 +58,9 @@ final class PersistedProposedAction {
             filename: filename,
             location: location,
             createdAt: createdAt,
-            resolvedAt: resolvedAt
+            resolvedAt: resolvedAt,
+            taskId: taskId,
+            stepId: stepId
         )
     }
 }
