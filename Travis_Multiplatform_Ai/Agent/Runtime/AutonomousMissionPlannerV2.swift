@@ -101,8 +101,22 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
   return TaskPlan(version:1,summary:"Deterministic read-only timed runtime monitoring → verified final report.",steps:steps)
  }
  private func deterministicRuntimeDiagnosticsPlan(goal:String,available:Set<String>)->TaskPlan?{
-  let normalized=goal.folding(options:[.diacriticInsensitive,.caseInsensitive],locale:Locale(identifier:"el_GR")).lowercased();guard !explicitDurableDeliveryIntent(normalized) else{return nil};let runtimeIntent=normalized.contains("runtime") || normalized.contains("travis runtime");let diagnosticIntent=["identity","ταυτοτητα","health","υγεια","safety","ασφαλ","report","αναφορα","status","κατασταση"].contains(where:normalized.contains);let required:Set<String>=["runtime_identity","runtime_health","runtime_safety","report_synthesis"];guard runtimeIntent && diagnosticIntent && required.isSubset(of:available) else{return nil}
+  let normalized=goal.folding(options:[.diacriticInsensitive,.caseInsensitive],locale:Locale(identifier:"el_GR")).lowercased();guard !explicitDurableDeliveryIntent(normalized) else{return nil};guard explicitRequestedStepCount(in:normalized) == nil else{return nil};let runtimeIntent=normalized.contains("runtime") || normalized.contains("travis runtime");let diagnosticIntent=["identity","ταυτοτητα","health","υγεια","safety","ασφαλ","report","αναφορα","status","κατασταση"].contains(where:normalized.contains);let required:Set<String>=["runtime_identity","runtime_health","runtime_safety","report_synthesis"];guard runtimeIntent && diagnosticIntent && required.isSubset(of:available) else{return nil}
   let identityID=UUID(),healthID=UUID(),safetyID=UUID(),reportID=UUID();let steps=[PlanStep(id:identityID,order:1,title:"Συλλογή ταυτότητας runtime",instructions:"Collect deterministic TRAVIS runtime identity, version, platform and environment evidence.",capabilityId:"runtime_identity",successCriteria:["Structured runtime identity evidence is returned."],riskLevel:.low,requiresApproval:false,canRunInBackground:true,estimatedEffort:.short,maxAttempts:2),PlanStep(id:healthID,order:2,title:"Έλεγχος υγείας runtime",instructions:"Inspect deterministic TRAVIS runtime and Always-On worker health telemetry.",capabilityId:"runtime_health",successCriteria:["Runtime health evidence is returned."],riskLevel:.low,requiresApproval:false,canRunInBackground:true,estimatedEffort:.short,maxAttempts:2),PlanStep(id:safetyID,order:3,title:"Έλεγχος safety controls",instructions:"Inspect deterministic runtime safety controls, kill-switch state and prohibited capabilities without changing state.",capabilityId:"runtime_safety",successCriteria:["Safety-control evidence is returned without mutation."],riskLevel:.low,requiresApproval:false,canRunInBackground:true,estimatedEffort:.short,maxAttempts:2),PlanStep(id:reportID,order:4,title:"Τελική αναφορά runtime",instructions:"Synthesize the verified identity, health and safety evidence into a concise deterministic final runtime report.",capabilityId:"report_synthesis",dependencyStepIds:[identityID,healthID,safetyID],successCriteria:["Final report incorporates identity, health and safety evidence."],riskLevel:.low,requiresApproval:false,canRunInBackground:true,estimatedEffort:.short,maxAttempts:2)];return TaskPlan(version:1,summary:"Zero-cloud deterministic runtime diagnostics → Always-On identity, health and safety checks → verified final report.",steps:steps)
+ }
+ private func explicitRequestedStepCount(in normalized:String)->Int?{
+  let patterns=[#"\\b(\\d{1,2})\\s*[- ]?step\\b"#,#"\\b(\\d{1,2})\\s*βημα"#]
+  for pattern in patterns{
+   guard let regex=try? NSRegularExpression(pattern:pattern,options:[.caseInsensitive]) else{continue}
+   let range=NSRange(normalized.startIndex..<normalized.endIndex,in:normalized)
+   guard let match=regex.firstMatch(in:normalized,options:[],range:range),
+         match.numberOfRanges>1,
+         let r=Range(match.range(at:1),in:normalized),
+         let value=Int(normalized[r]),
+         value>0 else{continue}
+   return value
+  }
+  return nil
  }
  private func explicitDurableDeliveryIntent(_ normalized:String)->Bool{
   let explicitFormats=["pdf","xlsx","csv","pptx","powerpoint","spreadsheet","markdown"," html"," svg"," json"," txt"]
