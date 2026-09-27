@@ -4,6 +4,7 @@ import SwiftUI
 struct TravisPremiumWorkspaceChatView: View {
     @Bindable var appState: TRAVISAppState
     @State private var draft = ""
+    @Environment(\.dismiss) private var dismiss
     private let cyan = Color(red: 0.04, green: 0.82, blue: 1)
     private let navy = Color(red: 0.001, green: 0.018, blue: 0.072)
     private let panel = Color(red: 0.004, green: 0.042, blue: 0.125)
@@ -26,6 +27,15 @@ struct TravisPremiumWorkspaceChatView: View {
                     Circle().fill(appState.isBusy ? Color.orange : Color.green).frame(width: 6, height: 6).shadow(color: appState.isBusy ? .orange : .green, radius: 4)
                     Text(appState.isBusy ? "TRAVIS WORKING" : "TRAVIS READY").font(.system(size: 8, weight: .bold, design: .rounded)).foregroundStyle(.secondary)
                 }
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .heavy))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(PremiumWorkspaceIconButton(tint: cyan))
+                .help("Close")
+                .accessibilityLabel("Close conversation")
+
                 if appState.viewedSessionId != appState.currentSessionId {
                     Button("RETURN LIVE") { appState.returnToCurrentSession() }
                         .buttonStyle(PremiumWorkspaceButton(tint: cyan))
