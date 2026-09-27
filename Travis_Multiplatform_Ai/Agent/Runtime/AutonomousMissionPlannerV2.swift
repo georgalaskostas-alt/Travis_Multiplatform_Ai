@@ -49,6 +49,9 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
   PLAN RULES:
   - Prefer 2-10 steps; exceed that only when the goal genuinely requires decomposition.
   - Every step uses exactly one registered capabilityId.
+  - Treat successCriteria as a mission contract, not decorative text: each criterion must describe observable evidence that the capability result can actually prove.
+  - Do not use vague criteria such as "task completed", "analysis done", "report created", or restatements of the step title.
+  - For the final/synthesis step, include criteria that demonstrate the original user goal is actually closed by the accumulated evidence.
   - Dependencies reference earlier order numbers only.
   - Success criteria must be observable/verifiable.
   - riskLevel low|medium|high|critical; estimatedEffort short|medium|long; maxAttempts 1...5.
@@ -69,7 +72,8 @@ enum AutonomousMissionPlannerV2Error:LocalizedError{case emptyGoal,noCapabilitie
   VERIFIED REFLECTIONS:\n\(reflection.isEmpty ? "None":String(reflection.prefix(5000)))
   CAPABILITY REGISTRY:\n\(registry.promptCatalog())
   HEADLESS MAP:\n\(headless)
-  If GOAL-CLOSURE DIAGNOSIS is present, treat its blockers and missing goal concepts as the authoritative recovery target. Add only work that closes those gaps; do not repeat already verified work merely to generate a new plan.
+  If GOAL-CLOSURE DIAGNOSIS is present, treat its blockers, mission success contract and missing goal concepts as the authoritative recovery target. Add only work that closes those gaps; do not repeat already verified work merely to generate a new plan.
+  Every recovery successCriteria entry must name observable evidence that proves the diagnosed gap is closed. The final recovery step must explicitly close the remaining mission-contract obligations.
   Choose a materially different route when the previous approach failed. Reuse completed evidence. Respect all descriptor policies. Preserve explicit path=/..., url=..., asset=TICKER requirements. Never invent unavailable facts. Code/trading mutations stay approval/risk gated. Use exact IDs, 1-8 steps, maxAttempts 1...5. JSON only.
   """
   let p=try materialize(draft:try await requestDraft(prompt:prompt,workload:planningWorkload(task.goal)),allowed:Set(capabilities.map(\.id)),registry:registry);return TaskPlan(version:task.plan.version+1,summary:"Recovery v\(task.plan.version+1): \(p.summary)",steps:p.steps)
