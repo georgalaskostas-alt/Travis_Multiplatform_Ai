@@ -46,6 +46,16 @@ enum MissionCriticV6 {
             }
         }
 
+        // Adaptive deliverable closure: if the mission promised a durable artifact,
+        // completion requires durable creation evidence rather than narrative intent.
+        for step in steps where step.status == .completed && promisesDurableArtifact(step) {
+            let evidence=normalize(step.resultSummary ?? "")
+            let durableMarkers=["created:","saved:","path:","filename:","file:","artifact created","artifact saved","δημιουργηθηκε","αποθηκευτηκε","αρχειο:"]
+            if !durableMarkers.contains(where:evidence.contains) {
+                findings.append(.init(severity:.blocker,message:"Promised deliverable lacks durable artifact evidence for step #\(step.order): \(step.title)"))
+            }
+        }
+
         // Goal-closure gate: a mission is not complete merely because every step
         // reached a terminal state. At least one completed step must provide
         // durable evidence that plausibly addresses the user's original goal.
@@ -90,6 +100,12 @@ enum MissionCriticV6 {
             if !fallback.isEmpty{criteria=[fallback]}
         }
         return Array(criteria.prefix(12))
+    }
+
+    private static func promisesDurableArtifact(_ step:PlanStep)->Bool {
+        let text=normalize(step.title+" "+step.instructions+" "+step.successCriteria.joined(separator:" "))
+        let terms=["pdf","xlsx","spreadsheet","csv","pptx","presentation","document","file","artifact","deliverable","αρχει","παρουσιασ","παραδοτε"]
+        return terms.contains(where:text.contains)
     }
 
     private struct EvidenceAssessment {
