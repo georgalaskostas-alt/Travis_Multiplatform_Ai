@@ -42,7 +42,7 @@ enum MissionCriticV6 {
             guard step.status == .completed else { return nil }
             let result=step.resultSummary?.trimmingCharacters(in:.whitespacesAndNewlines) ?? ""
             guard !result.isEmpty else { return nil }
-            return (step.title+" "+step.instructions+" "+result).folding(options:[.diacriticInsensitive,.caseInsensitive],locale:.current).lowercased()
+            return result.folding(options:[.diacriticInsensitive,.caseInsensitive],locale:.current).lowercased()
         }
         if completedEvidence.isEmpty {
             findings.append(.init(severity:.blocker,message:"Mission has no durable completed evidence supporting goal closure."))
@@ -69,7 +69,7 @@ enum MissionCriticV6 {
         let missing=meaningfulTerms(task.goal).filter { term in
             !task.plan.steps.contains { step in
                 guard step.status == .completed,let result=step.resultSummary,!result.isEmpty else{return false}
-                let evidence=(step.title+" "+step.instructions+" "+result).folding(options:[.diacriticInsensitive,.caseInsensitive],locale:.current).lowercased()
+                let evidence=result.folding(options:[.diacriticInsensitive,.caseInsensitive],locale:.current).lowercased()
                 return evidence.contains(term)
             }
         }
