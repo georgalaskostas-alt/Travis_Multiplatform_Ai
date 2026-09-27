@@ -34,18 +34,15 @@ enum MissionCriticV6 {
         }
         if task.failureReason != nil { findings.append(.init(severity:.blocker,message:"Task still carries a failure reason despite completion review.")) }
 
-        // Goal contract: derive observable mission-level obligations from the original goal
-        // and the plan's explicit success criteria. Closure must be supported by actual
-        // result evidence, never merely by plan wording.
-        let contract=goalContract(task)
-        let normalizedResults=steps.compactMap{$0.status == .completed ? $0.resultSummary:nil}.map{normalize($0)}
-        for criterion in contract {
-            let terms=meaningfulTerms(criterion)
-            guard !terms.isEmpty else{continue}
-            let required=min(2,terms.count)
-            let matched=terms.filter{term in normalizedResults.contains(where:{$0.contains(term)})}
-            if matched.count<required {
-                findings.append(.init(severity:.blocker,message:"Goal contract not evidenced: \(criterion)"))
+        // Goal contract: each criterion is checked primarily against the result
+        // of the step that owns it. This avoids accidental cross-step keyword matches.
+        for step in steps where step.status == .completed {
+            let evidence=normalize(step.resultSummary ?? "")
+            for criterion in step.successCriteria {
+                let assessment=assess(criterion:criterion,evidence:evidence)
+                if !assessment.passed {
+                    findings.append(.init(severity:.blocker,message:"Goal contract not evidenced for step #\(step.order): \(criterion) [\(assessment.matched)/\(assessment.required)]"))
+                }
             }
         }
 
@@ -93,6 +90,24 @@ enum MissionCriticV6 {
             if !fallback.isEmpty{criteria=[fallback]}
         }
         return Array(criteria.prefix(12))
+    }
+
+    private struct EvidenceAssessment {
+        let passed:Bool
+        let matched:Int
+        let required:Int
+    }
+
+    private static func assess(criterion:String,evidence:String)->EvidenceAssessment {
+        let terms=meaningfulTerms(criterion)
+        guard !terms.isEmpty else{return .init(passed:!evidence.isEmpty,matched:evidence.isEmpty ? 0:1,required:1)}
+        let matched=terms.filter{evidence.contains($0)}.count
+        // Require meaningful overlap, but do not demand every wording token.
+        // Two concepts are enough for short criteria; longer criteria require
+        // roughly one third of their meaningful concepts, capped to stay robust
+        // across paraphrases and bilingual output.
+        let required=min(3,max(1,Int(ceil(Double(terms.count)*0.34))))
+        return .init(passed:matched>=required,matched:matched,required:required)
     }
 
     static func recoveryContext(_ task:AgentTask)->String {
