@@ -25,14 +25,17 @@ final class TRAVISAppState {
         appCapabilities.forEach{orchestrator.register($0)}
         approvalGate.onResolution={ [weak taskRuntime] action in
             guard let taskRuntime,
-                  let task=taskRuntime.tasks.first(where:{$0.status == .waitingForApproval}),
-                  let stepId=task.executionState.currentStepId,
+                  let taskId=action.taskId,
+                  let stepId=action.stepId,
+                  let task=taskRuntime.task(id:taskId),
+                  task.status == .waitingForApproval,
+                  task.executionState.currentStepId == stepId,
                   let step=task.plan.steps.first(where:{$0.id == stepId}),
                   step.capabilityId == action.capabilityId else{return}
             if action.status == .approved {
-                taskRuntime.markStepApprovalGranted(taskId:task.id,stepId:stepId)
+                taskRuntime.markStepApprovalGranted(taskId:taskId,stepId:stepId)
             } else {
-                taskRuntime.markStepApprovalRejected(taskId:task.id,stepId:stepId,reason:"User rejected proposed action: \(action.summary)")
+                taskRuntime.markStepApprovalRejected(taskId:taskId,stepId:stepId,reason:"User rejected proposed action: \(action.summary)")
             }
         }
         orchestrator.onAssistantMessage={ [weak self] text in self?.addAssistantMessage(text)};orchestrator.onSessionRecall={ [weak self] id in self?.viewSession(id)}
