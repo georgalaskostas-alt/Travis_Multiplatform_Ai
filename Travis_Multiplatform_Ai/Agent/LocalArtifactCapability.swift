@@ -32,7 +32,17 @@ final class LocalArtifactCapability: AgentCapability, DeterministicInvocableCapa
                 supportsProjectContext: true,
                 timeoutSeconds: 30,
                 maxAttempts: 1
-            )
+            ),
+            version: 2,
+            inputSchema: [
+                "directory": "approved destination directory",
+                "filename": "safe filename ending txt|md|csv|json|log|yaml|yml|xml",
+                "text": "exact artifact content"
+            ],
+            outputKinds: [.text, .structuredData, .table, .document, .file],
+            costClass: .zeroLocal,
+            deterministicWhenStructured: true,
+            freshnessSensitive: false
         )
     }
 
