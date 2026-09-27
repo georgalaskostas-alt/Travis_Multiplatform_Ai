@@ -34,6 +34,21 @@ enum MissionCriticV6 {
         }
         if task.failureReason != nil { findings.append(.init(severity:.blocker,message:"Task still carries a failure reason despite completion review.")) }
 
+        // Goal contract: derive observable mission-level obligations from the original goal
+        // and the plan's explicit success criteria. Closure must be supported by actual
+        // result evidence, never merely by plan wording.
+        let contract=goalContract(task)
+        let normalizedResults=steps.compactMap{$0.status == .completed ? $0.resultSummary:nil}.map{normalize($0)}
+        for criterion in contract {
+            let terms=meaningfulTerms(criterion)
+            guard !terms.isEmpty else{continue}
+            let required=min(2,terms.count)
+            let matched=terms.filter{term in normalizedResults.contains(where:{$0.contains(term)})}
+            if matched.count<required {
+                findings.append(.init(severity:.blocker,message:"Goal contract not evidenced: \(criterion)"))
+            }
+        }
+
         // Goal-closure gate: a mission is not complete merely because every step
         // reached a terminal state. At least one completed step must provide
         // durable evidence that plausibly addresses the user's original goal.
@@ -62,6 +77,24 @@ enum MissionCriticV6 {
         return .init(passed:passed,confidence:confidence,findings:findings,summary:passed ? "Mission closure is structurally verified; evidence coverage \(Int(coverage*100))%.":"Mission closure has \(blockers) blocker(s) and must not be treated as fully verified.")
     }
 
+    static func goalContract(_ task:AgentTask)->[String] {
+        var criteria:[String]=[]
+        var seen=Set<String>()
+        for step in task.plan.steps.sorted(by:{$0.order<$1.order}) {
+            for criterion in step.successCriteria {
+                let clean=criterion.trimmingCharacters(in:.whitespacesAndNewlines)
+                guard !clean.isEmpty else{continue}
+                let key=normalize(clean)
+                if seen.insert(key).inserted{criteria.append(clean)}
+            }
+        }
+        if criteria.isEmpty {
+            let fallback=task.goal.trimmingCharacters(in:.whitespacesAndNewlines)
+            if !fallback.isEmpty{criteria=[fallback]}
+        }
+        return Array(criteria.prefix(12))
+    }
+
     static func recoveryContext(_ task:AgentTask)->String {
         let report=review(task)
         let blockers=report.findings.filter{$0.severity == .blocker}.map{"- "+$0.message}
@@ -83,8 +116,14 @@ enum MissionCriticV6 {
         \(warnings.isEmpty ? "- None":warnings.joined(separator:"\n"))
         Goal concepts without durable evidence:
         \(missing.isEmpty ? "- None":missing.prefix(12).map{"- "+$0}.joined(separator:"\n"))
+        Mission success contract:
+        \(goalContract(task).enumerated().map{"- [\($0.offset+1)] \($0.element)"}.joined(separator:"\n"))
         Recovery requirement: preserve verified completed work and add only the minimum evidence/action needed to close these specific gaps.
         """
+    }
+
+    private static func normalize(_ text:String)->String {
+        text.folding(options:[.diacriticInsensitive,.caseInsensitive],locale:.current).lowercased()
     }
 
     private static func meaningfulTerms(_ text:String)->[String] {
