@@ -23,7 +23,7 @@ final class TRAVISAppState {
         let runtimeIdentity=RuntimeDiagnosticsCapabilityV6(.identity),runtimeHealth=RuntimeDiagnosticsCapabilityV6(.health),runtimeSafety=RuntimeDiagnosticsCapabilityV6(.safety),runtimeReport=RuntimeDiagnosticsCapabilityV6(.report)
         let appCapabilities:[AgentCapability]=[TextTaskCapability(),market,audit,trading,SelfImprovementCapability(),evolution,fs,advancedFS,productivity,calculation,automation,document,fileSearch,textRead,textTransform,data,batch,artifact,visual,directory,delivery,scaffold,workspace,fcc,runtimeIdentity,runtimeHealth,runtimeSafety,runtimeReport]
         appCapabilities.forEach{orchestrator.register($0)}
-        approvalGate.onResolution={ [weak taskRuntime] action in
+        approvalGate.onResolution={ [weak taskRuntime] action, createdPath in
             guard let taskRuntime,
                   let taskId=action.taskId,
                   let stepId=action.stepId,
@@ -33,7 +33,12 @@ final class TRAVISAppState {
                   let step=task.plan.steps.first(where:{$0.id == stepId}),
                   step.capabilityId == action.capabilityId else{return}
             if action.status == .approved {
-                taskRuntime.markStepApprovalGranted(taskId:taskId,stepId:stepId)
+                if let createdPath {
+                    let filename=URL(fileURLWithPath:createdPath).lastPathComponent
+                    taskRuntime.markApprovedStepCompleted(taskId:taskId,stepId:stepId,resultSummary:"Artifact created and durably persisted. filename: \(filename) path: \(createdPath)")
+                } else {
+                    taskRuntime.markStepApprovalGranted(taskId:taskId,stepId:stepId)
+                }
             } else {
                 taskRuntime.markStepApprovalRejected(taskId:taskId,stepId:stepId,reason:"User rejected proposed action: \(action.summary)")
             }
