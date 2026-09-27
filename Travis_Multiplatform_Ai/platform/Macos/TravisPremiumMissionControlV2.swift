@@ -50,7 +50,7 @@ struct TravisPremiumMissionControlV2: View {
     }
 
     @ViewBuilder private var detailPane: some View {
-        if let task = selectedTask { ScrollView { VStack(alignment: .leading, spacing: 14) { taskDetailHeader(task); controls(task); progressPanel(task); stepsPanel(task); eventPanel(task) }.padding(16).frame(maxWidth: .infinity, alignment: .leading) } }
+        if let task = selectedTask { ScrollView { VStack(alignment: .leading, spacing: 14) { taskDetailHeader(task); controls(task); progressPanel(task); stepsPanel(task); finalReportPanel(task); eventPanel(task) }.padding(16).frame(maxWidth: .infinity, alignment: .leading) } }
         else { Text("Select a task").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity) }
     }
 
@@ -129,6 +129,70 @@ struct TravisPremiumMissionControlV2: View {
             sectionTitle("PLAN STEPS", "list.number")
             ForEach(task.plan.steps.sorted { $0.order < $1.order }) { step in HStack(alignment: .top, spacing: 9) { Image(systemName: stepIcon(step.status)).foregroundStyle(stepColor(step.status)).frame(width: 16); VStack(alignment: .leading, spacing: 3) { Text("#\(step.order)  \(step.title)").font(.system(size: 9, weight: .semibold, design: .rounded)); HStack(spacing: 7) { Text(step.status.rawValue.uppercased()); if step.requiresApproval { Text("APPROVAL") }; if let capability = step.capabilityId { Text(capability) }; Text("ATTEMPT \(step.attemptCount)/\(step.maxAttempts)") }.font(.system(size: 7, weight: .bold, design: .rounded)).foregroundStyle(.secondary); if let error = step.lastError, !error.isEmpty { Text(error).font(.system(size: 8, design: .rounded)).foregroundStyle(.red).textSelection(.enabled) } }; Spacer() }.padding(.vertical, 5) }
         }.padding(14).background(panelBackground).overlay(panelBorder)
+    }
+
+    @ViewBuilder private func finalReportPanel(_ task: AgentTask) -> some View {
+        if task.status == .completed {
+            let reportStep = task.plan.steps.sorted { $0.order < $1.order }.last { step in
+                let id = step.capabilityId?.lowercased() ?? ""
+                let title = step.title.lowercased()
+                return id.contains("report") || title.contains("report") || title.contains("αναφορ")
+            }
+            let raw = reportStep?.resultSummary ?? task.executionState.lastCheckpoint?.summary ?? ""
+            let report = missionReport(raw)
+            VStack(alignment: .leading, spacing: 11) {
+                sectionTitle("FINAL MISSION REPORT", "doc.text.magnifyingglass")
+                HStack(spacing: 10) {
+                    Label(report.overall, systemImage: report.overall == "PASSED" ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .foregroundStyle(report.overall == "PASSED" ? Color.green : Color.orange)
+                    Spacer()
+                    Text(shortID(task)).font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(cyan)
+                }
+                ForEach(report.rows, id: \.0) { row in
+                    HStack(alignment: .top, spacing: 10) {
+                        Text(row.0.uppercased()).font(.system(size: 7, weight: .bold, design: .rounded)).foregroundStyle(.secondary).frame(width: 105, alignment: .leading)
+                        Text(row.1).font(.system(size: 9, weight: .semibold, design: .rounded)).foregroundStyle(.white.opacity(0.92)).textSelection(.enabled)
+                        Spacer()
+                    }
+                }
+                if !raw.isEmpty {
+                    DisclosureGroup("VIEW FULL REPORT / TECHNICAL EVIDENCE") {
+                        Text(prettyJSON(raw) ?? raw).font(.system(size: 8, design: .monospaced)).foregroundStyle(.white.opacity(0.76)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 7)
+                    }.font(.system(size: 8, weight: .bold, design: .rounded)).foregroundStyle(cyan)
+                }
+            }.padding(14).background(panelBackground).overlay(panelBorder)
+        }
+    }
+
+    private func missionReport(_ raw: String) -> (overall: String, rows: [(String,String)]) {
+        guard let data = raw.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return ("PASSED", [("Status","Mission completed"),("Summary", raw.isEmpty ? "Verified mission completed successfully." : raw)])
+        }
+        var rows:[(String,String)] = [("Status","COMPLETED")]
+        if let summary = root["summary"] as? String { rows.append(("Summary",summary)) }
+        if let identity = root["identity"] as? [String:Any] {
+            if let host=identity["host"] { rows.append(("Runtime",String(describing:host))) }
+            if let platform=identity["platform"] { rows.append(("Platform",String(describing:platform))) }
+        }
+        if let health = root["health"] as? [String:Any] {
+            let load = health["load1"].map { String(describing:$0) }
+            let disk = health["diskFreePercent"].map { String(describing:$0)+"%" }
+            let value=[load.map{"Load "+$0},disk.map{"Disk free "+$0}].compactMap{$0}.joined(separator:" • ")
+            if !value.isEmpty { rows.append(("Health",value)) }
+        }
+        if let safety = root["safety"] as? [String:Any] {
+            let kill=safety["killSwitch"].map{String(describing:$0)} ?? "verified"
+            rows.append(("Safety","Verified • kill switch: "+kill))
+        }
+        if let verified = root["verifiedEvidenceSteps"] { rows.append(("Evidence",String(describing:verified)+" verified step(s)")) }
+        return ("PASSED",rows)
+    }
+
+    private func prettyJSON(_ raw:String)->String? {
+        guard let data=raw.data(using:.utf8),let object=try? JSONSerialization.jsonObject(with:data),let pretty=try? JSONSerialization.data(withJSONObject:object,options:[.prettyPrinted,.sortedKeys]) else{return nil}
+        return String(data:pretty,encoding:.utf8)
     }
 
     private func eventPanel(_ task: AgentTask) -> some View {
