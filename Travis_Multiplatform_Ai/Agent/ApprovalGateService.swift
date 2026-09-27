@@ -9,7 +9,7 @@ final class ApprovalGateService {
 
     private var capabilities: [String: WeakAgentCapabilityBox] = [:]
     private let persistence: PersistenceService
-    var onResolution: ((ProposedAction) -> Void)?
+    var onResolution: ((ProposedAction, String?) -> Void)?
 
     init(persistence: PersistenceService = .shared) {
         self.persistence = persistence
@@ -48,8 +48,18 @@ final class ApprovalGateService {
         history.append(resolvedAction)
         persistence.updateProposedAction(resolvedAction)
 
+        let before = Set(persistence.loadFiles().map(\.path))
         capabilities[resolvedAction.capabilityId]?.value?.resolve(resolvedAction)
-        onResolution?(resolvedAction)
+        let createdPath: String?
+        if status == .approved {
+            createdPath = persistence.loadFiles()
+                .filter { !before.contains($0.path) && $0.capabilityId == resolvedAction.capabilityId }
+                .sorted { $0.createdAt > $1.createdAt }
+                .first?.path
+        } else {
+            createdPath = nil
+        }
+        onResolution?(resolvedAction, createdPath)
     }
 }
 
