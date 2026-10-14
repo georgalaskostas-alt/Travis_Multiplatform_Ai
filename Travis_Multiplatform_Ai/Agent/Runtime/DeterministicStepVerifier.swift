@@ -8,6 +8,12 @@ enum DeterministicStepVerifier {
         let result = capabilityResult.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !result.isEmpty else { return nil }
 
+        // Runtime diagnostics may be planned with plain-language instructions.
+        // Route by the assigned capability rather than requiring an encoded invocation.
+        if step.capabilityId == "runtime_health" {
+            return verifyRuntimeHealth(result)
+        }
+
         guard let invocation = StructuredInvocationCodec.decode(from: step.instructions) else {
             return LearnedVerificationRegistry.shared.verify(step: step, capabilityResult: result)
         }
@@ -75,6 +81,46 @@ enum DeterministicStepVerifier {
         default:
             return learned(step, result)
         }
+    }
+
+    private static func verifyRuntimeHealth(_ result: String) -> StepVerificationResult {
+        let lines = result.components(separatedBy: .newlines)
+        guard lines.first == "TRAVIS RUNTIME HEALTH" else {
+            return healthFailure("Missing runtime health report header.")
+        }
+
+        var fields: [String: String] = [:]
+        let required: Set<String> = [
+            "process", "processorCount", "activeProcessorCount",
+            "physicalMemoryBytes", "osVersion", "collectedAt"
+        ]
+        for line in lines.dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let key = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+            guard required.contains(key) else { continue }
+            guard fields[key] == nil else {
+                return healthFailure("Duplicate health field: \\(key).")
+            }
+            fields[key] = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+        }
+
+        guard required.allSatisfy({ !(fields[$0] ?? "").isEmpty }),
+              fields["process"] == "active",
+              let processors = Int(fields["processorCount"] ?? ""), processors > 0,
+              let active = Int(fields["activeProcessorCount"] ?? ""), active > 0, active <= processors,
+              let memory = UInt64(fields["physicalMemoryBytes"] ?? ""), memory > 0,
+              let timestamp = fields["collectedAt"],
+              ISO8601DateFormatter().date(from: timestamp) != nil
+        else {
+            return healthFailure("Missing or inconsistent runtime health evidence.")
+        }
+
+        return pass("Validated local process health evidence without AI; remote worker health is not asserted.")
+    }
+
+    private static func healthFailure(_ reason: String) -> StepVerificationResult {
+        StepVerificationResult(verdict: .insufficientEvidence, confidence: 1.0,
+                               reason: reason, unmetCriteria: [reason])
     }
 
     private static func learned(_ step: PlanStep, _ result: String) -> StepVerificationResult? {
