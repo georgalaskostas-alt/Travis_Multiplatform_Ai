@@ -31,7 +31,32 @@ def main():
 
     profile = plistlib.loads(command("security", "cms", "-D", "-i", str(profile_path)))
     info = plistlib.loads((app / "Info.plist").read_bytes())
-    signing = plistlib.loads(command("codesign", "-d", "--entitlements", "-", str(app)))
+    # codesign may emit a deprecation warning on stderr and may return a
+    # DER entitlement blob instead of an XML plist on newer toolchains.
+    # Ask for XML explicitly and report actionable output if unavailable.
+    entitlement_result = subprocess.run(
+        ["codesign", "-d", "--entitlements", ":-", str(app)],
+        capture_output=True, check=False,
+    )
+    if entitlement_result.returncode != 0:
+        print("ERROR: codesign could not read entitlements:")
+        print(entitlement_result.stderr.decode("utf-8", errors="replace").strip())
+        return 2
+    raw_entitlements = entitlement_result.stdout
+    plist_start = raw_entitlements.find(b"<?xml")
+    if plist_start < 0:
+        plist_start = raw_entitlements.find(b"<plist")
+    if plist_start < 0:
+        print("ERROR: codesign did not output XML entitlements.")
+        print("Output prefix:", repr(raw_entitlements[:80]))
+        print("Try: codesign -d --entitlements :- <App.app>")
+        return 2
+    try:
+        signing = plistlib.loads(raw_entitlements[plist_start:])
+    except (plistlib.InvalidFileException, ValueError) as exc:
+        print("ERROR: Unable to parse XML entitlements:", exc)
+        print("Output prefix:", repr(raw_entitlements[:80]))
+        return 2
     allowed = profile.get("Entitlements", {})
 
     print("=== APP / PROFILE ===")
