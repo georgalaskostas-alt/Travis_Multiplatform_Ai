@@ -4,57 +4,52 @@ struct MacAppShell: View {
     @Bindable var appState: TRAVISAppState
 
     var body: some View {
-        NavigationSplitView {
-            List(SidebarItem.allCases, selection: $appState.selectedSidebarItem) {
-                item in
-                Label(item.title, systemImage: icon(for: item))
-                    .tag(item)
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 220)
-        } detail: {
-            detailView(for: appState.selectedSidebarItem)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        TravisWorkspaceLayer(appState: appState) {
+            TravisPremiumCommandCenterView(appState: appState)
         }
         .preferredColorScheme(.dark)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    appState.performUIAction(.openWorkspace(.fcc))
+                } label: {
+                    Label("FCC", systemImage: "waveform.path.ecg")
+                }
+                .help("Open FCC Assistant workspace")
+                .accessibilityLabel("Open FCC Assistant workspace")
+            }
+        }
+        .onAppear {
+            routeLegacySelection(appState.selectedSidebarItem)
+        }
+        .onChange(of: appState.selectedSidebarItem) { _, item in
+            routeLegacySelection(item)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .travisOpenFCCQuickAccess)) { _ in
+            appState.performUIAction(.openWorkspace(.fcc))
+        }
     }
 
-    @ViewBuilder
-    private func detailView(for item: SidebarItem) -> some View {
+    /// Compatibility bridge for any control that still changes SidebarItem.
+    /// Route directly into the premium workspace layer and immediately restore
+    /// the command center as the base screen. This avoids reopening legacy UI.
+    private func routeLegacySelection(_ item: SidebarItem) {
+        let action: TravisUIAction?
         switch item {
         case .chat:
-            ChatView(appState: appState)
+            action = nil
+        case .history:
+            action = .openWorkspace(.history)
         case .tasks:
-            taskPanel
+            action = .openWorkspace(.tasks)
         case .permissions:
-            PermissionsView(appState: appState)
+            action = .openWorkspace(.permissions)
         case .settings:
-            SettingsView(appState: appState)
+            action = .openWorkspace(.settings)
         }
-    }
 
-    private var taskPanel: some View {
-        List(appState.activeTasks) { task in
-            VStack(alignment: .leading, spacing: 6) {
-                Text(task.title)
-                    .font(.headline)
-                Text(task.details)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Text("\(task.status.rawValue) • \(task.priority.rawValue)")
-                    .font(.caption)
-                    .foregroundStyle(.cyan)
-            }
-            .padding(.vertical, 4)
-        }
-        .navigationTitle("Tasks")
-    }
-
-    private func icon(for item: SidebarItem) -> String {
-        switch item {
-        case .chat: return "message"
-        case .tasks: return "checklist"
-        case .permissions: return "lock.shield"
-        case .settings: return "gearshape"
-        }
+        guard let action else { return }
+        TravisUIActionRouter.shared.route(action)
+        appState.selectedSidebarItem = .chat
     }
 }
